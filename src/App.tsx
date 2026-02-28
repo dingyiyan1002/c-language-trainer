@@ -565,11 +565,7 @@ function QuestionView({
       setInputs(['']);
     }
     setShowHint(false);
-    // 只在题目未回答过时重置音效标记
-    const hasAnswered = userAnswers && userAnswers.length > 0;
-    if (!hasAnswered) {
-      soundPlayedRef.current = false;
-    }
+    soundPlayedRef.current = false;
   }, [question]);
 
   useEffect(() => {
@@ -2611,35 +2607,7 @@ function TrainingView({
 }) {
   const [showLesson, setShowLesson] = useState(true);
   const [lessonIndex, setLessonIndex] = useState(0);
-  
-  // 保存当前题目的答案
-  const saveCurrentAnswer = () => {
-    if (currentQuestion && userAnswers.length > 0) {
-      const saved = JSON.parse(localStorage.getItem('c-trainer-user-answers') || '{}');
-      saved[currentQuestion.id] = userAnswers;
-      localStorage.setItem('c-trainer-user-answers', JSON.stringify(saved));
-    }
-  };
-
-  // 恢复已答题目的答案
-  const restoreAnswer = (questionId: number) => {
-    const saved = JSON.parse(localStorage.getItem('c-trainer-user-answers') || '{}');
-    if (saved[questionId]) {
-      setUserAnswers(saved[questionId]);
-      // 已答题目，允许播放音效
-      soundPlayedRef.current = false;
-    } else {
-      setUserAnswers([]);
-      // 未答题目，禁止播放音效
-      soundPlayedRef.current = true;
-    }
-  };
-    } else {
-      setUserAnswers([]);
-    }
-  };
-
-const [questionIndex, setQuestionIndex] = useState(0);
+  const [questionIndex, setQuestionIndex] = useState(0);
   const [showResult, setShowResult] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
   const [userAnswers, setUserAnswers] = useState<string[]>([]);
@@ -2655,10 +2623,6 @@ const [questionIndex, setQuestionIndex] = useState(0);
       setQuestionIndex(firstUnanswered);
     }
   }, []);
-      setTimeout(() => {
-        restoreAnswer(chapterQuestions[questionIndex].id);
-      }, 100);
-
 
   const handleLessonComplete = () => {
     if (lessonIndex < chapter.lessons.length - 1) {
@@ -2692,10 +2656,6 @@ const [questionIndex, setQuestionIndex] = useState(0);
       const savedAnswer = answersMap[nextIndex];
       
       setQuestionIndex(nextIndex);
-      setTimeout(() => {
-        restoreAnswer(chapterQuestions[questionIndex].id);
-      }, 100);
-
       
       if (savedAnswer) {
         setUserAnswers(savedAnswer.answers);
@@ -2754,10 +2714,6 @@ const [questionIndex, setQuestionIndex] = useState(0);
       const savedAnswer = answersMap[prevIndex];
       
       setQuestionIndex(prevIndex);
-      setTimeout(() => {
-        restoreAnswer(chapterQuestions[questionIndex].id);
-      }, 100);
-
       
       if (savedAnswer) {
         setUserAnswers(savedAnswer.answers);
@@ -2937,12 +2893,7 @@ function ReviewView({
 
       setTimeout(() => {
         if (questionIndex < wrongQuestions.length - 1) {
-          saveCurrentAnswer();
-        setQuestionIndex(questionIndex + 1);
-      setTimeout(() => {
-        restoreAnswer(chapterQuestions[questionIndex].id);
-      }, 100);
-
+          setQuestionIndex(questionIndex + 1);
           setShowResult(false);
           setUserAnswers([]);
         } else {
@@ -2955,12 +2906,8 @@ function ReviewView({
   const goToNext = () => {
     if (questionIndex < wrongQuestions.length - 1) {
       setQuestionIndex(questionIndex + 1);
-      setTimeout(() => {
-        restoreAnswer(chapterQuestions[questionIndex].id);
-      }, 100);
-
       setShowResult(false);
-      /* 保存当前答案，切换后恢复 */;
+      setUserAnswers([]);
     } else {
       onBack();
     }
@@ -3083,25 +3030,16 @@ function BookmarkedView({
   const goToNext = () => {
     if (questionIndex < bookmarkedQuestions.length - 1) {
       setQuestionIndex(questionIndex + 1);
-      setTimeout(() => {
-        restoreAnswer(chapterQuestions[questionIndex].id);
-      }, 100);
-
       setShowResult(false);
-      /* 保存当前答案，切换后恢复 */;
+      setUserAnswers([]);
     }
   };
 
   const goToPrev = () => {
     if (questionIndex > 0) {
-      saveCurrentAnswer();
-        setQuestionIndex(questionIndex - 1);
-      setTimeout(() => {
-        restoreAnswer(chapterQuestions[questionIndex].id);
-      }, 100);
-
+      setQuestionIndex(questionIndex - 1);
       setShowResult(false);
-      /* 保存当前答案，切换后恢复 */;
+      setUserAnswers([]);
     }
   };
 
@@ -3114,10 +3052,6 @@ function BookmarkedView({
     setProgress(newProgress);
     if (questionIndex >= newProgress.bookmarked.length && questionIndex > 0) {
       setQuestionIndex(questionIndex - 1);
-      setTimeout(() => {
-        restoreAnswer(chapterQuestions[questionIndex].id);
-      }, 100);
-
     }
     if (newProgress.bookmarked.length === 0) {
       onBack();
