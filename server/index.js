@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import initSqlJs from 'sql.js';
 import { fileURLToPath } from 'url';
@@ -7,6 +7,8 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { spawn } from 'child_process';
 import { runCode, compileOnly, getAssembly, preprocess, memcheck, queryTypeInfo, formatCode } from './runner.js';
 
+
+import { setupVersionRoutes } from './routes/version.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -302,6 +304,9 @@ app.get('/api/heartbeat', (req, res) => {
   res.json({ alive: true });
 });
 
+
+const PROJECT_ROOT = join(__dirname, '..');
+setupVersionRoutes(app, PROJECT_ROOT);
 initDb().then(() => {
   app.listen(PORT, () => {
     console.log(`C Trainer API Server running on http://localhost:${PORT}`);
