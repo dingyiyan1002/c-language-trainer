@@ -464,7 +464,6 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
   const renderCode = useMemo(() => {
     const elements: JSX.Element[] = [];
 
-    // 渲染已输入的内容 + 光标 + 未输入的内容
     for (let i = 0; i < code.length; i++) {
       const char = code[i];
       let className = 'text-slate-500';
@@ -473,11 +472,6 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       if (i < userInput.length) {
         const userInputChar = userInput[i];
         className = userInputChar === char ? 'text-cyan-300' : 'text-red-400 bg-red-500/20';
-      }
-
-      // 如果到达光标位置，先添加光标
-      if (i === userInput.length) {
-        elements.push(<span key={`cursor-${i}`} className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
       }
 
       // 渲染字符
@@ -491,17 +485,16 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       } else {
         elements.push(<span key={i} className={className}>{char}</span>);
       }
+
+      // 光标在已输入字符的后面
+      if (i === userInput.length) {
+        elements.push(<span key={`cursor-${i}`} className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
+      }
     }
 
-    // 如果光标在最后（已输入完或还没开始输入）
-    if (userInput.length === code.length) {
-      if (userInput.length === 0) {
-        // 还没开始输入，光标在最前面
-        elements.unshift(<span key="cursor-start" className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
-      } else {
-        // 已输入完，光标在最后
-        elements.push(<span key="cursor-end" className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
-      }
+    // 如果光标在最后（已输入完所有字符）
+    if (userInput.length === code.length && userInput.length > 0) {
+      elements.push(<span key="cursor-end" className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
     }
 
     return elements;
