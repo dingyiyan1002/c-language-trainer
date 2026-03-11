@@ -465,6 +465,9 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
     const elements: JSX.Element[] = [];
     const cursorIdx = userInput.length; // 光标位置
 
+    console.log('[TypingArea render] code.length=' + code.length + ', userInput.length=' + userInput.length + ', cursorIdx=' + cursorIdx);
+    console.log('[TypingArea render] userInput="' + userInput + '"');
+
     for (let i = 0; i < code.length; i++) {
       const char = code[i];
       let className = 'text-slate-500';     // 默认灰色（未输入）
@@ -485,6 +488,7 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
 
       // 渲染字符
       if (char === '\n') {
+        console.log('[TypingArea render] i=' + i + ', char=\\n, isCursor=' + isCursor);
         elements.push(
           <React.Fragment key={i}>
             <span className={className} style={cursorStyle}>{' '}</span>
@@ -492,6 +496,9 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
           </React.Fragment>
         );
       } else {
+        if (i >= code.length - 10) {  // 只输出最后 10 个字符的调试信息
+          console.log('[TypingArea render] i=' + i + ', char="' + char + '", isCursor=' + isCursor + ', className=' + className);
+        }
         elements.push(
           <span key={i} className={className} style={cursorStyle}>{char}</span>
         );
