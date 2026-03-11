@@ -317,6 +317,8 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
   }, [code, userInput, onInput]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    console.log('[handleKeyDown] e.key=' + e.key + ', userInput.length=' + userInput.length);
+
     // 修饰键组合跳过处理
     if (e.ctrlKey || e.metaKey || e.altKey) return;
 
