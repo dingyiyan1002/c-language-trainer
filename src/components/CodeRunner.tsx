@@ -257,8 +257,7 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
   const containerRef = useRef<HTMLDivElement>(null);
   const [isStarted, setIsStarted] = useState(false);
 
-  const currentIndex = userInput.length;
-  const isFinished = currentIndex >= code.length && code.length > 0;
+  const isFinished = userInput.length >= code.length && code.length > 0;
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // 修饰键组合跳过处理
@@ -286,7 +285,7 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
     // Tab 键处理 - 自动补全缩进
     if (e.key === 'Tab') {
       e.preventDefault();
-      const remaining = code.substring(currentIndex);
+      const remaining = code.substring(userInput.length);
       const spacesMatch = remaining.match(/^( {1,4})/);
       if (spacesMatch) {
         onInput(userInput + spacesMatch[1]);
@@ -309,7 +308,7 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       e.preventDefault();
       onInput(userInput + e.key);
     }
-  }, [code, userInput, currentIndex, onInput, isStarted]);
+  }, [code, userInput, onInput, isStarted]);
 
   useEffect(() => {
     if (containerRef.current) {
@@ -319,6 +318,7 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
 
   const renderCode = useMemo(() => {
     const elements: JSX.Element[] = [];
+    const cursorPos = userInput.length; // 光标位置始终在已输入内容的末尾
 
     for (let i = 0; i < code.length; i++) {
       const char = code[i];
@@ -327,11 +327,6 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       // 已输入的部分：检查是否正确
       if (i < userInput.length) {
         className = userInput[i] === char ? 'text-cyan-300' : 'text-red-400 bg-red-500/20';
-      }
-
-      // 如果当前位置是光标位置，在字符前添加光标指示器
-      if (i === currentIndex) {
-        elements.push(<span key={`cursor-${i}`} className="bg-cyan-500/30">&ZeroWidthSpace;</span>);
       }
 
       // 换行符单独处理
@@ -345,15 +340,25 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       } else {
         elements.push(<span key={i} className={className}>{char}</span>);
       }
+
+      // 在已输入的最后一个字符后面添加光标
+      if (i === cursorPos - 1) {
+        elements.push(<span key={`cursor-${i}`} className="bg-cyan-500/30">&ZeroWidthSpace;</span>);
+      }
     }
 
-    // 如果光标在最后，添加光标指示器
-    if (currentIndex === code.length) {
+    // 如果还没有输入任何内容，光标在最前面
+    if (cursorPos === 0) {
+      elements.unshift(<span key="cursor-start" className="bg-cyan-500/30">&ZeroWidthSpace;</span>);
+    }
+
+    // 如果全部输入完成，光标在最后
+    if (cursorPos === code.length && code.length > 0) {
       elements.push(<span key="cursor-end" className="bg-cyan-500/30">&ZeroWidthSpace;</span>);
     }
 
     return elements;
-  }, [code, userInput, currentIndex]);
+  }, [code, userInput]);
 
   const stats = useMemo(() => {
     if (!isStarted || !typingStartTimeGlobal) return { cpm: 0, accuracy: 100 };
@@ -378,7 +383,7 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
           <span className="text-xs text-slate-500">[{code.length}字符]</span>
           {isStarted && (
             <span className="text-xs text-slate-500">
-              {currentIndex} / {code.length} 字符 · {stats.cpm} 字符/分 · {stats.accuracy}% 正确率
+              {userInput.length} / {code.length} 字符 · {stats.cpm} 字符/分 · {stats.accuracy}% 正确率
             </span>
           )}
         </div>

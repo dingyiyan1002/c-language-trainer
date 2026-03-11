@@ -32,6 +32,7 @@ const ERROR_TRANSLATIONS = {
   'undeclared (first use in this function)': '未声明（首次在此函数中使用）',
   'each undeclared identifier is reported only once': '每个未声明的标识符只报告一次',
   'expected declaration specifiers before': '在...之前期望声明说明符',
+  'expected declaration specifiers or': '期望声明说明符或',
   'expected \'{\' at end of input': '在输入末尾期望 \'{\'',
   'expected \'}\' at end of input': '在输入末尾期望 \'}\'',
   'expected \';\' before': '在...之前缺少 \';\'',
@@ -107,6 +108,7 @@ function translateErrorMessage(message) {
   const longPatterns = [
     'extra tokens at end of #include directive',
     'each undeclared identifier is reported only once',
+    'expected declaration specifiers or',
     'expected declaration specifiers before',
     'pointer targets in passing argument',
     'comparison of distinct pointer types',
