@@ -474,27 +474,31 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
         className = userInputChar === char ? 'text-cyan-300' : 'text-red-400 bg-red-500/20';
       }
 
-      // 渲染字符
+      // ✅ 先放光标（在未输入字符之前）
+      if (i === userInput.length) {
+        elements.push(
+          <span key="cursor" className="border-l-2 border-cyan-500 h-[1.2em] inline-block w-0 align-middle animate-pulse" />
+        );
+      }
+
+      // 再渲染字符
       if (char === '\n') {
         elements.push(
-          <span key={i} className={className}>
-            <span className="text-slate-600 select-none">↵</span>
-            {'\n'}
-          </span>
+          <React.Fragment key={i}>
+            <span className={className}>{' '}</span>
+            <br />
+          </React.Fragment>
         );
       } else {
         elements.push(<span key={i} className={className}>{char}</span>);
       }
-
-      // 光标在已输入字符的后面
-      if (i === userInput.length) {
-        elements.push(<span key={`cursor-${i}`} className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
-      }
     }
 
-    // 如果光标在最后（已输入完所有字符）
-    if (userInput.length === code.length && userInput.length > 0) {
-      elements.push(<span key="cursor-end" className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
+    // ✅ 全部输入完毕，光标在最后
+    if (userInput.length >= code.length && userInput.length > 0) {
+      elements.push(
+        <span key="cursor-end" className="border-l-2 border-cyan-500 h-[1.2em] inline-block w-0 align-middle animate-pulse" />
+      );
     }
 
     return elements;
