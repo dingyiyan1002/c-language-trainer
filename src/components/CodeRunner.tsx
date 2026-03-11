@@ -463,16 +463,21 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
 
   const renderCode = useMemo(() => {
     const elements: JSX.Element[] = [];
-    const cursorPos = userInput.length; // 光标位置始终在已输入内容的末尾
 
+    // 渲染已输入的内容 + 光标 + 未输入的内容
     for (let i = 0; i < code.length; i++) {
       const char = code[i];
       let className = 'text-slate-500';
 
       // 已输入的部分：检查是否正确
-      if (i < cursorPos) {
+      if (i < userInput.length) {
         const userInputChar = userInput[i];
         className = userInputChar === char ? 'text-cyan-300' : 'text-red-400 bg-red-500/20';
+      }
+
+      // 如果到达光标位置，先添加光标
+      if (i === userInput.length) {
+        elements.push(<span key={`cursor-${i}`} className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
       }
 
       // 渲染字符
@@ -486,22 +491,17 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       } else {
         elements.push(<span key={i} className={className}>{char}</span>);
       }
+    }
 
-      // 在字符后添加光标（如果当前位置是光标位置）
-      // 这样光标会出现在已输入字符的后面
-      if (i + 1 === cursorPos) {
-        elements.push(<span key={`cursor-${i}`} className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
+    // 如果光标在最后（已输入完或还没开始输入）
+    if (userInput.length === code.length) {
+      if (userInput.length === 0) {
+        // 还没开始输入，光标在最前面
+        elements.unshift(<span key="cursor-start" className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
+      } else {
+        // 已输入完，光标在最后
+        elements.push(<span key="cursor-end" className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
       }
-    }
-
-    // 如果还没有输入任何内容，光标在最开始
-    if (cursorPos === 0 && code.length > 0) {
-      elements.unshift(<span key="cursor-start" className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
-    }
-
-    // 如果光标在最后（已输入完所有字符）
-    if (cursorPos === code.length && cursorPos > 0) {
-      // 光标已经在上面添加了，不需要重复
     }
 
     return elements;
