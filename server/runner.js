@@ -6,16 +6,186 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const TEMP_DIR = path.join(__dirname, 'temp');
-if (!fs.existsSync(TEMP_DIR)) {
-  fs.mkdirSync(TEMP_DIR, { recursive: true });
+// 使用系统临时目录避免中文路径问题
+const TEMP_DIR = process.env.TEMP || process.env.TMP || path.join(__dirname, 'temp');
+const CODE_TEMP_DIR = path.join(TEMP_DIR, 'c-trainer');
+if (!fs.existsSync(CODE_TEMP_DIR)) {
+  fs.mkdirSync(CODE_TEMP_DIR, { recursive: true });
 }
 
 const TIMEOUT_MS = 3000;
 
+// GCC 错误信息翻译词典
+const ERROR_TRANSLATIONS = {
+  // 常见错误类型
+  'error:': '错误：',
+  'warning:': '警告：',
+  'note:': '提示：',
+
+  // #include 指令
+  '#include': '#include',
+  'extra tokens at end of #include directive': '#include 指令末尾有多余的标记',
+
+  // 具体错误信息
+  'implicit declaration of function': '函数的隐式声明',
+  'incompatible implicit declaration': '不兼容的隐式声明',
+  'undeclared (first use in this function)': '未声明（首次在此函数中使用）',
+  'each undeclared identifier is reported only once': '每个未声明的标识符只报告一次',
+  'expected declaration specifiers before': '在...之前期望声明说明符',
+  'expected \'{\' at end of input': '在输入末尾期望 \'{\'',
+  'expected \'}\' at end of input': '在输入末尾期望 \'}\'',
+  'expected \';\' before': '在...之前缺少 \';\'',
+  'expected \')\' before': '在...之前期望 \')\'',
+  'expected \'(\' before': '在...之前期望 \'(\'',
+  'expected \']\' before': '在...之前期望 \']\'',
+  'expected \'[\' before': '在...之前期望 \'[\'',
+  'expected identifier or \'(\' before': '在...之前期望标识符或 \'(\'',
+  'expected expression before': '在...之前期望表达式',
+  'expected constant expression before': '在...之前期望常量表达式',
+  'expected type-specifier before': '在...之前期望类型说明符',
+  'expected \';\' at end of input': '在输入末尾缺少 \';\'',
+  'expected declaration or statement at end of input': '在输入末尾期望声明或语句',
+  'unknown type name': '未知的类型名',
+  'use of undeclared identifier': '使用了未声明的标识符',
+  'no member named': '没有名为...的成员',
+  'invalid application of': '无效应用',
+  'sizeof: expression must have complete type': 'sizeof 表达式必须有完整类型',
+  'array index is not an integer': '数组索引不是整数',
+  'cannot convert': '无法转换',
+  'to type': '到类型',
+  'from type': '从类型',
+  'too many arguments to function': '函数参数过多',
+  'too few arguments to function': '函数参数过少',
+  'conflicting types for': '类型冲突',
+  'redefinition of': '重定义',
+  'previous declaration was here': '先前声明在此',
+  'unused variable': '未使用的变量',
+  'unused parameter': '未使用的参数',
+  'set but not used': '已设置但未使用',
+  'pointer targets in passing argument': '传递参数时的指针目标',
+  'differ in signedness': '有符号性不同',
+  'comparison of distinct pointer types': '不同类型指针的比较',
+  'suggest parentheses around': '建议在...周围添加括号',
+  'operation is always true': '操作始终为真',
+  'operation is always false': '操作始终为假',
+  'statement with no effect': '无效语句',
+  'missing braces around initializer': '初始化器缺少大括号',
+  'overflow in implicit constant conversion': '隐式常量转换溢出',
+  'format': '格式',
+  'expects argument of type': '期望参数类型为',
+  'but argument is of type': '但参数类型为',
+  'dereferencing void * pointer': '解引用 void* 指针',
+  'invalid use of void expression': '无效使用 void 表达式',
+  'return with a value, in function returning void': '在 void 函数中返回值',
+  'control reaches end of non-void function': '非 void 函数未返回值',
+  'function might be possible candidate for': '函数可能是...的候选',
+  'attribute': '属性',
+  'noreturn': '不返回',
+  'does return': '会返回',
+  'unknown type name': '未知的类型名',
+
+  // 建议信息
+  'or provide a declaration': '或提供声明',
+  'did you mean': '你是不是想说',
+  'replace this with': '替换为',
+
+  // 位置信息
+  'In function': '在函数中',
+  'at top level': '在顶层',
+  'first use in this function': '在此函数中首次使用',
+};
+
+function translateErrorMessage(message) {
+  let translated = message;
+
+  // 首先翻译固定的错误类型前缀
+  translated = translated.replace(/error:/g, '错误：')
+                        .replace(/warning:/g, '警告：')
+                        .replace(/note:/g, '提示：');
+
+  // 优先翻译较长的短语（避免被短词先匹配）
+  const longPatterns = [
+    'extra tokens at end of #include directive',
+    'each undeclared identifier is reported only once',
+    'expected declaration specifiers before',
+    'pointer targets in passing argument',
+    'comparison of distinct pointer types',
+    'control reaches end of non-void function',
+    'return with a value, in function returning void',
+    'expected \';\' before',
+    'expected \')\' before',
+    'expected \'(\' before',
+    'expected \']\' before',
+    'expected \'[\' before',
+    'expected identifier or \'(\' before',
+    'expected expression before',
+    'expected constant expression before',
+    'expected type-specifier before',
+    'sizeof: expression must have complete type',
+    'too many arguments to function',
+    'too few arguments to function',
+    'missing braces around initializer',
+    'overflow in implicit constant conversion',
+    'expects argument of type',
+    'but argument is of type',
+    'dereferencing void * pointer',
+    'invalid use of void expression',
+    'function might be possible candidate for',
+    'set but not used',
+    'unused variable',
+    'unused parameter',
+    'unknown type name',
+    'use of undeclared identifier',
+    'no member named',
+    'invalid application of',
+    'cannot convert',
+    'to type',
+    'from type',
+    'conflicting types for',
+    'redefinition of',
+    'previous declaration was here',
+    'differ in signedness',
+    'suggest parentheses around',
+    'operation is always true',
+    'operation is always false',
+    'statement with no effect',
+    'implicit declaration of function',
+    'incompatible implicit declaration',
+    'undeclared (first use in this function)',
+    'expected \'{\' at end of input',
+    'expected \'}\' at end of input',
+    'expected \';\' at end of input',
+    'expected declaration or statement at end of input',
+    'attribute',
+    'noreturn',
+    'does return',
+    'format',
+    'or provide a declaration',
+    'did you mean',
+    'replace this with',
+    'In function',
+    'at top level',
+    'first use in this function',
+  ];
+
+  // 按长度排序，优先匹配长短语
+  longPatterns.sort((a, b) => b.length - a.length);
+
+  for (const pattern of longPatterns) {
+    const translation = ERROR_TRANSLATIONS[pattern];
+    if (translation) {
+      const regex = new RegExp(pattern.replace(/([(){}[\]])/g, '\\$1'), 'gi');
+      translated = translated.replace(regex, translation);
+    }
+  }
+
+  return translated;
+}
+
 function formatCompileError(error, tempDir) {
   if (!error || !tempDir) return error;
-  return error.split(tempDir).join('').replace(/[/\\][^/\\]*\.c/g, '/main.c');
+  const cleaned = error.split(tempDir).join('').replace(/[/\\][^/\\]*\.c/g, '/main.c');
+  return translateErrorMessage(cleaned);
 }
 
 async function checkAsanAvailable() {
@@ -24,8 +194,8 @@ async function checkAsanAvailable() {
 #include <stdio.h>
 int main() { return 0; }
 `;
-    const testPath = path.join(TEMP_DIR, 'asan_test.c');
-    const testExe = path.join(TEMP_DIR, 'asan_test.exe');
+    const testPath = path.join(CODE_TEMP_DIR, 'asan_test.c');
+    const testExe = path.join(CODE_TEMP_DIR, 'asan_test.exe');
     
     fs.writeFileSync(testPath, testCode);
     
@@ -67,8 +237,8 @@ export async function runCode(codeSource, options = {}) {
 
   const timestamp = Date.now();
   const filename = `code_${timestamp}`;
-  const srcPath = path.join(TEMP_DIR, `${filename}.c`);
-  const exePath = path.join(TEMP_DIR, `${filename}.exe`);
+  const srcPath = path.join(CODE_TEMP_DIR, `${filename}.c`);
+  const exePath = path.join(CODE_TEMP_DIR, `${filename}.exe`);
 
   try {
     fs.writeFileSync(srcPath, codeSource, 'utf8');
@@ -107,7 +277,7 @@ export async function runCode(codeSource, options = {}) {
     if (compileResult.exitCode !== 0) {
       return { 
         success: false, 
-        output: formatCompileError(compileResult.error, TEMP_DIR), 
+        output: formatCompileError(compileResult.error, CODE_TEMP_DIR), 
         type: 'compile_error' 
       };
     }
@@ -252,7 +422,7 @@ export async function compileOnly(codeSource) {
     if (compileResult.exitCode !== 0) {
       return {
         success: false,
-        output: formatCompileError(compileResult.error, TEMP_DIR),
+        output: formatCompileError(compileResult.error, CODE_TEMP_DIR),
         type: 'syntax_error'
       };
     }
@@ -275,7 +445,7 @@ export async function compileOnly(codeSource) {
 export async function getAssembly(codeSource, optimization = '0') {
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 8);
-  const srcPath = path.join(TEMP_DIR, `asm_${timestamp}_${random}.c`);
+  const srcPath = path.join(CODE_TEMP_DIR, `asm_${timestamp}_${random}.c`);
 
   try {
     fs.writeFileSync(srcPath, codeSource, 'utf8');
@@ -370,7 +540,7 @@ int main() {
 export async function formatCode(codeSource) {
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 8);
-  const srcPath = path.join(TEMP_DIR, `fmt_${timestamp}_${random}.c`);
+  const srcPath = path.join(CODE_TEMP_DIR, `fmt_${timestamp}_${random}.c`);
 
   try {
     fs.writeFileSync(srcPath, codeSource, 'utf8');
@@ -426,8 +596,8 @@ function simpleFormat(code) {
 export async function memcheck(codeSource, stdinInput = '') {
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 8);
-  const srcPath = path.join(TEMP_DIR, `mem_${timestamp}_${random}.c`);
-  const exePath = path.join(TEMP_DIR, `mem_${timestamp}_${random}${process.platform === 'win32' ? '.exe' : ''}`);
+  const srcPath = path.join(CODE_TEMP_DIR, `mem_${timestamp}_${random}.c`);
+  const exePath = path.join(CODE_TEMP_DIR, `mem_${timestamp}_${random}${process.platform === 'win32' ? '.exe' : ''}`);
 
   try {
     fs.writeFileSync(srcPath, codeSource, 'utf8');
@@ -523,7 +693,7 @@ export async function memcheck(codeSource, stdinInput = '') {
 export async function preprocess(codeSource) {
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 8);
-  const srcPath = path.join(TEMP_DIR, `pp_${timestamp}_${random}.c`);
+  const srcPath = path.join(CODE_TEMP_DIR, `pp_${timestamp}_${random}.c`);
 
   try {
     fs.writeFileSync(srcPath, codeSource, 'utf8');

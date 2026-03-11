@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Play, Loader2, AlertCircle, CheckCircle2, Terminal, X, Copy, Check, Maximize2, Minimize2, RotateCcw, Settings, ChevronDown, Keyboard } from 'lucide-react';
 import { CodeTypingPractice } from './CodeTypingPractice';
 
@@ -234,15 +234,7 @@ function HighlightedLine({ tokens }: { tokens: Token[] }) {
   return (
     <>
       {tokens.map((token, i) => {
-        const escaped = token.value
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;');
-
-        if (token.type === 'whitespace') {
-          return <span key={i} dangerouslySetInnerHTML={{ __html: escaped.replace(/ /g, '&nbsp;').replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;') }} />;
-        }
-
+        // 直接渲染字符，不使用 HTML 实体编码，确保宽度一致
         return (
           <span key={i} className={TOKEN_COLORS[token.type]}>
             {token.value}
@@ -269,27 +261,31 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
   const isFinished = currentIndex >= code.length && code.length > 0;
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.ctrlKey || e.metaKey) return;
+    // 修饰键组合跳过处理
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
     if (!isStarted) {
       setIsStarted(true);
       typingStartTimeGlobal = Date.now();
     }
-    if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Escape',
-         'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+
+    // 方向键和导航键 - 允许默认行为（移动光标）
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
          'Home', 'End', 'PageUp', 'PageDown',
-         'Insert', 'Delete', 'F1', 'F2', 'F3', 'F4', 'F5',
-         'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'].includes(e.key)) {
+         'Escape'].includes(e.key)) {
       return;
     }
 
-    e.preventDefault();
-
+    // Backspace 处理
     if (e.key === 'Backspace') {
+      e.preventDefault();
       onInput(userInput.slice(0, -1));
       return;
     }
 
+    // Tab 键处理 - 自动补全缩进
     if (e.key === 'Tab') {
+      e.preventDefault();
       const remaining = code.substring(currentIndex);
       const spacesMatch = remaining.match(/^( {1,4})/);
       if (spacesMatch) {
@@ -300,23 +296,20 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       return;
     }
 
+    // Enter 键处理
     if (e.key === 'Enter') {
-      if (currentIndex < code.length && code[currentIndex] === '\n') {
-        onInput(userInput + '\n');
-      } else {
-        onInput(userInput + '\n');
-      }
+      e.preventDefault();
+      onInput(userInput + '\n');
       return;
     }
 
+    // 所有单个字符都允许输入（包括符号 < > & \ ; ) 等）
+    // 不阻止默认行为，让容器 focus 保持
     if (e.key.length === 1) {
-      const expectedChar = code[currentIndex];
-      if (e.key !== expectedChar) {
-        // 错误不阻止输入，继续打字
-      }
+      e.preventDefault();
       onInput(userInput + e.key);
     }
-  }, [code, userInput, currentIndex, onInput]);
+  }, [code, userInput, currentIndex, onInput, isStarted]);
 
   useEffect(() => {
     if (containerRef.current) {
@@ -325,15 +318,41 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
   }, []);
 
   const renderCode = useMemo(() => {
-    return code.split('').map((char, i) => {
+    const elements: JSX.Element[] = [];
+
+    for (let i = 0; i < code.length; i++) {
+      const char = code[i];
       let className = 'text-slate-500';
+
+      // 已输入的部分：检查是否正确
       if (i < userInput.length) {
         className = userInput[i] === char ? 'text-cyan-300' : 'text-red-400 bg-red-500/20';
-      } else if (i === currentIndex) {
-        className = 'bg-cyan-500/30';
       }
-      return <span key={i} className={className}>{char === '\n' ? '↵\n' : char}</span>;
-    });
+
+      // 如果当前位置是光标位置，在字符前添加光标指示器
+      if (i === currentIndex) {
+        elements.push(<span key={`cursor-${i}`} className="bg-cyan-500/30">&ZeroWidthSpace;</span>);
+      }
+
+      // 换行符单独处理
+      if (char === '\n') {
+        elements.push(
+          <span key={i} className={className}>
+            <span className="text-slate-600 select-none">↵</span>
+            {'\n'}
+          </span>
+        );
+      } else {
+        elements.push(<span key={i} className={className}>{char}</span>);
+      }
+    }
+
+    // 如果光标在最后，添加光标指示器
+    if (currentIndex === code.length) {
+      elements.push(<span key="cursor-end" className="bg-cyan-500/30">&ZeroWidthSpace;</span>);
+    }
+
+    return elements;
   }, [code, userInput, currentIndex]);
 
   const stats = useMemo(() => {
@@ -369,7 +388,7 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
               onClick={() => onComplete(userInput)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-500 rounded-lg text-white text-xs font-medium"
             >
-              ✓ 填入并运行
+              Check 填入并运行
             </button>
           ) : (
             <button
@@ -391,7 +410,7 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       >
         {!isStarted && (
           <div className="text-center text-slate-500 text-sm mb-4 py-2 bg-slate-800/50 rounded-lg">
-            💡 点击此区域，然后开始打字（请切换到英文输入法）
+            Lightbulb 点击此区域，然后开始打字（请切换到英文输入法）
           </div>
         )}
         <pre className="font-mono leading-7 text-sm" style={{ tabSize: 4 }}>
@@ -404,7 +423,7 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
 
 let typingStartTimeGlobal: number | null = null;
 
-export function CodeRunner({ initialCode = '', onClose, standalone = false }: CodeRunnerProps) {
+const CodeRunner = memo(function CodeRunner({ initialCode = '', onClose, standalone = false }: CodeRunnerProps) {
   const defaultCode = `#include <stdio.h>
 
 int main() {
@@ -427,6 +446,7 @@ int main() {
   const [typeQueryInput, setTypeQueryInput] = useState('int');
   const [availableTools, setAvailableTools] = useState<Record<string, any>>({});
   const [typingMode, setTypingMode] = useState<'edit' | 'typing'>('edit');
+  const [cursorPosition, setCursorPosition] = useState({ line: 0, col: 0 });
 
   useEffect(() => {
     fetch('http://localhost:3001/api/tools')
@@ -434,6 +454,19 @@ int main() {
       .then(data => setAvailableTools(data))
       .catch(() => {});
   }, []);
+
+  // 更新光标位置
+  useEffect(() => {
+    if (textareaRef.current) {
+      const textarea = textareaRef.current;
+      const pos = textarea.selectionStart;
+      const codeUpToCursor = code.substring(0, pos);
+      const lines = codeUpToCursor.split('\n');
+      const line = lines.length - 1;
+      const col = lines[lines.length - 1].length;
+      setCursorPosition({ line, col });
+    }
+  }, [code, typingMode]);
 
   const [typingCode, setTypingCode] = useState('');
   const [userInput, setUserInput] = useState('');
@@ -523,6 +556,7 @@ int main() {
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const textarea = e.currentTarget;
 
+    // Tab 键处理
     if (e.key === 'Tab') {
       e.preventDefault();
       const start = textarea.selectionStart;
@@ -546,14 +580,18 @@ int main() {
           textarea.selectionStart = textarea.selectionEnd = start + 4;
         }, 0);
       }
+      return;
     }
 
+    // 括号自动补全 - 只处理成对符号
     const pairs: Record<string, string> = { '(': ')', '{': '}', '[': ']', '"': '"', "'": "'" };
     if (pairs[e.key]) {
+      e.preventDefault();
       const start = textarea.selectionStart;
       const end = textarea.selectionEnd;
+
       if (start !== end) {
-        e.preventDefault();
+        // 选中内容时包裹括号
         const selected = code.substring(start, end);
         const newCode = code.substring(0, start) + e.key + selected + pairs[e.key] + code.substring(end);
         setCode(newCode);
@@ -561,43 +599,63 @@ int main() {
           textarea.selectionStart = start + 1;
           textarea.selectionEnd = end + 1;
         }, 0);
+      } else {
+        // 无选中时插入括号对，光标在中间
+        const newCode = code.substring(0, start) + e.key + pairs[e.key] + code.substring(end);
+        setCode(newCode);
+        setTimeout(() => {
+          textarea.selectionStart = start + 1;
+          textarea.selectionEnd = start + 1;
+        }, 0);
       }
+      return;
     }
 
+    // 检查是否有选中内容 - 此时应该允许默认行为（删除/替换选区）
+    const hasSelection = textarea.selectionStart !== textarea.selectionEnd;
+    if (hasSelection && e.key.length === 1) {
+      // 选区存在时，让默认行为处理，onChange 会捕获新值
+      return;
+    }
+
+    // Enter 键处理 - 自动缩进
     if (e.key === 'Enter') {
+      e.preventDefault();
       const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
       const lineStart = code.lastIndexOf('\n', start - 1) + 1;
       const currentLine = code.substring(lineStart, start);
       const indent = currentLine.match(/^(\s*)/)?.[0] || '';
       const prevChar = code[start - 1];
       const nextChar = code[start];
 
+      let extraIndent = '';
       if (prevChar === '{') {
-        e.preventDefault();
-        const extraIndent = indent + '    ';
-        if (nextChar === '}') {
-          const newCode = code.substring(0, start) + '\n' + extraIndent + '\n' + indent + code.substring(start);
-          setCode(newCode);
-          setTimeout(() => {
-            textarea.selectionStart = textarea.selectionEnd = start + 1 + extraIndent.length;
-          }, 0);
-        } else {
-          const newCode = code.substring(0, start) + '\n' + extraIndent + code.substring(start);
-          setCode(newCode);
-          setTimeout(() => {
-            textarea.selectionStart = textarea.selectionEnd = start + 1 + extraIndent.length;
-          }, 0);
-        }
-      } else if (indent) {
-        e.preventDefault();
-        const newCode = code.substring(0, start) + '\n' + indent + code.substring(start);
+        extraIndent = '    ';
+      }
+
+      if (nextChar === '}') {
+        // 在闭合括号前回车，添加额外的缩进
+        const newIndent = indent + extraIndent;
+        const newCode = code.substring(0, start) + '\n' + newIndent + '\n' + indent + code.substring(end);
         setCode(newCode);
         setTimeout(() => {
-          textarea.selectionStart = textarea.selectionEnd = start + 1 + indent.length;
+          textarea.selectionStart = start + 1 + newIndent.length;
+          textarea.selectionEnd = start + 1 + newIndent.length;
+        }, 0);
+      } else {
+        const newIndent = indent + extraIndent;
+        const newCode = code.substring(0, start) + '\n' + newIndent + code.substring(end);
+        setCode(newCode);
+        setTimeout(() => {
+          textarea.selectionStart = start + 1 + newIndent.length;
+          textarea.selectionEnd = start + 1 + newIndent.length;
         }, 0);
       }
+      return;
     }
 
+    // Ctrl+Enter 运行代码
     if (e.ctrlKey && e.key === 'Enter') {
       e.preventDefault();
       runCodeRef.current();
@@ -710,7 +768,7 @@ int main() {
     if (!availableTools.valgrind?.available && !availableTools.asan?.available) {
       setResult({
         success: false,
-        output: '⚠️ 内存检测在当前系统不可用\n\n' +
+        output: 'AlertTriangle️ 内存检测在当前系统不可用\n\n' +
           'Windows (MinGW): 不支持 AddressSanitizer\n' +
           'Linux: sudo apt install valgrind\n\n' +
           '替代方案：\n' +
@@ -824,20 +882,20 @@ int main() {
 
   const getTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
-      success: '✓ 运行成功',
-      compile_error: '✗ 编译错误',
-      runtime_error: '✗ 运行时错误',
-      memory_error: '✗ 内存错误 (ASan)',
-      timeout: '⏱ 运行超时',
-      syntax_error: '✗ 语法错误',
-      invalid_input: '✗ 输入无效',
-      too_long: '✗ 代码过长',
-      system_error: '✗ 系统错误',
-      connection_error: '✗ 连接错误',
-      assembly: '📋 汇编代码',
-      preprocessed: '📄 预处理输出',
-      formatted: '🎨 代码格式化',
-      not_available: '⚠️ 不可用'
+      success: 'Check 运行成功',
+      compile_error: 'X 编译错误',
+      runtime_error: 'X 运行时错误',
+      memory_error: 'X 内存错误 (ASan)',
+      timeout: 'Timer 运行超时',
+      syntax_error: 'X 语法错误',
+      invalid_input: 'X 输入无效',
+      too_long: 'X 代码过长',
+      system_error: 'X 系统错误',
+      connection_error: 'X 连接错误',
+      assembly: 'Clipboard 汇编代码',
+      preprocessed: 'File 预处理输出',
+      formatted: 'Palette 代码格式化',
+      not_available: 'AlertTriangle️ 不可用'
     };
     return labels[type] || type;
   };
@@ -955,7 +1013,7 @@ int main() {
         <div ref={editorRef} className="relative overflow-hidden" style={{ height: isMaximized ? '60%' : `${editorHeight}px` }}>
           <div className="absolute inset-0 flex overflow-hidden">
             <div className="flex-shrink-0 bg-slate-850 border-r border-slate-700/50 select-none overflow-hidden" style={{ width: `${Math.max(3, String(lineCount).length) * 10 + 24}px` }}>
-              <div className="py-3" style={{ transform: `translateY(-${textareaRef.current?.scrollTop || 0}px)`, fontSize: `${fontSize}px`, lineHeight: `${fontSize * 1.6}px` }}>
+              <div style={{ padding: `${fontSize * 1.5}px 0`, transform: `translateY(-${textareaRef.current?.scrollTop || 0}px)`, fontSize: `${fontSize}px`, lineHeight: `${fontSize * 1.6}px` }}>
                 {Array.from({ length: lineCount }, (_, i) => (
                   <div key={i} className="text-right pr-3 text-slate-600 hover:text-slate-400 transition-colors" style={{ height: `${fontSize * 1.6}px` }}>
                     {i + 1}
@@ -965,8 +1023,8 @@ int main() {
             </div>
 
             <div className="flex-1 relative">
-              <div ref={highlightRef} className="absolute inset-0 overflow-hidden pointer-events-none py-3 px-4" aria-hidden="true">
-                <pre className="font-mono whitespace-pre" style={{ fontSize: `${fontSize}px`, lineHeight: `${fontSize * 1.6}px` }}>
+              <div ref={highlightRef} className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+                <pre className="whitespace-pre-wrap break-normal" style={{ fontSize: `${fontSize}px`, lineHeight: `${fontSize * 1.6}px`, margin: 0, padding: `${fontSize * 1.5}px ${fontSize}px`, fontFamily: 'JetBrains Mono, monospace' }}>
                   {tokenizedLines.map((lineTokens, lineIdx) => (
                     <div key={lineIdx} style={{ minHeight: `${fontSize * 1.6}px` }}>
                       <HighlightedLine tokens={lineTokens} />
@@ -980,15 +1038,34 @@ int main() {
                 ref={textareaRef}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
+                onSelect={() => {
+                  // 更新光标位置显示
+                  if (textareaRef.current) {
+                    const pos = textareaRef.current.selectionStart;
+                    const codeUpToCursor = code.substring(0, pos);
+                    const lines = codeUpToCursor.split('\n');
+                    setCursorPosition({ line: lines.length - 1, col: lines[lines.length - 1].length });
+                  }
+                }}
                 onScroll={syncScroll}
                 onKeyDown={handleKeyDown}
-                className="absolute inset-0 w-full h-full resize-none bg-transparent font-mono py-3 px-4 outline-none overflow-auto"
+                className="whitespace-pre-wrap break-normal outline-none overflow-auto"
                 style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  resize: 'none',
+                  backgroundColor: 'transparent',
+                  padding: `${fontSize * 1.5}px ${fontSize}px`,
                   fontSize: `${fontSize}px`,
                   lineHeight: `${fontSize * 1.6}px`,
-                  color: 'transparent',
+                  fontFamily: 'JetBrains Mono, monospace',
+                  color: 'rgba(255, 255, 255, 0.01)',
                   caretColor: '#22d3ee',
-                  WebkitTextFillColor: 'transparent',
+                  WebkitTextFillColor: 'rgba(255, 255, 255, 0.01)',
+                  border: 'none',
+                  boxSizing: 'border-box',
                 }}
                 spellCheck={false}
                 autoCapitalize="off"
@@ -1041,7 +1118,7 @@ int main() {
               disabled={isRunning}
               className="flex items-center gap-1 px-3 py-1.5 bg-slate-700/50 hover:bg-slate-600/50 disabled:opacity-40 rounded-lg text-slate-300 text-xs font-medium transition-colors"
             >
-              🔧 工具
+              Settings 工具
               <ChevronDown className="w-3 h-3" />
             </button>
 
@@ -1054,7 +1131,7 @@ int main() {
                       onClick={handleAssembly}
                       className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-700/50 rounded-lg text-left transition-colors"
                     >
-                      <span className="text-base">📋</span>
+                      <span className="text-base">Clipboard</span>
                       <div>
                         <div className="text-sm text-slate-200">查看汇编代码</div>
                         <div className="text-xs text-slate-500">gcc -S -masm=intel</div>
@@ -1083,7 +1160,7 @@ int main() {
                     onClick={handlePreprocess}
                     className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-700/50 rounded-lg text-left transition-colors"
                   >
-                    <span className="text-base">📄</span>
+                    <span className="text-base">File</span>
                     <div>
                       <div className="text-sm text-slate-200">预处理输出</div>
                       <div className="text-xs text-slate-500">gcc -E 宏展开</div>
@@ -1100,7 +1177,7 @@ int main() {
                         : 'opacity-40 cursor-not-allowed'
                     }`}
                   >
-                    <span className="text-base">🔍</span>
+                    <span className="text-base">Search</span>
                     <div>
                       <div className="text-sm text-slate-200">内存检测</div>
                       <div className="text-xs text-slate-500">
@@ -1108,7 +1185,7 @@ int main() {
                           ? 'Valgrind'
                           : availableTools.asan?.available
                             ? 'AddressSanitizer'
-                            : '⚠️ 仅 Linux 可用'}
+                            : 'AlertTriangle️ 仅 Linux 可用'}
                       </div>
                     </div>
                   </button>
@@ -1119,7 +1196,7 @@ int main() {
                     onClick={() => { setShowTypeQuery(true); setShowTools(false); }}
                     className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-700/50 rounded-lg text-left transition-colors"
                   >
-                    <span className="text-base">📐</span>
+                    <span className="text-base">Ruler</span>
                     <div>
                       <div className="text-sm text-slate-200">类型信息查询</div>
                       <div className="text-xs text-slate-500">sizeof / 对齐 / 范围</div>
@@ -1136,7 +1213,7 @@ int main() {
                         : 'opacity-40 cursor-not-allowed'
                     }`}
                   >
-                    <span className="text-base">🎨</span>
+                    <span className="text-base">Palette</span>
                     <div>
                       <div className="text-sm text-slate-200">代码格式化</div>
                       <div className="text-xs text-slate-500">
@@ -1152,7 +1229,7 @@ int main() {
           {showTypeQuery && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
               <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-5 w-80">
-                <h3 className="text-sm font-semibold text-slate-200 mb-3">📐 查询类型信息</h3>
+                <h3 className="text-sm font-semibold text-slate-200 mb-3">Ruler 查询类型信息</h3>
                 <input
                   value={typeQueryInput}
                   onChange={(e) => setTypeQueryInput(e.target.value)}
@@ -1227,4 +1304,6 @@ int main() {
       </div>
     </div>
   );
-}
+});
+
+export default CodeRunner;
