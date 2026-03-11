@@ -468,20 +468,31 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       const char = code[i];
       let className = 'text-slate-500';
 
-      // 已输入的部分：检查是否正确
       if (i < userInput.length) {
         const userInputChar = userInput[i];
-        className = userInputChar === char ? 'text-cyan-300' : 'text-red-400 bg-red-500/20';
+        className = userInputChar === char
+          ? 'text-cyan-300'
+          : 'text-red-400 bg-red-500/20';
       }
 
-      // ✅ 先放光标（在未输入字符之前）
+      // ✅ 先放光标，再渲染字符（零宽度，不影响布局）
       if (i === userInput.length) {
         elements.push(
-          <span key="cursor" className="border-l-2 border-cyan-500 h-[1.2em] inline-block w-0 align-middle animate-pulse" />
+          <span
+            key="cursor"
+            className="inline-block align-middle animate-pulse"
+            style={{
+              width: 0,
+              height: '1.2em',
+              borderLeft: '2px solid #22d3ee',
+              marginLeft: '-1px',
+              marginRight: '-1px',
+            }}
+          />
         );
       }
 
-      // 再渲染字符
+      // 渲染字符
       if (char === '\n') {
         elements.push(
           <React.Fragment key={i}>
@@ -490,14 +501,26 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
           </React.Fragment>
         );
       } else {
-        elements.push(<span key={i} className={className}>{char}</span>);
+        elements.push(
+          <span key={i} className={className}>{char}</span>
+        );
       }
     }
 
-    // ✅ 全部输入完毕，光标在最后
-    if (userInput.length >= code.length && userInput.length > 0) {
+    // 全部输入完毕，光标在最后
+    if (userInput.length >= code.length) {
       elements.push(
-        <span key="cursor-end" className="border-l-2 border-cyan-500 h-[1.2em] inline-block w-0 align-middle animate-pulse" />
+        <span
+          key="cursor-end"
+          className="inline-block align-middle animate-pulse"
+          style={{
+            width: 0,
+            height: '1.2em',
+            borderLeft: '2px solid #22d3ee',
+            marginLeft: '-1px',
+            marginRight: '-1px',
+          }}
+        />
       );
     }
 
