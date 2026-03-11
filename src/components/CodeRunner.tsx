@@ -1029,7 +1029,17 @@ int main() {
 
             <div className="flex-1 relative">
               <div ref={highlightRef} className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
-                <pre className="whitespace-pre-wrap break-normal" style={{ fontSize: `${fontSize}px`, lineHeight: `${fontSize * 1.6}px`, margin: 0, padding: `${fontSize * 1.5}px ${fontSize}px`, fontFamily: 'JetBrains Mono, monospace' }}>
+                <pre className="whitespace-pre-wrap break-normal" style={{
+                  fontSize: `${fontSize}px`,
+                  lineHeight: `${fontSize * 1.6}px`,
+                  margin: 0,
+                  padding: `${fontSize * 1.5}px ${fontSize}px`,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontVariantNumeric: 'tabular-nums',
+                  fontFeatureSettings: '"calt" 0',
+                  WebkitFontSmoothing: 'antialiased',
+                  MozOsxFontSmoothing: 'grayscale',
+                }}>
                   {tokenizedLines.map((lineTokens, lineIdx) => (
                     <div key={lineIdx} style={{ minHeight: `${fontSize * 1.6}px` }}>
                       <HighlightedLine tokens={lineTokens} />
@@ -1066,6 +1076,10 @@ int main() {
                   fontSize: `${fontSize}px`,
                   lineHeight: `${fontSize * 1.6}px`,
                   fontFamily: 'JetBrains Mono, monospace',
+                  fontVariantNumeric: 'tabular-nums',
+                  fontFeatureSettings: '"calt" 0',
+                  WebkitFontSmoothing: 'antialiased',
+                  MozOsxFontSmoothing: 'grayscale',
                   color: 'rgba(255, 255, 255, 0.01)',
                   caretColor: '#22d3ee',
                   WebkitTextFillColor: 'rgba(255, 255, 255, 0.01)',

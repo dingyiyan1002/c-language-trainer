@@ -1,18 +1,18 @@
-import { useState } from 'react';
+import { memo, useState, useCallback } from 'react';
 
 interface ThemeToggleProps {
   isDark: boolean;
   onChange: (v: boolean) => void;
 }
 
-export function ThemeToggle({ isDark, onChange }: ThemeToggleProps) {
+export const ThemeToggle = memo(function ThemeToggle({ isDark, onChange }: ThemeToggleProps) {
   const [transitioning, setTransitioning] = useState(false);
 
-  const toggle = () => {
+  const toggle = useCallback(() => {
     setTransitioning(true);
     onChange(!isDark);
     setTimeout(() => setTransitioning(false), 500);
-  };
+  }, [isDark, onChange]);
 
   return (
     <button
@@ -22,11 +22,11 @@ export function ThemeToggle({ isDark, onChange }: ThemeToggleProps) {
     >
       <div className={`toggle-thumb ${transitioning ? 'transitioning' : ''}`} />
       <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px]">
-        {isDark ? '' : '☀️'}
+        {isDark ? '' : 'Sun️'}
       </span>
       <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px]">
-        {isDark ? '🌙' : ''}
+        {isDark ? 'Moon' : ''}
       </span>
     </button>
   );
-}
+});

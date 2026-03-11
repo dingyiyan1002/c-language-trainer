@@ -1,12 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { X } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, Suspense, lazy, memo, useMemo } from 'react';
 import {
   chapters, questions, getQuestionsByChapter, getChapterById,
   type Question, type Chapter, type Lesson, type QuestionMode
 } from './data/lessons';
 import { getAllProjects, type Project } from './data/projects';
-import { vizMap } from './data/vizData';
-import { Visualization } from './components/Visualizations';
 import { HighlightedLine } from './components/SyntaxHighlighter';
 import { deriveVocabularyFromText, mergeVocabulary } from './data/vocabulary';
 import { ReferenceSidebar } from './components/ReferenceSidebar';
@@ -14,17 +11,25 @@ import ProjectView from './components/ProjectView';
 import { BitSwitchGame } from './components/BitSwitchGame';
 import { StructPackerGame } from './components/StructPackerGame';
 import { PointerSandbox } from './components/PointerSandbox';
-import { CodeRunner } from './components/CodeRunner';
 import { StackFrameViz } from './components/StackFrameViz';
 import { COWMemoryViz } from './components/COWMemoryViz';
 import { CodeAnalyzer } from './components/CodeAnalyzer';
 import { DeepUnderstandingPanel } from './components/DeepUnderstandingPanel';
-import { EnhancedMemoryViz, generateStepsFromCode } from './components/EnhancedMemoryViz';
-import { CodeTypingPractice } from './components/CodeTypingPractice';
-import { CodeVisualizer } from './components/visualizer';
+import { generateStepsFromCode } from './utils/generateStepsFromCode';
 import { useSoundEffects, useKeyboardShortcuts } from './hooks/useInteractions';
 import { useUserStats, StatsPanel, AchievementsPanel, StreakDisplay } from './components/StatsAndAchievements';
 import { loadProgress as loadProgressApi, saveProgress as saveProgressApi, type Progress } from './services/progressApi';
+
+// 样式常量 - 性能优化
+const textStyles = {
+  muted: (isDarkMode: boolean) => isDarkMode ? 'text-slate-400' : 'text-slate-600',
+  primary: (isDarkMode: boolean) => isDarkMode ? 'text-white' : 'text-slate-800',
+};
+
+// 懒加载大组件 - 性能优化
+const CodeRunner = lazy(() => import('./components/CodeRunner'));
+const CodeTypingPractice = lazy(() => import('./components/CodeTypingPractice'));
+const EnhancedMemoryViz = lazy(() => import('./components/EnhancedMemoryViz'));
 import {
   BookOpen,
   Trophy,
@@ -54,10 +59,153 @@ import {
   Layers,
   Bookmark,
   BookmarkCheck,
-  Keyboard
+  Keyboard,
+  BookMarked,
+  Clapperboard,
+  Beaker,
+  Cpu,
+  Microscope,
+  GitBranch,
+  Binary,
+  CircleHelp,
+  CircleArrowRight,
+  CircleDot,
+  Boxes,
+  Timer,
+  Upload,
+  Wrench,
+  RefreshCcw,
+  ScanLine,
+  Lock,
+  FastForward,
+  Repeat2,
+  Ruler,
+  Split,
+  Divide,
+  MoveRight,
+  Plus,
+  Minus,
+  Pin,
+  TableProperties,
+  Type,
+  Package,
+  SquareFunction,
+  Eye,
+  HardDrive,
+  Network,
+  Hash,
+  Thermometer,
+  CircuitBoard,
+  Link,
+  Smartphone,
+  Phone,
+  Eraser,
+  FileText,
+  HelpCircle,
+  ArrowLeft,
+  Globe,
+  Construction,
+  Save,
+  Hammer,
+  Circle,
+  Heart,
+  Pointer,
+  Tv,
+  Star,
+  X,
+  Check
 } from 'lucide-react';
 
-function CodeBlock({
+// 图标名称到组件的映射
+const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  BookOpen,
+  Target,
+  Trophy,
+  BarChart3,
+  ChevronRight,
+  ChevronLeft,
+  CheckCircle,
+  XCircle,
+  Lightbulb,
+  Sparkles,
+  Terminal,
+  RotateCcw,
+  Home,
+  Flame,
+  Award,
+  Zap,
+  Code2,
+  Bug,
+  Play,
+  GraduationCap,
+  Brain,
+  AlertTriangle,
+  Shuffle,
+  Undo2,
+  Sun,
+  Moon,
+  FolderOpen,
+  Layers,
+  Bookmark,
+  BookmarkCheck,
+  Keyboard,
+  BookMarked,
+  Clapperboard,
+  Beaker,
+  Cpu,
+  Microscope,
+  GitBranch,
+  Binary,
+  CircleHelp,
+  CircleArrowRight,
+  CircleDot,
+  Boxes,
+  Timer,
+  Upload,
+  Wrench,
+  RefreshCcw,
+  ScanLine,
+  Lock,
+  FastForward,
+  Repeat2,
+  Ruler,
+  Split,
+  Divide,
+  MoveRight,
+  Plus,
+  Minus,
+  Pin,
+  TableProperties,
+  Type,
+  Package,
+  SquareFunction,
+  Eye,
+  HardDrive,
+  Network,
+  Hash,
+  Thermometer,
+  CircuitBoard,
+  Link,
+  Smartphone,
+  Phone,
+  Eraser,
+  FileText,
+  HelpCircle,
+  ArrowLeft,
+  Globe,
+  Construction,
+  Save,
+  Hammer,
+  Circle,
+  Heart,
+  Pointer,
+  Tv,
+  Star,
+  X,
+  Check
+};
+
+const CodeBlock = memo(function CodeBlock({
   code,
   highlightLine,
 }: {
@@ -66,21 +214,23 @@ function CodeBlock({
 }) {
   const [copied, setCopied] = useState(false);
 
-  const rawLines = code.split("\n");
-  const parsed = rawLines.map((raw, idx) => {
-    const m = raw.match(/^(\d+)\s*\|\s(.*)$/);
-    if (m) {
-      return {
-        num: parseInt(m[1]!, 10),
-        text: m[2] ?? "",
-      };
-    }
-    return { num: idx + 1, text: raw };
-  });
+  const parsed = useMemo(() => {
+    const rawLines = code.split("\n");
+    return rawLines.map((raw, idx) => {
+      const m = raw.match(/^(\d+)\s*\|\s(.*)$/);
+      if (m) {
+        return {
+          num: parseInt(m[1]!, 10),
+          text: m[2] ?? "",
+        };
+      }
+      return { num: idx + 1, text: raw };
+    });
+  }, [code]);
 
-  const copyText = parsed.map((l) => l.text).join("\n");
+  const copyText = useMemo(() => parsed.map((l) => l.text).join("\n"), [parsed]);
 
-  const handleCopy = async () => {
+  const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(copyText);
       setCopied(true);
@@ -88,7 +238,7 @@ function CodeBlock({
     } catch {
       // ignore
     }
-  };
+  }, [copyText]);
 
   return (
     <div className="code-block relative">
@@ -120,10 +270,10 @@ function CodeBlock({
       </div>
     </div>
   );
-}
+});
 
 // Header Component
-function Header({
+const Header = memo(function Header({
   view,
   setView,
   progress,
@@ -221,20 +371,6 @@ function Header({
             <Zap className="w-4 h-4" />
             <span className="hidden sm:inline">实验室</span>
           </button>
-          {/* 动画演示已禁用 */}
-          {/*
-          <button
-            onClick={() => setView('animation')}
-            className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-              view === 'animation'
-                ? 'bg-amber-500/20 text-amber-400'
-                : `${isDarkMode ? 'text-slate-400 hover:text-white hover:bg-white/5' : 'text-slate-600 hover:text-slate-800 hover:bg-slate-100'}`
-            }`}
-          >
-            <Play className="w-4 h-4" />
-            <span className="hidden sm:inline">动画演示</span>
-          </button>
-          */}
           <button
             onClick={() => setView('typing')}
             className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
@@ -250,12 +386,12 @@ function Header({
       </div>
     </header>
   );
-}
+});
 
 
 
 // Lesson View Component
-function LessonView({
+const LessonView = memo(function LessonView({
   lesson,
   onComplete,
   isDarkMode,
@@ -353,10 +489,10 @@ function LessonView({
       </div>
     </div>
   );
-}
+});
 
 // Order Type Question Component
-function OrderQuestion({
+const OrderQuestion = memo(function OrderQuestion({
   question,
   onAnswer,
   showResult,
@@ -430,7 +566,7 @@ function OrderQuestion({
         <div className="code-block min-h-[120px]">
           <pre>
             {selectedOrder.length === 0 ? (
-              <code className="text-slate-600 italic">👆 点击下方代码行，按正确顺序组装程序</code>
+              <code className="text-slate-600 italic"><Pointer className="w-4 h-4 inline mr-1" /> 点击下方代码行，按正确顺序组装程序</code>
             ) : (
               selectedOrder.map((lineIdx, i) => {
                 const isWrong = showResult && correctOrder[i] !== lineIdx;
@@ -473,7 +609,10 @@ function OrderQuestion({
       {/* Show correct answer if wrong */}
       {showResult && !isCorrect && (
         <div className="mt-4">
-          <span className="text-sm text-emerald-400 mb-2 block">✅ 正确顺序：</span>
+          <span className="text-sm text-emerald-400 mb-2 block flex items-center gap-2">
+            <CheckCircle className="w-4 h-4" />
+            正确顺序：
+          </span>
           <div className="code-block">
             <pre>
               {correctOrder.map((lineIdx, i) => (
@@ -519,10 +658,10 @@ function OrderQuestion({
       )}
     </div>
   );
-}
+});
 
 // Question Component
-function QuestionView({
+const QuestionView = memo(function QuestionView({
   question,
   onAnswer,
   showResult,
@@ -547,7 +686,6 @@ function QuestionView({
 }) {
   const [inputs, setInputs] = useState<string[]>([]);
   const [showHint, setShowHint] = useState(false);
-  const [showVizModal, setShowVizModal] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | HTMLTextAreaElement | null)[]>([]);
   const soundPlayedRef = useRef(false);
   
@@ -815,7 +953,7 @@ function QuestionView({
           {showResult && (
             <div className={`mt-4 p-4 rounded-lg ${isCorrect ? 'bg-green-500/20 border border-green-500/30' : 'bg-red-500/20 border border-red-500/30'}`}>
               <p className={isCorrect ? 'text-green-300' : 'text-red-300'}>
-                {isCorrect ? '✅ 回答正确！' : `❌ 正确答案: ${question.correctAnswer}`}
+                {isCorrect ? '<CheckCircle className="w-4 h-4 inline mr-1" /> 回答正确！' : `<XCircle className="w-4 h-4 inline mr-1" /> 正确答案: ${question.correctAnswer}`}
               </p>
             </div>
           )}
@@ -957,212 +1095,9 @@ function QuestionView({
 
   const getDifficultyStars = () => {
     return Array.from({ length: 3 }, (_, i) => (
-      <span key={i} className={i < question.difficulty ? 'text-yellow-400' : 'text-slate-600'}>★</span>
+      <span key={i} className={i < question.difficulty ? 'text-yellow-400' : 'text-slate-600'}><Star className="w-4 h-4 inline" /></span>
     ));
   };
-
-  // Render visualization for question
-  const renderVisualization = () => {
-    if (!question.visualization) return null;
-    
-    const { type, data } = question.visualization;
-    
-    if (type === 'memory') {
-      return (
-        <div className={`mt-4 p-4 rounded-lg border ${isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-          <h4 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-            <span>🎯</span> {data.title}
-          </h4>
-          <p className={`text-xs mb-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-            {data.description}
-          </p>
-          
-          {/* Memory blocks visualization */}
-          <div className="space-y-2 mb-4">
-            {data.memoryBlocks?.map((block: any, idx: number) => (
-              <div key={idx} className="flex items-center gap-3">
-                <span className={`text-xs font-mono w-20 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                  {block.address}
-                </span>
-                <div className={`px-3 py-1.5 rounded text-xs font-mono ${
-                  block.color === 'blue' ? (isDarkMode ? 'bg-blue-900/50 text-blue-300 border border-blue-700' : 'bg-blue-100 text-blue-700 border border-blue-300') :
-                  block.color === 'green' ? (isDarkMode ? 'bg-green-900/50 text-green-300 border border-green-700' : 'bg-green-100 text-green-700 border border-green-300') :
-                  (isDarkMode ? 'bg-slate-700 text-slate-400 border border-slate-600' : 'bg-slate-200 text-slate-600 border border-slate-300')
-                }`}>
-                  {block.value}
-                </div>
-                <span className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                  → {block.label}
-                </span>
-              </div>
-            ))}
-          </div>
-          
-          {/* Pointer info */}
-          {data.pointerInfo && (
-            <div className={`p-3 rounded text-xs ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
-              <div className="flex items-center gap-2 mb-1">
-                <span className={isDarkMode ? 'text-purple-400' : 'text-purple-600'}>{data.pointerInfo.from}</span>
-                <span className={isDarkMode ? 'text-slate-500' : 'text-slate-400'}>───→</span>
-                <span className={isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}>{data.pointerInfo.to}</span>
-              </div>
-              <p className={isDarkMode ? 'text-slate-400' : 'text-slate-600'}>{data.pointerInfo.description}</p>
-            </div>
-          )}
-          
-          {data.note && (
-            <p className={`mt-3 text-xs italic ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-              💡 {data.note}
-            </p>
-          )}
-        </div>
-      );
-    }
-    
-    if (type === 'array') {
-      return (
-        <div className={`mt-4 p-3 rounded-lg border ${isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-          <h4 className={`text-sm font-semibold mb-2 flex items-center gap-2 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-            <span>🎯</span> {data.title}
-          </h4>
-          
-          {/* 紧凑的数组可视化 - 横向排列所有步骤 */}
-          <div className="overflow-x-auto">
-            <div className="flex gap-2 min-w-max">
-              {data.steps?.map((step: any, idx: number) => (
-                <div key={idx} className={`flex flex-col items-center p-2 rounded ${isDarkMode ? 'bg-slate-700/30' : 'bg-white'} ${step.i >= step.array?.length - 1 ? 'border border-red-500/30' : ''}`}>
-                  {/* 步骤标题 */}
-                  <p className={`text-[10px] mb-1 text-center whitespace-nowrap ${step.i >= step.array?.length - 1 ? 'text-red-400' : (isDarkMode ? 'text-slate-400' : 'text-slate-600')}`}>
-                    i={step.i}
-                  </p>
-                  {/* 数组格子 */}
-                  <div className="flex gap-0.5">
-                    {step.array?.map((char: string, charIdx: number) => (
-                      <div
-                        key={charIdx}
-                        className={`w-10 h-8 flex items-center justify-center text-[10px] font-mono rounded ${
-                          charIdx === step.i ? (isDarkMode ? 'bg-purple-600 text-white' : 'bg-purple-500 text-white') :
-                          charIdx === step.j ? (isDarkMode ? 'bg-emerald-600 text-white' : 'bg-emerald-500 text-white') :
-                          charIdx >= step.array?.length - 1 && char === '危险!' ? (isDarkMode ? 'bg-red-600 text-white' : 'bg-red-500 text-white') :
-                          (isDarkMode ? 'bg-slate-600 text-slate-300' : 'bg-slate-200 text-slate-600')
-                        }`}
-                      >
-                        {char}
-                      </div>
-                    ))}
-                  </div>
-                  {/* 状态指示 */}
-                  <div className="mt-1 text-[10px]">
-                    {step.i >= step.array?.length - 1 ? (
-                      <span className="text-red-400">✗ 越界</span>
-                    ) : (
-                      <span className={isDarkMode ? 'text-green-400' : 'text-green-600'}>✓</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          
-          {/* 说明文字 */}
-          <p className={`text-xs mt-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-            {data.description}
-          </p>
-          
-          {data.note && (
-            <p className={`mt-2 text-xs italic ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-              💡 {data.note}
-            </p>
-          )}
-        </div>
-      );
-    }
-    
-    if (type === 'pointer') {
-      return (
-        <div className={`mt-4 p-4 rounded-lg border ${isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-          <h4 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-            <span>🎯</span> {data.title}
-          </h4>
-          <p className={`text-xs mb-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-            {data.description}
-          </p>
-          
-          {/* Pointer steps visualization */}
-          <div className="space-y-3">
-            {data.steps?.map((step: any, idx: number) => (
-              <div key={idx} className={`p-3 rounded ${isDarkMode ? 'bg-slate-700/50' : 'bg-white'}`}>
-                <p className={`text-xs mb-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                  步骤 {idx + 1}: {step.action}
-                </p>
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div className={`p-2 rounded ${isDarkMode ? 'bg-purple-900/30 border border-purple-700' : 'bg-purple-50 border border-purple-200'}`}>
-                    <span className={isDarkMode ? 'text-purple-400' : 'text-purple-600'}>prev</span>
-                    <div className="font-mono mt-1">{step.prev}</div>
-                  </div>
-                  <div className={`p-2 rounded ${isDarkMode ? 'bg-emerald-900/30 border border-emerald-700' : 'bg-emerald-50 border border-emerald-200'}`}>
-                    <span className={isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}>curr</span>
-                    <div className="font-mono mt-1">{step.curr}</div>
-                  </div>
-                  <div className={`p-2 rounded ${isDarkMode ? 'bg-amber-900/30 border border-amber-700' : 'bg-amber-50 border border-amber-200'}`}>
-                    <span className={isDarkMode ? 'text-amber-400' : 'text-amber-600'}>next</span>
-                    <div className="font-mono mt-1">{step.next}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          {data.note && (
-            <p className={`mt-3 text-xs italic ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-              💡 {data.note}
-            </p>
-          )}
-        </div>
-      );
-    }
-
-    if (type === 'flow') {
-      return (
-        <div className={`mt-4 p-4 rounded-lg border ${isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-          <h4 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-            <span>🎯</span> {data.title}
-          </h4>
-          <p className={`text-xs mb-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-            {data.description}
-          </p>
-          
-          {/* Flow steps visualization */}
-          <div className="space-y-2">
-            {data.steps?.map((step: any, idx: number) => (
-              <div key={idx} className="flex items-center gap-3">
-                <div className={`px-3 py-1.5 rounded text-xs font-mono ${isDarkMode ? 'bg-blue-900/50 text-blue-300 border border-blue-700' : 'bg-blue-100 text-blue-700 border border-blue-300'}`}>
-                  {step.from}
-                </div>
-                <div className="flex flex-col items-center">
-                  <span className={`text-lg ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>→</span>
-                  <span className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{step.action}</span>
-                </div>
-                <div className={`px-3 py-1.5 rounded text-xs font-mono ${isDarkMode ? 'bg-emerald-900/50 text-emerald-300 border border-emerald-700' : 'bg-emerald-100 text-emerald-700 border border-emerald-300'}`}>
-                  {step.to}
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          {data.note && (
-            <p className={`mt-3 text-xs italic ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-              💡 {data.note}
-            </p>
-          )}
-        </div>
-      );
-    }
-    
-    return null;
-  };
-
-  const vizData = vizMap[question.id];
 
   // ===== Reference Sidebar (always shown) =====
   const chapterName = getChapterById(question.chapter)?.name ?? '当前章节';
@@ -1283,19 +1218,7 @@ function QuestionView({
             </button>
           </div>
 
-          {/* Visualization (if available, shown before the question) */}
-          {vizData && (
-            <div className="mb-6">
-              <Visualization data={vizData} />
-            </div>
-          )}
-
-          {/* Question-specific visualization (for beginners) */}
-          {question.visualization && (
-            <div className="mb-6">
-              {renderVisualization()}
-            </div>
-          )}
+          {/* 可视化功能已移除 - 待重构 */}
 
           {/* Question Content */}
           <div className="mb-6">
@@ -1311,18 +1234,8 @@ function QuestionView({
                   className={`text-sm flex items-center gap-1 mb-2 transition-colors ${isDarkMode ? 'text-amber-400 hover:text-amber-300' : 'text-amber-600 hover:text-amber-700'}`}
                 >
                   <Lightbulb className="w-4 h-4" />
-                  {showHint ? '隐藏提示' : '💡 显示提示'}
+                  {showHint ? '隐藏提示' : '显示提示'}
                 </button>
-                {/* 动画演示按钮 - 仅针对有可视化的题目 */}
-                {question.visualization && (
-                  <button
-                    onClick={() => setShowVizModal(true)}
-                    className={`text-sm flex items-center gap-1 mb-2 transition-colors ${isDarkMode ? 'text-purple-400 hover:text-purple-300' : 'text-purple-600 hover:text-purple-700'}`}
-                  >
-                    <Play className="w-4 h-4" />
-                    🎬 动画演示
-                  </button>
-                )}
               </div>
               {showHint && (
                 <div className={`p-3 rounded-lg border animate-fadeIn ${isDarkMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
@@ -1355,7 +1268,9 @@ function QuestionView({
                         <CheckCircle className="w-5 h-5 text-emerald-400" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-emerald-400 font-medium">✨ 完全正确！</p>
+                        <p className="text-emerald-400 font-medium flex items-center gap-2">
+                          <Sparkles className="w-4 h-4" /> 完全正确！
+                        </p>
                         <p className="text-sm text-emerald-400/70">你的代码思维很棒！</p>
                       </div>
                       <StreakDisplay currentStreak={stats.currentStreak} isDarkMode={isDarkMode} />
@@ -1389,11 +1304,13 @@ function QuestionView({
               {question.code && (
                 <>
                   {/* 增强版内存可视化 - 步骤状态（优先显示） */}
-                  <EnhancedMemoryViz 
-                    steps={generateStepsFromCode(question.code)} 
-                    isDarkMode={isDarkMode}
-                  />
-                  
+                  <Suspense fallback={<div className="p-4 text-center text-slate-500">加载内存可视化...</div>}>
+                    <EnhancedMemoryViz
+                      steps={generateStepsFromCode(question.code)}
+                      isDarkMode={isDarkMode}
+                    />
+                  </Suspense>
+
                   {/* 原始代码分析器 */}
                   {question.lineAnalysis && question.lineAnalysis.length > 0 && (
                     <CodeAnalyzer
@@ -1414,7 +1331,9 @@ function QuestionView({
                   {/* Knowledge Points */}
                   {question.knowledgePoints && question.knowledgePoints.length > 0 && (
                     <div className="mb-4">
-                      <h4 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>📚 知识点</h4>
+                      <h4 className={`text-sm font-medium mb-2 flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                        <BookMarked className="w-4 h-4" /> 知识点
+                      </h4>
                       <div className="flex flex-wrap gap-2">
                         {question.knowledgePoints.map((point, idx) => (
                           <span key={idx} className={`px-2 py-1 rounded text-xs ${isDarkMode ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-700'}`}>
@@ -1428,7 +1347,9 @@ function QuestionView({
                   {/* Common Mistakes */}
                   {question.commonMistakes && question.commonMistakes.length > 0 && (
                     <div className="mb-4">
-                      <h4 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>⚠️ 常见错误</h4>
+                      <h4 className={`text-sm font-medium mb-2 flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                        <AlertTriangle className="w-4 h-4" /> 常见错误
+                      </h4>
                       <ul className={`text-sm space-y-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                         {question.commonMistakes.map((mistake, idx) => (
                           <li key={idx} className="flex items-start gap-2">
@@ -1443,7 +1364,7 @@ function QuestionView({
                   {/* Related Concepts */}
                   {question.relatedConcepts && question.relatedConcepts.length > 0 && (
                     <div>
-                      <h4 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>🔗 相关概念</h4>
+                      <h4 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}><Link className="w-4 h-4 inline mr-1" />相关概念</h4>
                       <div className="flex flex-wrap gap-2">
                         {question.relatedConcepts.map((concept, idx) => (
                           <span key={idx} className={`px-2 py-1 rounded text-xs ${isDarkMode ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700'}`}>
@@ -1468,129 +1389,15 @@ function QuestionView({
         </div>
       </div>
 
-      {/* HTML Visualization Modal */}
-      {showVizModal && question.visualization?.type === 'html' && (
-        <HTMLVizModal
-          file={question.visualization?.file || ''}
-          onClose={() => setShowVizModal(false)}
-          isDarkMode={isDarkMode}
-        />
-      )}
-
-      {/* Code Visualizer Modal - 已禁用 */}
-      {/*
-      {showVizModal && (() => {
-        const qid = typeof question.id === 'string' ? parseInt(question.id, 10) : question.id;
-        const isRealExam = typeof qid === 'number' && qid >= 9001 && qid <= 9407;
-        const isSupportedPractice = [2003, 1010, 1011, 1057, 1058, 1017, 1018, 1025, 1026, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010, 10011, 10012].includes(qid as number);
-        return isRealExam || isSupportedPractice;
-      })() && (
-        <CodeVisualizer
-          questionId={String(qid)}
-          onClose={() => setShowVizModal(false)}
-        />
-      )}
-      */}
     </div>
   );
-}
-
-// HTML Visualization Modal Component - 处理 iframe 全屏
-function HTMLVizModal({
-  file,
-  onClose,
-  isDarkMode
-}: {
-  file: string;
-  onClose: () => void;
-  isDarkMode: boolean;
-}) {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      // 处理来自 iframe 的全屏请求
-      if (event.data?.type === 'viz-fullscreen-request') {
-        const container = containerRef.current;
-        if (!container) return;
-
-        if (event.data.action === 'enter') {
-          // 进入全屏
-          if (container.requestFullscreen) {
-            container.requestFullscreen().then(() => {
-              setIsFullscreen(true);
-            }).catch(err => {
-              console.error('Fullscreen error:', err);
-            });
-          }
-        } else if (event.data.action === 'exit') {
-          // 退出全屏
-          if (document.exitFullscreen) {
-            document.exitFullscreen().then(() => {
-              setIsFullscreen(false);
-            }).catch(err => {
-              console.error('Exit fullscreen error:', err);
-            });
-          }
-        }
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
-
-  // 监听全屏变化事件
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      const isCurrentlyFullscreen = !!document.fullscreenElement;
-      setIsFullscreen(isCurrentlyFullscreen);
-      
-      // 通知 iframe 全屏状态变化
-      if (iframeRef.current?.contentWindow) {
-        iframeRef.current.contentWindow.postMessage({
-          type: 'viz-fullscreen-change',
-          isFullscreen: isCurrentlyFullscreen
-        }, '*');
-      }
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
-
-  return (
-    <div 
-      ref={containerRef}
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/70 backdrop-blur-sm"
-    >
-      <div className={`relative w-full max-w-[95vw] h-[95vh] sm:max-w-[98vw] sm:h-[98vh] rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 ${isFullscreen ? 'max-w-none h-screen rounded-none' : ''} ${isDarkMode ? 'bg-slate-900' : 'bg-white'}`}>
-        <button
-          onClick={onClose}
-          className={`absolute top-2 right-2 z-10 p-2 rounded-full transition-colors ${isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-400' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
-        >
-          <X className="w-5 h-5" />
-        </button>
-        <iframe
-          ref={iframeRef}
-          src={file}
-          className="w-full h-full border-0"
-          title="Visualization"
-          allow="fullscreen"
-        />
-      </div>
-    </div>
-  );
-}
+});
 
 // LabQuestionView - 实验室题目详情页（完整答题功能）
-function LabQuestionView({
+const LabQuestionView = memo(function LabQuestionView({
   question,
   isDarkMode,
   onBack,
-  onShowViz,
   onPrev,
   onNext,
   currentIndex,
@@ -1599,7 +1406,6 @@ function LabQuestionView({
   question: any;
   isDarkMode: boolean;
   onBack: () => void;
-  onShowViz: () => void;
   onPrev?: () => void;
   onNext?: () => void;
   currentIndex: number;
@@ -1713,7 +1519,7 @@ function LabQuestionView({
             }`}
           >
             <Lightbulb className="w-4 h-4" />
-            {showHint ? '隐藏提示' : '💡 显示提示'}
+            {showHint ? '隐藏提示' : '显示提示'}
           </button>
           {showHint && (
             <div className={`p-3 rounded-lg border animate-fadeIn ${
@@ -1786,18 +1592,6 @@ function LabQuestionView({
             重新答题
           </button>
         )}
-        
-        <button
-          onClick={onShowViz}
-          className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${
-            isDarkMode
-              ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-500/30'
-              : 'bg-purple-500 hover:bg-purple-600 text-white shadow-lg shadow-purple-500/30'
-          }`}
-        >
-          <Play className="w-5 h-5" />
-          🎬 动画演示
-        </button>
       </div>
 
       {/* 上一题/下一题导航 */}
@@ -1834,98 +1628,25 @@ function LabQuestionView({
       </div>
     </div>
   );
-}
+});
 
 // Lab View - 互动实验室
-function LabView({
+const LabView = memo(function LabView({
   onBack,
   isDarkMode
 }: {
   onBack: () => void;
   isDarkMode: boolean;
 }) {
-  const [activeTab, setActiveTab] = useState<'bits' | 'struct' | 'pointer' | 'stack' | 'cow' | 'runner' | 'animation'>('pointer');
-  const [selectedVizDemo, setSelectedVizDemo] = useState<string | null>(null);
-  const [selectedVizQuestionIndex, setSelectedVizQuestionIndex] = useState<number | null>(null);
-
-  // 实验室动画演示题目列表
-  const vizQuestions = [
-    {
-      id: 2003,
-      title: 'uint8_t 计数器溢出',
-      description: '计数器溢出回绕',
-      code: `#include <stdio.h>\n#include <stdint.h>\n\nint main(void)\n{\n    uint8_t rx_count = 0;\n    uint8_t packet_seq = 254;\n\n    for (uint8_t i = 0; i < 3; i++) {\n        rx_count++;\n        packet_seq++;\n    }\n\n    printf("rx_count: %u\\n", rx_count);\n    printf("packet_seq: %u\\n", packet_seq);\n\n    return 0;\n}`,
-      correctOutput: 'rx_count: 3\npacket_seq: 1',
-      explanation: 'uint8_t范围0~255，255+1溢出回绕到0。packet_seq: 254→255→0→1。协议包序号常用uint8_t循环。',
-      vizId: 'uint8-overflow'
-    },
-    {
-      id: 2004,
-      title: '指针基础-声明与初始化',
-      description: '指针变量声明和基本操作',
-      code: `#include <stdio.h>\n#include <stdint.h>\n\nint main(void)\n{\n    uint8_t value = 100;\n    uint8_t *ptr = &value;\n    \n    printf("value = %u\\n", value);\n    printf("*ptr = %u\\n", *ptr);\n    printf("&value = %p\\n", (void*)&value);\n    printf("ptr = %p\\n", (void*)ptr);\n    \n    return 0;\n}`,
-      correctOutput: 'value = 100\n*ptr = 100',
-      explanation: 'ptr存储value的地址，*ptr解引用得到value的值。&value和ptr的值相同，都指向value的内存地址。',
-      vizId: 'pointer-basic'
-    },
-    {
-      id: 3005,
-      title: '指针运算-不同类型',
-      description: 'uint8_t/uint16_t/uint32_t指针步长对比',
-      code: `#include <stdio.h>\n#include <stdint.h>\n\nint main(void)\n{\n    uint8_t arr8[4] = {1, 2, 3, 4};\n    uint16_t arr16[4] = {100, 200, 300, 400};\n    uint32_t arr32[4] = {1000, 2000, 3000, 4000};\n\n    uint8_t *p8 = arr8;\n    uint16_t *p16 = arr16;\n    uint32_t *p32 = arr32;\n\n    printf("uint8_t: %u, %u\\n", *p8, *(p8+1));\n    printf("uint16_t: %u, %u\\n", *p16, *(p16+1));\n    printf("uint32_t: %u, %u\\n", *p32, *(p32+1));\n\n    return 0;\n}`,
-      correctOutput: 'uint8_t: 1, 2\nuint16_t: 100, 200\nuint32_t: 1000, 2000',
-      explanation: '指针+1移动的字节数取决于类型大小。uint8_t*移动1字节，uint16_t*移动2字节，uint32_t*移动4字节。',
-      vizId: 'pointer-types'
-    },
-    {
-      id: 1050,
-      title: '带参宏的陷阱',
-      description: '宏的副作用 - 难度 ★★★',
-      code: `#include <stdio.h>\n#include <stdint.h>\n\n#define SQUARE(x)  ((x) * (x))\n\nint main(void)\n{\n    uint8_t a = 5;\n    printf("SQUARE(%u) = %u\\n", a, SQUARE(a));\n\n    uint8_t b = 3;\n    printf("SQUARE(%u++) = %u\\n", b, SQUARE(b++));\n    printf("b after = %u\\n", b);\n\n    return 0;\n}`,
-      correctOutput: 'SQUARE(5) = 25\nSQUARE(3++) = 12\nb after = 5',
-      explanation: 'SQUARE(b++)展开为((b++)*(b++))，b++执行两次，结果是未定义行为。宏是文本替换，参数有副作用时要小心。',
-      vizId: 'macro-side-effect'
-    },
-    {
-      id: 247,
-      title: '创建线程',
-      description: 'pthread_create 和 pthread_join 演示',
-      code: `#include <stdio.h>
-#include <stdint.h>
-#include <pthread.h>
-
-void *thread_func(void *arg)
-{
-    uint8_t *value = (uint8_t*)arg;
-    printf("Thread received: %u\\n", *value);
-    return NULL;
-}
-
-int main(void)
-{
-    pthread_t thread;
-    uint8_t data = 42;
-
-    pthread_create(&thread, NULL, thread_func, &data);
-    pthread_join(thread, NULL);
-
-    printf("Thread completed\\n");
-    return 0;
-}`,
-      correctOutput: 'Thread received: 42\nThread completed',
-      explanation: 'pthread_create创建线程，参数：(线程ID, 属性, 函数, 参数)。pthread_join等待线程结束。',
-      vizId: 'pthread-create'
-    }
-  ];
+  const [activeTab, setActiveTab] = useState<'bits' | 'struct' | 'pointer' | 'stack' | 'cow' | 'runner'>('pointer');
 
   const tabs = [
-    { id: 'pointer', label: '🎯 指针与内存', color: 'emerald' },
-    { id: 'stack', label: '📚 函数栈帧', color: 'blue' },
-    { id: 'cow', label: '🔄 COW机制', color: 'amber' },
-    { id: 'bits', label: '🔌 位运算', color: 'purple' },
-    { id: 'struct', label: '📦 内存对齐', color: 'indigo' },
-    { id: 'runner', label: '⚡ 代码运行', color: 'cyan' },
-    { id: 'animation', label: '🎬 动画演示', color: 'pink' },
+    { id: 'pointer', label: <><Target className="w-4 h-4 inline mr-1" />指针与内存</>, color: 'emerald' },
+    { id: 'stack', label: <><BookMarked className="w-4 h-4 inline mr-1" />函数栈帧</>, color: 'blue' },
+    { id: 'cow', label: <><RefreshCcw className="w-4 h-4 inline mr-1" />COW 机制</>, color: 'amber' },
+    { id: 'bits', label: <><CircuitBoard className="w-4 h-4 inline mr-1" />位运算</>, color: 'purple' },
+    { id: 'struct', label: <><Package className="w-4 h-4 inline mr-1" />内存对齐</>, color: 'indigo' },
+    { id: 'runner', label: <><Zap className="w-4 h-4 inline mr-1" />代码运行</>, color: 'cyan' },
   ];
 
   return (
@@ -1944,7 +1665,7 @@ int main(void)
           返回
         </button>
         <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-          🧪 互动实验室
+          <Beaker className="w-5 h-5 inline mr-1" />互动实验室
         </h2>
       </div>
 
@@ -1958,7 +1679,7 @@ int main(void)
             cow: 'bg-amber-600 text-white shadow-lg shadow-amber-500/30',
             bits: 'bg-purple-600 text-white shadow-lg shadow-purple-500/30',
             struct: 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30',
-            animation: 'bg-pink-600 text-white shadow-lg shadow-pink-500/30'
+            runner: 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/30'
           }[tab.id] || 'bg-purple-600') : (isDarkMode ? 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50' : 'bg-white text-slate-600 hover:bg-slate-50 shadow-sm');
           return (
             <button
@@ -1979,270 +1700,34 @@ int main(void)
         {activeTab === 'cow' && <COWMemoryViz />}
         {activeTab === 'bits' && <BitSwitchGame />}
         {activeTab === 'struct' && <StructPackerGame />}
-        {activeTab === 'runner' && <CodeRunner />}
-        {activeTab === 'animation' && selectedVizQuestionIndex === null && (
-          <div className={`rounded-xl p-6 ${isDarkMode ? 'bg-slate-800/50' : 'bg-white'}`}>
-            <h3 className={`text-xl font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-              🎬 代码执行动画演示
-            </h3>
-            <p className={`mb-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-              选择下面的题目，进入详情页后点击"动画演示"按钮观看动态演示
-            </p>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {vizQuestions.map((q, index) => (
-                <button
-                  key={q.id}
-                  onClick={() => setSelectedVizQuestionIndex(index)}
-                  className={`p-4 rounded-lg text-left transition-all ${
-                    isDarkMode 
-                      ? 'bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600' 
-                      : 'bg-slate-50 hover:bg-slate-100 border border-slate-200'
-                  }`}
-                >
-                  <div className="text-2xl mb-2">{index === 0 ? '🔢' : '👉'}</div>
-                  <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                    {q.title}
-                  </div>
-                  <div className={`text-sm mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    {q.description}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 题目详情页 - 完整答题页面 */}
-        {activeTab === 'animation' && selectedVizQuestionIndex !== null && (
-          <LabQuestionView
-            question={vizQuestions[selectedVizQuestionIndex]}
-            isDarkMode={isDarkMode}
-            onBack={() => setSelectedVizQuestionIndex(null)}
-            onShowViz={() => setSelectedVizDemo(vizQuestions[selectedVizQuestionIndex].vizId)}
-            onPrev={selectedVizQuestionIndex > 0 ? () => setSelectedVizQuestionIndex(selectedVizQuestionIndex - 1) : undefined}
-            onNext={selectedVizQuestionIndex < vizQuestions.length - 1 ? () => setSelectedVizQuestionIndex(selectedVizQuestionIndex + 1) : undefined}
-            currentIndex={selectedVizQuestionIndex}
-            totalCount={vizQuestions.length}
-          />
+        {activeTab === 'runner' && (
+          <Suspense fallback={<div className="p-4 text-center text-slate-500">加载代码运行器...</div>}>
+            <CodeRunner />
+          </Suspense>
         )}
       </div>
 
       {/* 说明 */}
       <div className={`mt-8 p-4 rounded-xl ${isDarkMode ? 'bg-slate-800/50' : 'bg-white'} border border-slate-200/20`}>
         <h3 className={`font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-          💡 互动实验室使用指南
+          <><Lightbulb className="w-5 h-5 inline mr-1" />互动实验室使用指南</>
         </h3>
         <ul className={`text-sm space-y-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-          <li>• <strong>🎯 指针与内存</strong>：可视化指针、地址、解引用、多级指针，理解指针运算和危险操作</li>
-          <li>• <strong>📚 函数栈帧</strong>：观察函数调用时栈的变化，理解递归调用栈、局部变量生命周期</li>
-          <li>• <strong>🔄 COW机制</strong>：理解fork的写时复制原理，观察页表和物理页的关系变化</li>
-          <li>• <strong>🔌 位运算</strong>：通过开关理解二进制、十六进制转换</li>
-          <li>• <strong>📦 内存对齐</strong>：拖拽字段观察结构体内存布局和填充字节</li>
-          <li>• <strong>⚡ 代码运行</strong>：在线编译运行C代码，检测内存错误</li>
-          <li>• <strong>🎬 动画演示</strong>：可视化代码执行过程，深入理解C语言陷阱和难点</li>
+          <li>• <strong><Target className="w-3 h-3 inline mr-1" />指针与内存</strong>：可视化指针、地址、解引用、多级指针，理解指针运算和危险操作</li>
+          <li>• <strong><BookMarked className="w-3 h-3 inline mr-1" />函数栈帧</strong>：观察函数调用时栈的变化，理解递归调用栈、局部变量生命周期</li>
+          <li>• <strong><RefreshCcw className="w-3 h-3 inline mr-1" /> COW机制</strong>：理解fork的写时复制原理，观察页表和物理页的关系变化</li>
+          <li>• <strong><CircuitBoard className="w-3 h-3 inline mr-1" />位运算</strong>：通过开关理解二进制、十六进制转换</li>
+          <li>• <strong><Package className="w-3 h-3 inline mr-1" />内存对齐</strong>：拖拽字段观察结构体内存布局和填充字节</li>
+          <li>• <strong><Zap className="w-3 h-3 inline mr-1" />代码运行</strong>：在线编译运行C代码，检测内存错误</li>
         </ul>
       </div>
 
-      {/* 溢出可视化 Modal */}
-      {selectedVizDemo && (
-        <CodeVisualizer
-          questionId={selectedVizDemo}
-          onClose={() => setSelectedVizDemo(null)}
-        />
-      )}
     </div>
   );
-}
+});
 
-// AnimationDemoView - 动画演示展示
-function AnimationDemoView({
-  onBack
-}: {
-  onBack: () => void;
-}) {
-  const [selectedDemo, setSelectedDemo] = useState<string | null>(null);
-
-  // 可视化题型数据
-  const demoList = [
-    { id: 'uint8-overflow', title: 'uint8_t 计数器溢出', description: '无符号8位整数溢出回绕演示', icon: '🔢' },
-    { id: 'int8-overflow', title: 'int8_t 温度值溢出', description: '有符号8位整数溢出演示', icon: '🌡️' },
-    { id: 'signed-unsigned-compare', title: '有符号无符号比较陷阱', description: '隐式类型转换导致的比较错误', icon: '⚠️' },
-    { id: 'bit-set-register', title: '设置寄存器位', description: '使用位或运算设置GPIO寄存器', icon: '🔌' },
-    { id: 'bit-clear-register', title: '清除寄存器位', description: '使用位与运算清除寄存器位', icon: '🧹' },
-    { id: 'switch-case-command', title: 'switch-case 命令分发', description: '理解 switch 语句的命令分发逻辑', icon: '🔀' },
-    { id: 'array-sum-loop', title: '数组求和循环', description: '观察循环中数组元素的累加过程', icon: '➕' },
-    { id: 'while-timeout-wait', title: 'while 超时等待', description: '嵌入式 while 循环超时等待实现', icon: '⏱️' },
-    { id: 'pass-by-value', title: '值传递 vs 指针传递', description: '理解 C 语言的值传递和指针传递', icon: '📤' },
-    { id: 'bit-macro', title: '位运算宏陷阱', description: '宏定义中的位运算注意事项', icon: '⚡' },
-    { id: 'macro-side-effect', title: '宏副作用陷阱', description: '表达式求值顺序导致的隐藏问题', icon: '💥' },
-    { id: 'device-status-check', title: '设备状态检查', description: '位运算在嵌入式设备状态检查中的应用', icon: '📟' },
-    // Level 1 可视化
-    { id: 'level1-register-print', title: '打印寄存器值', description: '%08X格式化输出演示', icon: '📋' },
-    { id: 'level1-sensor-data', title: '打印传感器数据', description: '有符号/无符号格式化输出', icon: '🌡️' },
-    { id: 'level1-switch-command', title: 'switch-case命令分发', description: '协议命令解析流程', icon: '🔀' },
-    { id: 'level1-while-timeout', title: 'while超时等待', description: '嵌入式超时检测模式', icon: '⏱️' },
-    { id: 'level1-function-return', title: '函数调用与返回值', description: '错误码返回值规范', icon: '📞' },
-    { id: 'level1-bit-set', title: '设置寄存器位', description: '|=位或运算设置位', icon: '🔧' },
-    { id: 'level1-bit-clear', title: '清除寄存器位', description: '&=~位与运算清除位', icon: '🧹' },
-    { id: 'level1-bit-macro', title: 'BIT宏定义', description: '位操作宏的使用', icon: '⚡' },
-    { id: 'level1-array-sum', title: 'for循环数组求和', description: '循环遍历数组累加', icon: '➕' },
-    { id: 'level1-string-length', title: '字符串长度计算', description: '\\0结束符和字符串遍历', icon: '📝' },
-    { id: 'level1-for-loop', title: 'for循环计数', description: 'for循环执行流程', icon: '🔄' },
-    { id: 'level1-if-else-branch', title: 'if-else分支', description: '条件分支执行流程', icon: '🔀' },
-    { id: 'level1-array-init', title: '数组初始化', description: '部分初始化自动填0', icon: '📦' },
-    { id: 'level1-pointer-basic', title: '指针基础', description: '&取地址和*解引用', icon: '📍' },
-    { id: 'level1-do-while', title: 'do-while循环', description: '先执行后判断至少一次', icon: '🔄' },
-    { id: 'level1-break-continue', title: 'break与continue', description: '跳出和跳过循环', icon: '⏭️' },
-    { id: 'level1-nested-loop', title: '嵌套循环', description: '外层内层循环执行', icon: '🔂' },
-    { id: 'level1-printf-format', title: 'printf格式符', description: 'd/u/f/c/s格式符', icon: '📋' },
-    { id: 'level1-operator-precedence', title: '运算符优先级', description: '先乘除后加减', icon: '➕' },
-    { id: 'level1-logical-operator', title: '逻辑运算符', description: '!非 &&与 ||或', icon: '🔬' },
-    { id: 'level1-sizeof-type', title: 'sizeof类型大小', description: '各类型字节大小', icon: '📏' },
-    { id: 'level1-ternary-operator', title: '三目运算符', description: '条件?真值:假值', icon: '❓' },
-    { id: 'level1-modulo-operator', title: '取模运算', description: 'a%b求余数', icon: '➗' },
-    { id: 'level1-shift-operator', title: '位移运算', description: '<<左移 >>右移', icon: '⬅️' },
-    { id: 'level1-increment-decrement', title: '递增递减运算', description: '前++后++的区别', icon: '➕' },
-    { id: 'level1-constant-define', title: '常量定义', description: '#define宏定义', icon: '📌' },
-    { id: 'level1-multi-dimensional-array', title: '二维数组', description: 'matrix[行][列]', icon: '📊' },
-    { id: 'level1-string-array', title: '字符数组', description: '字符串\\0结尾', icon: '🔤' },
-    { id: 'level1-function-param-pass', title: '函数参数传递', description: '值传递vs指针传递', icon: '📤' },
-    { id: 'level1-global-local-var', title: '全局与局部变量', description: '作用域规则', icon: '🌍' },
-    { id: 'level1-static-var', title: 'static静态变量', description: '只初始化一次', icon: '🔒' },
-    { id: 'level1-goto-statement', title: 'goto语句', description: '跳转语句', icon: '⏩' },
-    { id: 'level1-bitwise-and-or', title: '位与/位或', description: '& | ^位运算', icon: '🔗' },
-    { id: 'level1-comma-operator', title: '逗号运算符', description: '从左到右取最后值', icon: '🔥' },
-    { id: 'level1-type-cast', title: '类型转换', description: '自动vs强制转换', icon: '🔄' },
-    { id: 'level1-enum-const', title: '枚举类型', description: '常量整数值', icon: '📋' },
-    { id: 'level1-typedef', title: 'typedef类型定义', description: '为类型起别名', icon: '📝' },
-    { id: 'level1-struct-basic', title: '结构体基础', description: '不同类型数据集合', icon: '🏗️' },
-    { id: 'level1-union-basic', title: '联合体基础', description: '共享内存', icon: '🔗' },
-    { id: 'level1-sizeof-array', title: 'sizeof数组', description: '数组总字节数', icon: '📏' },
-    { id: 'level1-array-pointer', title: '数组与指针', description: '数组名=首地址', icon: '📍' },
-    { id: 'level1-string-functions', title: '字符串函数', description: 'strcpy/strcat', icon: '📝' },
-    { id: 'level1-recursion', title: '递归函数', description: '函数调用自身', icon: '🔄' },
-    { id: 'level1-variable-arguments', title: '可变参数', description: 'va_list用法', icon: '📊' },
-    { id: 'level1-function-pointer', title: '函数指针', description: '指向函数的指针', icon: '📍' },
-    { id: 'level1-const-pointer', title: 'const指针', description: 'const位置含义', icon: '🔒' },
-    { id: 'level1-memcpy-memset', title: '内存操作函数', description: 'memset/memcpy', icon: '💾' },
-    { id: 'level1-bit-field', title: '位域', description: '按位定义字段', icon: '📊' },
-    { id: 'level1-volatile-keyword', title: 'volatile关键字', description: '防止编译器优化', icon: '🔄' },
-    { id: 'level1-preprocessor-conditional', title: '条件编译', description: '#ifdef/#if', icon: '🔨' },
-    { id: 'level1-inline-function', title: '内联函数', description: 'inline编译时展开', icon: '⚡' },
-    { id: 'level1-hex-dec-conversion', title: '进制转换', description: '十进制转十六进制', icon: '🔢' },
-    { id: 'level1-ascii-table', title: 'ASCII表', description: '字符对应数字编码', icon: '🔤' },
-    { id: 'level1-boolean-logic', title: '布尔逻辑', description: 'true/false逻辑运算', icon: '🔬' },
-    { id: 'level1-auto-register-static', title: '存储类别', description: 'auto/register/static', icon: '📦' },
-    { id: 'level1-floating-point', title: '浮点数', description: 'float和double', icon: '🔵' },
-    { id: 'level1-uchar-ushort', title: '无符号类型', description: 'uint8_t/uint16_t', icon: '🔢' },
-    { id: 'level1-schar-sshort', title: '有符号类型', description: 'int8_t/int16_t', icon: '🔢' },
-    { id: 'level1-varargs-sum', title: '可变参数求和', description: 'va_list用法', icon: '➕' },
-    { id: 'level1-sizeof-pointer', title: '指针大小', description: '指针类型大小', icon: '📏' },
-    { id: 'level1-void-pointer', title: 'void指针', description: '通用指针类型', icon: '📍' },
-    { id: 'level1-null-pointer', title: '空指针', description: 'NULL指针', icon: '❌' },
-    { id: 'level1-pointer-arithmetic', title: '指针运算', description: '指针算术运算', icon: '➕' },
-  ];
-
-  // 处理选择可视化
-  const handleSelectDemo = (demoId: string) => {
-    try {
-      setSelectedDemo(demoId);
-    } catch (error) {
-      console.error('加载可视化失败:', error);
-      alert('该可视化暂时不可用，请尝试其他题型');
-      setSelectedDemo(null);
-    }
-  };
-
-  // 处理关闭可视化
-  const handleCloseVisualization = () => {
-    setSelectedDemo(null);
-  };
-
-  // 如果选择了可视化题，显示 CodeVisualizer
-  if (selectedDemo) {
-    return (
-      <div className="animate-fadeIn">
-        <div className="flex items-center gap-4 mb-6">
-          <button
-            onClick={handleCloseVisualization}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 transition-all"
-          >
-            <ChevronLeft className="w-5 h-5" />
-            返回列表
-          </button>
-          <h2 className="text-2xl font-bold text-white">
-            🎬 {demoList.find(d => d.id === selectedDemo)?.title || '动画演示'}
-          </h2>
-        </div>
-        <div className="bg-slate-900 rounded-xl overflow-hidden" style={{ minHeight: '600px' }}>
-          <CodeVisualizer
-            questionId={selectedDemo}
-            onClose={handleCloseVisualization}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="animate-fadeIn">
-      {/* 头部 */}
-      <div className="flex items-center gap-4 mb-6">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 transition-all"
-        >
-          <ChevronLeft className="w-5 h-5" />
-          返回
-        </button>
-        <h2 className="text-2xl font-bold text-white">
-          🎬 动画演示
-        </h2>
-      </div>
-
-      {/* 说明文字 */}
-      <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
-        <p className="text-amber-200 text-sm">
-          📺 这里收集了所有已完成的动画演示题型，点击即可观看代码执行过程的动态演示。
-          通过可视化方式深入理解 C 语言的底层原理。
-        </p>
-      </div>
-
-      {/* 题型网格 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {demoList.map((demo) => (
-          <button
-            key={demo.id}
-            onClick={() => handleSelectDemo(demo.id)}
-            className="p-4 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700/50 hover:border-amber-500/30 transition-all text-left group"
-          >
-            <div className="flex items-start gap-3">
-              <span className="text-2xl">{demo.icon}</span>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-white group-hover:text-amber-200 transition-colors truncate">
-                  {demo.title}
-                </h3>
-                <p className="text-slate-400 text-sm mt-1 line-clamp-2">
-                  {demo.description}
-                </p>
-              </div>
-              <Play className="w-5 h-5 text-slate-500 group-hover:text-amber-400 transition-colors flex-shrink-0" />
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {/* 空状态提示 */}
-      {demoList.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-slate-400">暂无动画演示题型</p>
-          <p className="text-slate-500 text-sm mt-2">敬请期待更多内容</p>
-        </div>
-      )}
-    </div>
-  );
-}
-function HomeView({
+// Home View Component
+const HomeView = memo(function HomeView({
   progress,
   onStartChapter,
   onReview,
@@ -2402,7 +1887,10 @@ function HomeView({
               >
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 flex items-center justify-center text-3xl">
-                    {chapter.icon}
+                    {(() => {
+                      const IconComponent = iconMap[chapter.icon] || BookOpen;
+                      return <IconComponent className="w-8 h-8" />;
+                    })()}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
@@ -2479,10 +1967,10 @@ function HomeView({
       </div>
     </div>
   );
-}
+});
 
 // Stats View
-function StatsView({ progress, onReset, isDarkMode }: { progress: Progress; onReset: () => void; isDarkMode: boolean }) {
+const StatsView = memo(function StatsView({ progress, onReset, isDarkMode }: { progress: Progress; onReset: () => void; isDarkMode: boolean }) {
   const accuracy = progress.completed.length > 0
     ? Math.round((progress.correct.length / progress.completed.length) * 100)
     : 0;
@@ -2587,10 +2075,10 @@ function StatsView({ progress, onReset, isDarkMode }: { progress: Progress; onRe
       </button>
     </div>
   );
-}
+});
 
 // Training View
-function TrainingView({
+const TrainingView = memo(function TrainingView({
   chapter,
   progress,
   setProgress,
@@ -2624,33 +2112,33 @@ function TrainingView({
     }
   }, []);
 
-  const handleLessonComplete = () => {
+  const handleLessonComplete = useCallback(() => {
     if (lessonIndex < chapter.lessons.length - 1) {
       setLessonIndex(lessonIndex + 1);
     } else {
       setShowLesson(false);
     }
-  };
+  }, [lessonIndex, chapter.lessons.length]);
 
-  const goToPrevLesson = () => {
+  const goToPrevLesson = useCallback(() => {
     if (lessonIndex > 0) {
       setLessonIndex(lessonIndex - 1);
     }
-  };
+  }, [lessonIndex]);
 
-  const goToNextLesson = () => {
+  const goToNextLesson = useCallback(() => {
     if (lessonIndex < chapter.lessons.length - 1) {
       setLessonIndex(lessonIndex + 1);
     } else {
       setShowLesson(false);
     }
-  };
+  }, [lessonIndex, chapter.lessons.length]);
 
-  const goToPractice = () => {
+  const goToPractice = useCallback(() => {
     setShowLesson(false);
-  };
+  }, []);
 
-  const goToNext = () => {
+  const goToNext = useCallback(() => {
     if (questionIndex < chapterQuestions.length - 1) {
       const nextIndex = questionIndex + 1;
       const savedAnswer = answersMap[nextIndex];
@@ -2667,7 +2155,7 @@ function TrainingView({
         setIsCorrect(false);
       }
     }
-  };
+  }, [questionIndex, chapterQuestions.length, answersMap]);
 
   const handleAnswer = useCallback((answers: string[], correct: boolean) => {
     setUserAnswers(answers);
@@ -2708,7 +2196,7 @@ function TrainingView({
     }
   }, [currentQuestion, progress, setProgress, questionIndex, chapterQuestions.length, goToNext]);
 
-  const goToPrev = () => {
+  const goToPrev = useCallback(() => {
     if (questionIndex > 0) {
       const prevIndex = questionIndex - 1;
       const savedAnswer = answersMap[prevIndex];
@@ -2725,7 +2213,7 @@ function TrainingView({
         setIsCorrect(false);
       }
     }
-  };
+  }, [questionIndex, answersMap]);
 
   const toggleBookmark = useCallback(() => {
     const qId = currentQuestion.id;
@@ -2823,7 +2311,7 @@ function TrainingView({
           {questionIndex === chapterQuestions.length - 1 && showResult && (
             <div className={`mt-4 glass rounded-xl p-4 text-center animate-fadeIn ${isDarkMode ? '' : 'bg-white/60 border-slate-200'}`}>
               <Trophy className="w-10 h-10 text-yellow-400 mx-auto mb-3" />
-              <h3 className={`text-lg font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>🎉 章节完成！</h3>
+              <h3 className={`text-lg font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}><Trophy className="w-5 h-5 inline mr-1" />章节完成！</h3>
               <p className={`text-sm ${isDarkMode ? 'text-slate-400 mb-3' : 'text-slate-600 mb-3'}`}>
                 你已完成 {chapter.name} 的所有练习
               </p>
@@ -2839,10 +2327,10 @@ function TrainingView({
       ) : null}
     </div>
   );
-}
+});
 
 // Review View
-function ReviewView({
+const ReviewView = memo(function ReviewView({
   progress,
   setProgress,
   onBack,
@@ -2903,7 +2391,7 @@ function ReviewView({
     }
   }, [currentQuestion, progress, setProgress, questionIndex, wrongQuestions.length, onBack]);
 
-  const goToNext = () => {
+  const goToNext = useCallback(() => {
     if (questionIndex < wrongQuestions.length - 1) {
       setQuestionIndex(questionIndex + 1);
       setShowResult(false);
@@ -2911,7 +2399,7 @@ function ReviewView({
     } else {
       onBack();
     }
-  };
+  }, [questionIndex, wrongQuestions.length, onBack]);
 
   const toggleBookmark = useCallback(() => {
     const qId = currentQuestion.id;
@@ -2977,10 +2465,10 @@ function ReviewView({
       )}
     </div>
   );
-}
+});
 
 // Bookmarked View - 收藏列表
-function BookmarkedView({
+const BookmarkedView = memo(function BookmarkedView({
   progress,
   setProgress,
   onBack,
@@ -3027,21 +2515,21 @@ function BookmarkedView({
     }
   }, [questionIndex, bookmarkedQuestions.length]);
 
-  const goToNext = () => {
+  const goToNext = useCallback(() => {
     if (questionIndex < bookmarkedQuestions.length - 1) {
       setQuestionIndex(questionIndex + 1);
       setShowResult(false);
       setUserAnswers([]);
     }
-  };
+  }, [questionIndex]);
 
-  const goToPrev = () => {
+  const goToPrev = useCallback(() => {
     if (questionIndex > 0) {
       setQuestionIndex(questionIndex - 1);
       setShowResult(false);
       setUserAnswers([]);
     }
-  };
+  }, [questionIndex]);
 
   const toggleBookmark = useCallback(() => {
     const qId = currentQuestion.id;
@@ -3120,10 +2608,10 @@ function BookmarkedView({
       />
     </div>
   );
-}
+});
 
 // Projects List View
-function ProjectsListView({
+const ProjectsListView = memo(function ProjectsListView({
   onSelectProject,
   isDarkMode
 }: {
@@ -3218,7 +2706,7 @@ function ProjectsListView({
       </div>
     </div>
   );
-}
+});
 
 // Main App
 export function App() {
@@ -3274,12 +2762,8 @@ export function App() {
   useEffect(() => {
     if (isDarkMode) {
       document.body.classList.add('dark');
-      document.body.style.background = 'linear-gradient(135deg, #0a0f1a 0%, #111827 50%, #0a0f1a 100%)';
-      document.body.style.color = '#e2e8f0';
     } else {
       document.body.classList.remove('dark');
-      document.body.style.background = 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 50%, #f8fafc 100%)';
-      document.body.style.color = '#334155';
     }
     localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
   }, [isDarkMode]);
@@ -3376,19 +2860,16 @@ export function App() {
         {view === 'lab' && (
           <LabView onBack={() => setView('home')} isDarkMode={isDarkMode} />
         )}
-        {/* 动画演示已禁用 
-        {view === 'animation' && (
-          <AnimationDemoView onBack={() => setView('home')} />
-        )}
-        */}
         {view === 'typing' && (
-          <CodeTypingPractice />
+          <Suspense fallback={<div className="p-4 text-center text-slate-500">加载代码打字练习...</div>}>
+            <CodeTypingPractice />
+          </Suspense>
         )}
       </main>
 
       {view !== 'project' && (
         <footer className={`text-center py-8 text-sm ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
-          <p>用 ❤️ 打造 · C语言代码思维训练器</p>
+          <p>用 <Heart className="w-4 h-4 inline" /> 打造 · C语言代码思维训练器</p>
         </footer>
       )}
     </div>

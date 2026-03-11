@@ -53,7 +53,7 @@ export default function ProjectView({ project, onBack }: ProjectViewProps) {
       case 'architecture':
         return (
           <div className="bg-slate-800 rounded-lg p-4 font-mono text-sm">
-            <div className="text-green-400 mb-2">🏗️ 系统架构图</div>
+            <div className="text-green-400 mb-2">Building️ 系统架构图</div>
             <div className="text-slate-300 whitespace-pre leading-relaxed">
               {`┌─────────────────────────────────────────┐
 │              主线程 (Main Thread)        │
@@ -81,7 +81,7 @@ export default function ProjectView({ project, onBack }: ProjectViewProps) {
       case 'flow':
         return (
           <div className="bg-slate-800 rounded-lg p-4 font-mono text-sm">
-            <div className="text-blue-400 mb-2">🔄 流程图</div>
+            <div className="text-blue-400 mb-2">RefreshCcw 流程图</div>
             <div className="flex flex-col items-center gap-2">
               <div className="bg-blue-900/50 px-4 py-2 rounded text-blue-200">开始</div>
               <div className="text-slate-500">↓</div>
@@ -91,7 +91,7 @@ export default function ProjectView({ project, onBack }: ProjectViewProps) {
               <div className="text-slate-500">↓</div>
               <div className="bg-slate-700 px-4 py-2 rounded text-slate-200">listen()</div>
               <div className="text-slate-500">↓</div>
-              <div className="bg-yellow-900/50 px-4 py-2 rounded text-yellow-200">accept() ⏳ 阻塞等待</div>
+              <div className="bg-yellow-900/50 px-4 py-2 rounded text-yellow-200">accept() Hourglass 阻塞等待</div>
               <div className="text-slate-500">↓</div>
               <div className="bg-green-900/50 px-4 py-2 rounded text-green-200">创建线程处理</div>
               <div className="text-slate-500">↓ 循环</div>
@@ -102,7 +102,7 @@ export default function ProjectView({ project, onBack }: ProjectViewProps) {
       case 'memory':
         return (
           <div className="bg-slate-800 rounded-lg p-4 font-mono text-sm">
-            <div className="text-purple-400 mb-2">💾 内存布局图</div>
+            <div className="text-purple-400 mb-2">Save 内存布局图</div>
             <div className="text-slate-300">
               <div className="mb-2">环形缓冲区 (64KB):</div>
               <div className="flex flex-wrap gap-1 mb-2">
@@ -255,8 +255,8 @@ export default function ProjectView({ project, onBack }: ProjectViewProps) {
                 onClick={() => setShowExplanation(!showExplanation)}
                 className="w-full px-4 py-3 bg-slate-700/50 border-b border-slate-700 flex items-center justify-between hover:bg-slate-700 transition-colors"
               >
-                <span className="text-sm font-semibold text-slate-300">📖 详细解析</span>
-                <span className="text-slate-400">{showExplanation ? '▼' : '▶'}</span>
+                <span className="text-sm font-semibold text-slate-300">BookOpen 详细解析</span>
+                <span className="text-slate-400">{showExplanation ? '▼' : 'Play'}</span>
               </button>
               {showExplanation && (
                 <div className="p-4 space-y-4">
@@ -283,15 +283,15 @@ export default function ProjectView({ project, onBack }: ProjectViewProps) {
                 onClick={() => setShowInterviewTips(!showInterviewTips)}
                 className="w-full px-4 py-3 bg-slate-700/50 border-b border-slate-700 flex items-center justify-between hover:bg-slate-700 transition-colors"
               >
-                <span className="text-sm font-semibold text-yellow-400">💼 面试常问</span>
-                <span className="text-slate-400">{showInterviewTips ? '▼' : '▶'}</span>
+                <span className="text-sm font-semibold text-yellow-400">Briefcase 面试常问</span>
+                <span className="text-slate-400">{showInterviewTips ? '▼' : 'Play'}</span>
               </button>
               {showInterviewTips && (
                 <div className="p-4">
                   <ul className="space-y-2">
                     {currentFragment.interviewTips.map((tip, i) => (
                       <li key={i} className="text-sm text-slate-300 flex items-start gap-2">
-                        <span className="text-yellow-500 mt-1">💡</span>
+                        <span className="text-yellow-500 mt-1">Lightbulb</span>
                         <span>{tip}</span>
                       </li>
                     ))}
@@ -306,8 +306,8 @@ export default function ProjectView({ project, onBack }: ProjectViewProps) {
                 onClick={() => setShowPractice(!showPractice)}
                 className="w-full px-4 py-3 bg-slate-700/50 border-b border-slate-700 flex items-center justify-between hover:bg-slate-700 transition-colors"
               >
-                <span className="text-sm font-semibold text-blue-400">✏️ 动手练习</span>
-                <span className="text-slate-400">{showPractice ? '▼' : '▶'}</span>
+                <span className="text-sm font-semibold text-blue-400">Pencil️ 动手练习</span>
+                <span className="text-slate-400">{showPractice ? '▼' : 'Play'}</span>
               </button>
               {showPractice && (
                 <div className="p-4 space-y-3">
@@ -318,7 +318,7 @@ export default function ProjectView({ project, onBack }: ProjectViewProps) {
                         className="w-full px-4 py-3 bg-slate-700/30 flex items-center justify-between hover:bg-slate-700/50 transition-colors"
                       >
                         <span className="text-sm text-slate-200 font-medium">Q{i + 1}: {q.question}</span>
-                        <span className="text-slate-400">{expandedQuestion === i ? '▼' : '▶'}</span>
+                        <span className="text-slate-400">{expandedQuestion === i ? '▼' : 'Play'}</span>
                       </button>
                       {expandedQuestion === i && (
                         <div className="px-4 py-3 bg-slate-700/20">

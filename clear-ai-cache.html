@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>清除 AI 配置缓存</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 600px;
+      margin: 50px auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+    .container {
+      background: white;
+      border-radius: 10px;
+      padding: 30px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 30px;
+    }
+    .info-box {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+    .info-box h3 {
+      margin-top: 0;
+      color: #856404;
+    }
+    .info-box ul {
+      margin: 10px 0;
+      padding-left: 20px;
+    }
+    .info-box li {
+      margin: 5px 0;
+      color: #856404;
+    }
+    .success-box {
+      background: #d4edda;
+      border-left: 4px solid #28a745;
+      padding: 15px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .success-box h3 {
+      margin-top: 0;
+      color: #155724;
+    }
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 30px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      width: 100%;
+      margin-top: 10px;
+    }
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+    .step {
+      background: #e7f3ff;
+      border-left: 4px solid #2196F3;
+      padding: 15px;
+      margin-bottom: 15px;
+    }
+    .step h4 {
+      margin-top: 0;
+      color: #1976D2;
+    }
+    .step p {
+      margin: 5px 0;
+      color: #1565C0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔧 清除 AI 配置缓存</h1>
+    <p class="subtitle">解决 401 认证错误问题</p>
+
+    <div class="info-box">
+      <h3>❓ 为什么要清除缓存？</h3>
+      <p>之前的配置可能保存了错误的 API 信息：</p>
+      <ul>
+        <li>错误的 Base URL</li>
+        <li>错误的模型名称</li>
+        <li>错误的 API Key</li>
+      </ul>
+      <p>清除缓存后，系统会自动加载最新的正确配置。</p>
+    </div>
+
+    <div id="successBox" class="success-box">
+      <h3>✅ 清除成功！</h3>
+      <p>AI 配置缓存已清除完成。</p>
+      <p>请返回主应用页面，刷新后即可使用正确的配置。</p>
+    </div>
+
+    <button onclick="clearCache()">🗑️ 清除缓存并重新加载配置</button>
+
+    <div style="margin-top: 30px;">
+      <div class="step">
+        <h4>步骤 1: 点击上面的按钮</h4>
+        <p>清除 localStorage 中的旧 AI 配置</p>
+      </div>
+      <div class="step">
+        <h4>步骤 2: 返回主应用</h4>
+        <p>打开 http://localhost:5173</p>
+      </div>
+      <div class="step">
+        <h4>步骤 3: 刷新页面</h4>
+        <p>按 Ctrl+F5 强制刷新，清除浏览器缓存</p>
+      </div>
+      <div class="step">
+        <h4>步骤 4: 测试连接</h4>
+        <p>打开 AI 配置面板，点击"测试连接"验证</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function clearCache() {
+      try {
+        // 清除 AI 配置
+        localStorage.removeItem('ai_tutor_config');
+        
+        // 显示成功消息
+        document.getElementById('successBox').style.display = 'block';
+        
+        // 禁用按钮
+        const btn = document.querySelector('button');
+        btn.disabled = true;
+        btn.textContent = '✅ 已清除';
+        btn.style.background = '#28a745';
+        
+        console.log('AI 配置缓存已清除');
+        console.log('请刷新主应用页面以加载新配置');
+      } catch (error) {
+        alert('清除失败：' + error.message);
+      }
+    }
+  </script>
+</body>
+</html>

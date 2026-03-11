@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>强制刷新配置</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      max-width: 600px;
+      margin: 50px auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+    }
+    h1 { color: #333; }
+    .btn {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      margin: 10px 5px;
+      width: 100%;
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+    .success {
+      background: #d4edda;
+      color: #155724;
+      padding: 15px;
+      border-radius: 5px;
+      margin: 20px 0;
+      display: none;
+    }
+    .info {
+      background: #e7f3ff;
+      color: #004085;
+      padding: 15px;
+      border-radius: 5px;
+      margin: 20px 0;
+    }
+    pre {
+      background: #f8f8f8;
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔄 强制刷新 AI 配置</h1>
+    
+    <div class="info">
+      <h3>为什么要强制刷新？</h3>
+      <p>localStorage 中可能保存了旧的错误配置，需要强制清除并重新加载正确的配置。</p>
+    </div>
+
+    <button class="btn" onclick="forceRefresh()">🔧 强制刷新配置</button>
+    <button class="btn" onclick="openApp()">🚀 打开主应用</button>
+
+    <div id="result" class="success"></div>
+
+    <div style="margin-top: 30px;">
+      <h3>📋 当前配置:</h3>
+      <pre id="configDisplay">加载中...</pre>
+    </div>
+  </div>
+
+  <script>
+    function forceRefresh() {
+      try {
+        // 清除旧配置
+        localStorage.removeItem('ai_tutor_config');
+        
+        // 重新加载新配置
+        const newConfig = [
+          {
+            id: 'deepseek',
+            name: 'DeepSeek',
+            apiKey: '',
+            baseUrl: 'https://api.deepseek.com/v1',
+            model: 'deepseek-chat',
+            enabled: false,
+            isDefault: false
+          },
+          {
+            id: 'qwen',
+            name: '阿里云百炼 Qwen',
+            apiKey: '',  // 空密钥，需要用户自行配置
+            baseUrl: 'https://coding.dashscope.aliyuncs.com/v1',
+            model: 'qwen3.5-plus',
+            enabled: true,
+            isDefault: true
+          }
+        ];
+        
+        localStorage.setItem('ai_tutor_config', JSON.stringify(newConfig));
+        
+        const resultDiv = document.getElementById('result');
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `
+          <h3>✅ 配置已强制刷新！</h3>
+          <p><strong>Qwen API Key:</strong> 空 (需自行配置)</p>
+          <p><strong>Base URL:</strong> https://coding.dashscope.aliyuncs.com/v1</p>
+          <p><strong>模型:</strong> qwen3.5-plus</p>
+          <p><strong>状态:</strong> 已启用 ✅</p>
+          <p><strong>默认:</strong> 是 ✅</p>
+          <p style="margin-top: 15px;">请在主应用设置页面配置 API Key，然后刷新页面！</p>
+        `;
+        
+        // 更新配置显示
+        updateConfigDisplay();
+        
+      } catch (error) {
+        alert('刷新失败：' + error.message);
+      }
+    }
+
+    function updateConfigDisplay() {
+      try {
+        const config = localStorage.getItem('ai_tutor_config');
+        if (config) {
+          const parsed = JSON.parse(config);
+          document.getElementById('configDisplay').textContent = 
+            JSON.stringify(parsed, null, 2);
+        } else {
+          document.getElementById('configDisplay').textContent = '没有配置';
+        }
+      } catch (e) {
+        document.getElementById('configDisplay').textContent = '读取失败：' + e.message;
+      }
+    }
+
+    function openApp() {
+      // 在新窗口打开主应用
+      window.open('http://localhost:5173', '_blank');
+      // 提示用户刷新
+      alert('主应用已打开！\n\n请按 Ctrl+F5 强制刷新页面，然后测试 AI 连接！');
+    }
+
+    // 页面加载时显示当前配置
+    updateConfigDisplay();
+  </script>
+</body>
+</html>

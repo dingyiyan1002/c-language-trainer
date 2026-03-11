@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试</title>
+</head>
+<body>
+    <h1 style="color: #fff; background: #0a0e17; padding: 20px;">✅ 如果你看到这个页面，说明 Vite 服务器正常！</h1>
+    <p style="color: #8b949e; padding: 0 20px;">当前端口：<span id="port"></span></p>
+    <script>
+        document.getElementById('port').textContent = window.location.port || '80';
+    </script>
+</body>
+</html>

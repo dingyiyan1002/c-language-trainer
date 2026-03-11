@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { memo, useState, useCallback, useEffect } from 'react';
 
 // COW (Copy-on-Write) 内存可视化 - 深度交互组件
 // 理解：fork时的页表复制、写时复制机制
@@ -24,7 +24,7 @@ type Step = {
   pages: Page[];
 };
 
-export function COWMemoryViz() {
+export const COWMemoryViz = memo(function COWMemoryViz() {
   const [step, setStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedPage, setSelectedPage] = useState<number | null>(null);
@@ -135,7 +135,7 @@ export function COWMemoryViz() {
       {/* 标题 */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
-          <h3 className="text-xl font-bold text-white mb-1">🔄 Copy-on-Write 可视化</h3>
+          <h3 className="text-xl font-bold text-white mb-1">RefreshCcw Copy-on-Write 可视化</h3>
           <p className="text-slate-400 text-sm">理解 fork() 的写时复制机制</p>
         </div>
         <div className="flex gap-2">
@@ -150,7 +150,7 @@ export function COWMemoryViz() {
             onClick={() => setIsPlaying(!isPlaying)}
             className="px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium"
           >
-            {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+            {isPlaying ? 'Pause 暂停' : 'Play 播放'}
           </button>
           <button
             onClick={() => setStep(Math.min(steps.length - 1, step + 1))}
@@ -319,7 +319,7 @@ export function COWMemoryViz() {
       {/* 教学提示 */}
       <div className="mt-6 grid sm:grid-cols-2 gap-4">
         <div className="bg-emerald-900/20 rounded-lg p-4 border border-emerald-500/20">
-          <h4 className="text-sm font-bold text-emerald-400 mb-2">💡 COW 的优势</h4>
+          <h4 className="text-sm font-bold text-emerald-400 mb-2">Lightbulb COW 的优势</h4>
           <ul className="text-xs text-emerald-200 space-y-1">
             <li>• fork() 时不复制整个地址空间，只复制页表</li>
             <li>• 共享只读页面（如代码段），节省内存</li>
@@ -328,7 +328,7 @@ export function COWMemoryViz() {
           </ul>
         </div>
         <div className="bg-amber-900/20 rounded-lg p-4 border border-amber-500/20">
-          <h4 className="text-sm font-bold text-amber-400 mb-2">⚠️ 注意事项</h4>
+          <h4 className="text-sm font-bold text-amber-400 mb-2">AlertTriangle️ 注意事项</h4>
           <ul className="text-xs text-amber-200 space-y-1">
             <li>• 写入共享页触发缺页中断(Page Fault)</li>
             <li>• 内核分配新物理页，复制数据，更新页表</li>
@@ -339,4 +339,6 @@ export function COWMemoryViz() {
       </div>
     </div>
   );
-}
+});
+
+export default COWMemoryViz;

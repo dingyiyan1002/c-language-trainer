@@ -8,7 +8,7 @@ export const embeddedChapters: Chapter[] = [
   {
     id: 'level1',
     name: 'Level 1 入门',
-    icon: '🌱',
+    icon: 'Sprout',
     description: 'C语言基础：printf、变量、运算符、条件、循环、函数 - 工作第一周就会用到',
     questionCount: 80,
     lessons: [
@@ -140,7 +140,7 @@ export const embeddedChapters: Chapter[] = [
   {
     id: 'level2',
     name: 'Level 2 基础',
-    icon: '🌿',
+    icon: 'Leaf',
     description: '指针、数组、结构体、位操作 - 嵌入式核心技能',
     questionCount: 100,
     lessons: [
@@ -228,7 +228,7 @@ export const embeddedChapters: Chapter[] = [
   {
     id: 'level3',
     name: 'Level 3 进阶',
-    icon: '🌳',
+    icon: 'Tree',
     description: 'Linux应用编程核心：文件IO、进程线程、网络编程、信号处理',
     questionCount: 150,
     lessons: [
@@ -311,7 +311,7 @@ export const embeddedChapters: Chapter[] = [
   {
     id: 'level4',
     name: 'Level 4 困难',
-    icon: '🔥',
+    icon: 'Flame',
     description: '调试复杂问题：内存泄漏、死锁、竞态条件、性能优化',
     questionCount: 120,
     lessons: [
@@ -383,7 +383,7 @@ export const embeddedChapters: Chapter[] = [
   {
     id: 'level5',
     name: 'Level 5 专家',
-    icon: '👑',
+    icon: 'Crown',
     description: '面试压轴题：架构设计、内核原理、疑难杂症、系统调优',
     questionCount: 50,
     lessons: [

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Debug Console</title>
+    <style>
+        body {
+            background: #0a0f1a;
+            color: #e2e8f0;
+            font-family: 'JetBrains Mono', monospace;
+            padding: 20px;
+            margin: 0;
+        }
+        .log {
+            padding: 8px 12px;
+            margin: 4px 0;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .info { background: rgba(59, 130, 246, 0.2); }
+        .success { background: rgba(16, 185, 129, 0.2); }
+        .error { background: rgba(239, 68, 68, 0.2); }
+        .warn { background: rgba(245, 158, 11, 0.2); }
+        #container { max-width: 1200px; margin: 0 auto; }
+        pre { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>C 语言训练器 - Debug 控制台</h1>
+        <div id="logs"></div>
+    </div>
+
+    <script type="module">
+        const logsDiv = document.getElementById('logs');
+
+        function log(msg, type = 'info', data = null) {
+            const div = document.createElement('div');
+            div.className = `log ${type}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logsDiv.appendChild(div);
+            if (data) {
+                const pre = document.createElement('pre');
+                pre.textContent = JSON.stringify(data, null, 2).slice(0, 500);
+                logsDiv.appendChild(pre);
+            }
+            console.log(msg, data || '');
+        }
+
+        log('开始加载测试...', 'info');
+
+        // 测试 React 加载
+        try {
+            log('正在加载 React...', 'info');
+            const reactModule = await import('http://localhost:5187/node_modules/.vite/deps/react.js?v=11dea6bd');
+            log('React 加载成功', 'success', { useState: typeof reactModule.useState, createElement: typeof reactModule.createElement });
+        } catch(e) {
+            log('React 加载失败：' + e.message, 'error');
+        }
+
+        // 测试 lessons 加载
+        try {
+            log('正在加载 lessons.ts...', 'info');
+            const t0 = performance.now();
+            const lessonsModule = await import('http://localhost:5187/src/data/lessons.ts?t=' + Date.now());
+            const t1 = performance.now();
+            log(`lessons.ts 加载成功 (${(t1-t0).toFixed(2)}ms)`, 'success', {
+                hasChapters: !!lessonsModule.chapters,
+                hasQuestions: !!lessonsModule.questions,
+                hasGetQuestionsByChapter: typeof lessonsModule.getQuestionsByChapter,
+                chaptersLength: lessonsModule.chapters?.length,
+                questionsProxy: typeof lessonsModule.questions
+            });
+
+            // 测试访问 chapters
+            try {
+                log('测试访问 chapters...', 'info');
+                const chapters = lessonsModule.chapters;
+                log(`chapters 访问成功，数量：${chapters?.length}`, 'success');
+            } catch(e) {
+                log('chapters 访问失败：' + e.message, 'error');
+            }
+
+            // 测试访问 questions (这会触发懒加载)
+            try {
+                log('测试访问 questions.length...', 'warn');
+                const t2 = performance.now();
+                const qLen = lessonsModule.questions?.length;
+                const t3 = performance.now();
+                log(`questions.length = ${qLen} (${(t3-t2).toFixed(2)}ms)`, 'success');
+            } catch(e) {
+                log('questions 访问失败：' + e.message, 'error');
+            }
+
+            // 测试 getQuestionsByChapter
+            try {
+                log('测试 getQuestionsByChapter("basics-test")...', 'warn');
+                const t4 = performance.now();
+                const basicsQuestions = lessonsModule.getQuestionsByChapter('basics-test');
+                const t5 = performance.now();
+                log(`getQuestionsByChapter 成功，题目数量：${basicsQuestions?.length} (${(t5-t4).toFixed(2)}ms)`, 'success');
+            } catch(e) {
+                log('getQuestionsByChapter 失败：' + e.message, 'error');
+            }
+
+        } catch(e) {
+            log('lessons.ts 加载失败：' + e.message, 'error');
+        }
+
+        // 测试 App 加载
+        try {
+            log('正在加载 App.tsx...', 'info');
+            const t0 = performance.now();
+            const appModule = await import('http://localhost:5187/src/App.tsx');
+            const t1 = performance.now();
+            log(`App.tsx 加载成功 (${(t1-t0).toFixed(2)}ms)`, 'success', {
+                hasApp: typeof appModule.App === 'function'
+            });
+        } catch(e) {
+            log('App.tsx 加载失败：' + e.message, 'error');
+        }
+
+        log('测试完成', 'info');
+    </script>
+</body>
+</html>

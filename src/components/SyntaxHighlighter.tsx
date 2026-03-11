@@ -1,4 +1,6 @@
 
+import { memo, useMemo } from 'react';
+
 export type TokenType =
   | "plain"
   | "keyword"
@@ -259,8 +261,8 @@ function classFor(type: TokenType): string {
   }
 }
 
-export function HighlightedLine({ line }: { line: string }) {
-  const tokens = tokenizeCLine(line);
+export const HighlightedLine = memo(function HighlightedLine({ line }: { line: string }) {
+  const tokens = useMemo(() => tokenizeCLine(line), [line]);
   return (
     <>
       {tokens.map((t, idx) => (
@@ -270,10 +272,10 @@ export function HighlightedLine({ line }: { line: string }) {
       ))}
     </>
   );
-}
+});
 
-export function HighlightedCode({ code }: { code: string }) {
-  const lines = code.split("\n");
+export const HighlightedCode = memo(function HighlightedCode({ code }: { code: string }) {
+  const lines = useMemo(() => code.split("\n"), [code]);
   return (
     <div className="code-wrapper">
       {lines.map((line, idx) => (
@@ -286,7 +288,7 @@ export function HighlightedCode({ code }: { code: string }) {
       ))}
     </div>
   );
-}
+});
 
 // 默认导出，用于ProjectView
 export default function SyntaxHighlighter({ code }: { code: string }) {

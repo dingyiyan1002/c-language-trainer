@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   RotateCcw, Play, Pause, Trophy, Clock, Zap,
   AlertCircle, CheckCircle2, ChevronDown, Keyboard,
@@ -564,7 +564,7 @@ interface CodeTypingPracticeProps {
   memorizeDuration?: number;
 }
 
-export function CodeTypingPractice({
+const CodeTypingPractice = memo(function CodeTypingPractice({
   onClose,
   initialCode,
   initialCodeName = '章节代码',
@@ -890,7 +890,7 @@ export function CodeTypingPractice({
             onClick={() => setShowHistory(true)}
             className="flex items-center gap-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-300"
           >
-            📊 历史记录
+            BarChart3 历史记录
           </button>
           <div className="relative">
             <button
@@ -902,7 +902,7 @@ export function CodeTypingPractice({
               }}
               className="flex items-center gap-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-300"
             >
-              {soundEnabled ? '🔊' : '🔇'} 音效
+              {soundEnabled ? 'Volume2' : 'VolumeX'} 音效
             </button>
 
             {showSoundSettings && (
@@ -923,10 +923,10 @@ export function CodeTypingPractice({
                       <span className="text-xs text-slate-400 block mb-1.5">音色</span>
                       <div className="grid grid-cols-2 gap-1.5">
                         {[
-                          { id: 'mechanical' as const, name: '机械键盘', emoji: '⌨️' },
-                          { id: 'typewriter' as const, name: '打字机', emoji: '🖨️' },
-                          { id: 'soft' as const, name: '轻柔', emoji: '🔔' },
-                          { id: 'bubble' as const, name: '气泡', emoji: '💧' },
+                          { id: 'mechanical' as const, name: '机械键盘', emoji: 'Keyboard️' },
+                          { id: 'typewriter' as const, name: '打字机', emoji: 'Printer️' },
+                          { id: 'soft' as const, name: '轻柔', emoji: 'Bell' },
+                          { id: 'bubble' as const, name: '气泡', emoji: 'Droplet' },
                         ].map(s => (
                           <button
                             key={s.id}
@@ -951,7 +951,7 @@ export function CodeTypingPractice({
                     <div>
                       <span className="text-xs text-slate-400 block mb-1.5">音量</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500">🔈</span>
+                        <span className="text-xs text-slate-500">Volume</span>
                         <input
                           type="range"
                           min="0"
@@ -960,7 +960,7 @@ export function CodeTypingPractice({
                           onChange={(e) => setSoundVolume(Number(e.target.value) / 100)}
                           className="flex-1 accent-cyan-500 h-1"
                         />
-                        <span className="text-xs text-slate-500">🔊</span>
+                        <span className="text-xs text-slate-500">Volume2</span>
                       </div>
                     </div>
                   </>
@@ -1070,7 +1070,7 @@ export function CodeTypingPractice({
               onClick={() => setShowCustomInput(!showCustomInput)}
               className="w-full mb-4 p-3 border-2 border-dashed border-slate-600 hover:border-cyan-500 rounded-xl text-sm text-slate-400 hover:text-cyan-400 transition-colors"
             >
-              📋 粘贴自定义代码
+              Clipboard 粘贴自定义代码
             </button>
 
             {showCustomInput && (
@@ -1106,7 +1106,7 @@ export function CodeTypingPractice({
                       {preset.name}
                     </span>
                     <div className="flex items-center gap-2">
-                      {pb && <span className="text-xs text-amber-400">🏆{pb.cpm}</span>}
+                      {pb && <span className="text-xs text-amber-400">Trophy{pb.cpm}</span>}
                       <span className={`text-xs px-2 py-0.5 rounded-full ${
                         preset.difficulty === '入门' ? 'bg-green-500/10 text-green-400' :
                         preset.difficulty === '基础' ? 'bg-blue-500/10 text-blue-400' :
@@ -1179,7 +1179,7 @@ export function CodeTypingPractice({
               </div>
             ) : !isStarted ? (
               <div className="text-center text-slate-500 text-sm mb-4 py-2 bg-slate-800/50 rounded-lg">
-                💡 点击此区域，然后开始打字（请切换到英文输入法）
+                Lightbulb 点击此区域，然后开始打字（请切换到英文输入法）
               </div>
             ) : null}
             <pre
@@ -1198,7 +1198,7 @@ export function CodeTypingPractice({
           <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-slate-700">
               <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                📊 练习历史
+                BarChart3 练习历史
               </h2>
               <button onClick={() => setShowHistory(false)} className="text-slate-400 hover:text-white">
                 ✕
@@ -1267,4 +1267,6 @@ export function CodeTypingPractice({
       )}
     </div>
   );
-}
+});
+
+export default CodeTypingPractice;

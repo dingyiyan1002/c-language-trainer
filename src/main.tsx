@@ -4,6 +4,27 @@ import { ErrorBoundary } from "./components/layout/ErrorBoundary";
 import { App } from "./App";
 import "./index.css";
 
+// 性能监控 - 仅在开发环境启用
+if (import.meta.env.DEV) {
+  import('web-vitals').then(({ getCLS, getFID, getFCP, getLCP, getTTFB, INP }) => {
+    const reportMetric = (metric: any) => {
+      console.log(`[Web Vitals] ${metric.name}:`, {
+        value: metric.value,
+        rating: metric.rating,
+        delta: metric.delta,
+        navigationType: metric.navigationType,
+      });
+    };
+
+    getCLS(reportMetric);
+    getFID(reportMetric);
+    getFCP(reportMetric);
+    getLCP(reportMetric);
+    getTTFB(reportMetric);
+    INP?.(reportMetric);
+  });
+}
+
 // 全局错误监听 - 捕获未处理的 Promise 拒绝
 window.addEventListener('unhandledrejection', (event) => {
   console.error('[Global] 未处理的 Promise 拒绝:', event.reason);

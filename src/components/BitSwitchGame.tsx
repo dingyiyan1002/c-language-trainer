@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 
 // 位运算开关箱 - 微型交互组件
 // 8个开关，实时显示二进制和十六进制值
 
-export function BitSwitchGame() {
+export const BitSwitchGame = memo(function BitSwitchGame() {
   const [bits, setBits] = useState([0, 0, 0, 0, 0, 0, 0, 0]);
 
   const toggleBit = (index: number) => {
@@ -24,7 +24,7 @@ export function BitSwitchGame() {
     <div className="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 rounded-2xl p-6 border border-purple-500/30 shadow-2xl max-w-md mx-auto">
       {/* 标题 */}
       <div className="text-center mb-6">
-        <h3 className="text-xl font-bold text-white mb-1">🔌 位运算开关箱</h3>
+        <h3 className="text-xl font-bold text-white mb-1">Plug 位运算开关箱</h3>
         <p className="text-purple-300 text-sm">点击开关，观察二进制与十六进制的转换</p>
       </div>
 
@@ -115,11 +115,11 @@ export function BitSwitchGame() {
       {/* 教学提示 */}
       <div className="mt-4 p-3 bg-purple-900/30 rounded-lg border border-purple-500/20">
         <div className="text-xs text-purple-200">
-          <span className="font-bold">💡 提示：</span>
+          <span className="font-bold">Lightbulb 提示：</span>
           每个开关代表一个二进制位。开启开关(绿色)表示该位为1。
           8个位组成1个字节(Byte)，范围是 0-255 (0x00-0xFF)。
         </div>
       </div>
     </div>
   );
-}
+});

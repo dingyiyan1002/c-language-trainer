@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { DashboardLayout } from './DashboardLayout';
-import { VisualizationFactory } from './VisualizationFactory';
 import { Code2, Terminal, Bug, Brain } from 'lucide-react';
 
 // ============================================
@@ -430,7 +429,7 @@ printf("flags = %d\\n", h->flags); // 输出: 255`}</code>
           onClick={() => setIsDarkMode(!isDarkMode)}
           className="theme-btn"
         >
-          {isDarkMode ? '☀️ 浅色模式' : '🌙 深色模式'}
+          {isDarkMode ? 'Sun️ 浅色模式' : 'Moon 深色模式'}
         </button>
       </div>
 
@@ -442,10 +441,9 @@ printf("flags = %d\\n", h->flags); // 输出: 255`}</code>
         isDarkMode={isDarkMode}
         centerContent={centerContent}
         leftContent={
-          <VisualizationFactory 
-            data={pointerCastViz} 
-            isDarkMode={isDarkMode} 
-          />
+          <div className="visualization-placeholder">
+            <p>动画演示功能已移除</p>
+          </div>
         }
         rightContent={rightContent}
       />

@@ -163,14 +163,14 @@ export function useAchievements() {
 }
 
 export const ACHIEVEMENTS = {
-  FIRST_CORRECT: { id: 'first_correct', name: '🎯 初次成功', description: '答对第一道题' },
-  STREAK_5: { id: 'streak_5', name: '🔥 五连对', description: '连续答对5道题' },
-  STREAK_10: { id: 'streak_10', name: '⚡ 十连对', description: '连续答对10道题' },
-  STREAK_20: { id: 'streak_20', name: '🌟 二十连对', description: '连续答对20道题' },
-  COMPLETE_CHAPTER: { id: 'complete_chapter', name: '📚 章节完成', description: '完成一个章节' },
-  SPEED_DEMON: { id: 'speed_demon', name: '⚡ 速度达人', description: '10秒内答对题目' },
-  PERFECT_CHAPTER: { id: 'perfect_chapter', name: '💎 完美章节', description: '章节全对' },
-  POINTER_MASTER: { id: 'pointer_master', name: '👆 指针大师', description: '完成所有指针题目' },
-  MEMORY_EXPERT: { id: 'memory_expert', name: '🧠 内存专家', description: '完成所有内存题目' },
-  LINUX_PRO: { id: 'linux_pro', name: '🐧 Linux专家', description: '完成所有Linux题目' },
+  FIRST_CORRECT: { id: 'first_correct', name: 'Target 初次成功', description: '答对第一道题' },
+  STREAK_5: { id: 'streak_5', name: 'Flame 五连对', description: '连续答对5道题' },
+  STREAK_10: { id: 'streak_10', name: 'Zap 十连对', description: '连续答对10道题' },
+  STREAK_20: { id: 'streak_20', name: 'Star 二十连对', description: '连续答对20道题' },
+  COMPLETE_CHAPTER: { id: 'complete_chapter', name: 'BookOpen 章节完成', description: '完成一个章节' },
+  SPEED_DEMON: { id: 'speed_demon', name: 'Zap 速度达人', description: '10秒内答对题目' },
+  PERFECT_CHAPTER: { id: 'perfect_chapter', name: 'Gem 完美章节', description: '章节全对' },
+  POINTER_MASTER: { id: 'pointer_master', name: 'Finger 指针大师', description: '完成所有指针题目' },
+  MEMORY_EXPERT: { id: 'memory_expert', name: 'Brain 内存专家', description: '完成所有内存题目' },
+  LINUX_PRO: { id: 'linux_pro', name: 'Bird Linux专家', description: '完成所有Linux题目' },
 };

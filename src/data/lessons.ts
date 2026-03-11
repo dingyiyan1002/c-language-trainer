@@ -76,7 +76,7 @@ export const chapters: Chapter[] = [
   {
     id: 'basics-test',
     name: '基础入门',
-    icon: '📖',
+    icon: 'BookOpen',
     description: 'C语言基础知识选择题 - 零基础入门，查漏补缺',
     questionCount: 178,
     mode: 'practice',
@@ -400,7 +400,7 @@ int result = func_ptr(3, 4);
   {
     id: 'level1',
     name: 'Level 1 入门真题',
-    icon: '🎯',
+    icon: 'Target',
     description: 'C语言基础：printf、变量、运算符、条件、循环、函数、数组、宏、字符串、作用域 - 工作第一周就会用到',
     questionCount: 80,
     mode: 'real',
@@ -495,7 +495,7 @@ int result = func_ptr(3, 4);
   {
     id: 'level2',
     name: 'Level 2 进阶真题',
-    icon: '🎯',
+    icon: 'Target',
     description: '指针基础、结构体、联合体、枚举进阶、函数指针、多文件编程 - 工作第一个月必备',
     questionCount: 100,
     mode: 'real',
@@ -582,7 +582,7 @@ int result = func_ptr(3, 4);
   {
     id: 'level3',
     name: 'Level 3 核心真题',
-    icon: '🎯',
+    icon: 'Target',
     description: '内存管理、文件操作、位操作进阶、预处理进阶、复杂声明 - 工作三个月核心技能',
     questionCount: 150,
     mode: 'real',
@@ -658,7 +658,7 @@ int result = func_ptr(3, 4);
   {
     id: 'level4',
     name: 'Level 4 高级真题',
-    icon: '🎯',
+    icon: 'Target',
     description: '多线程编程、进程通信、网络编程、信号处理、高级指针 - 工作半年进阶技能',
     questionCount: 120,
     mode: 'real',
@@ -735,7 +735,7 @@ int result = func_ptr(3, 4);
   {
     id: 'level5',
     name: 'Level 5 专家真题',
-    icon: '🎯',
+    icon: 'Target',
     description: '内核编程、驱动开发、性能优化、安全编程、架构设计 - 资深工程师必备',
     questionCount: 50,
     mode: 'real',
@@ -810,7 +810,7 @@ int result = func_ptr(3, 4);
   {
     id: 'interview',
     name: '面试专题',
-    icon: '💼',
+    icon: 'Briefcase',
     description: '面试常考的手写代码、系统设计、Bug修复、性能优化、概念深度题',
     questionCount: 30,
     mode: 'practice',
@@ -925,7 +925,7 @@ int result = func_ptr(3, 4);
   {
     id: 'basics',
     name: '基础语法入门',
-    icon: '🌱',
+    icon: 'Sprout',
     description: '从Hello World开始，掌握C语言基本结构',
     questionCount: 16,
     mode: 'practice',
@@ -971,7 +971,7 @@ printf("换行\\n");       // \\n表示换行
   {
     id: 'variables',
     name: '变量与数据类型',
-    icon: '📦',
+    icon: 'Package',
     description: '学会声明变量，理解不同数据类型',
     questionCount: 17,
     mode: 'practice',
@@ -1018,7 +1018,7 @@ printf("%d", num);     // 输出整数
   {
     id: 'operators',
     name: '运算符与表达式',
-    icon: '➕',
+    icon: 'Plus',
     description: '掌握各类运算符，理解表达式求值',
     questionCount: 12,
     mode: 'practice',
@@ -1064,7 +1064,7 @@ a++  // 先用后加：b = a++; (b得旧值)
   {
     id: 'control',
     name: '控制流语句',
-    icon: '🔀',
+    icon: 'Shuffle',
     description: '条件判断、循环控制，程序的核心逻辑',
     questionCount: 17,
     mode: 'practice',
@@ -1134,7 +1134,7 @@ do {
   {
     id: 'functions',
     name: '函数',
-    icon: '⚙️',
+    icon: 'Settings️',
     description: '代码复用的核心，理解函数调用机制',
     questionCount: 11,
     mode: 'practice',
@@ -1183,7 +1183,7 @@ change(a);
   {
     id: 'arrays',
     name: '数组',
-    icon: '📊',
+    icon: 'BarChart3',
     description: '批量存储同类型数据，理解内存布局',
     questionCount: 11,
     mode: 'practice',
@@ -1229,7 +1229,7 @@ sizeof(str);  // 返回6（含\\0）
   {
     id: 'pointers',
     name: '指针陷阱',
-    icon: '👆',
+    icon: 'Finger',
     description: '指针是C的灵魂，也是最大的坑',
     questionCount: 16,
     mode: 'practice',
@@ -1280,7 +1280,7 @@ free(p);
   {
     id: 'memory',
     name: '内存安全',
-    icon: '🛡️',
+    icon: 'Shield️',
     description: '理解内存管理，避免内存泄漏和溢出',
     questionCount: 8,
     mode: 'practice',
@@ -1378,13 +1378,13 @@ free(p);
 
 **经典错误：返回局部变量地址**
 \`\`\`c
-// ❌ 错误
+// XCircle 错误
 int *bad() {
     int x = 10;   // 栈变量
     return &x;    // 返回后x销毁！
 }
 
-// ✅ 正确
+// CheckCircle 正确
 int *good() {
     static int x = 10;  // 静态变量
     return &x;
@@ -1400,24 +1400,24 @@ int *good() {
         content: `**数组越界**：
 \`\`\`c
 int arr[5];
-arr[5] = 1;   // ❌ 越界！索引0-4
+arr[5] = 1;   // XCircle 越界！索引0-4
 \`\`\`
 
 **字符串溢出**：
 \`\`\`c
 char buf[10];
-strcpy(buf, "Hello World!");  // ❌ 12>10
+strcpy(buf, "Hello World!");  // XCircle 12>10
 
-// ✅ 安全
+// CheckCircle 安全
 snprintf(buf, sizeof(buf), "%s", "Hello World!");
 \`\`\`
 
 **栈溢出**：
 \`\`\`c
-// ❌ 栈上分配大数组
+// XCircle 栈上分配大数组
 void bad() { int big[10000000]; }
 
-// ✅ 堆上分配
+// CheckCircle 堆上分配
 void good() { 
     int *big = malloc(10000000 * sizeof(int));
     free(big);
@@ -1434,19 +1434,19 @@ void good() {
 \`\`\`c
 int *p = malloc(4);
 free(p);
-free(p);   // ❌ 崩溃！
+free(p);   // XCircle 崩溃！
 \`\`\`
 
 **解决**：free后置NULL
 \`\`\`c
 free(p);
-p = NULL;  // ✅ 再free(NULL)安全
+p = NULL;  // CheckCircle 再free(NULL)安全
 \`\`\`
 
 **使用已释放内存**：
 \`\`\`c
 free(p);
-printf("%d", *p);  // ❌ 未定义行为
+printf("%d", *p);  // XCircle 未定义行为
 \`\`\`
 
 **检测工具**：
@@ -1463,7 +1463,7 @@ gcc -fsanitize=address program.c
   {
     id: 'linux',
     name: 'Linux系统编程',
-    icon: '🐧',
+    icon: 'Bird',
     description: '深入理解Linux系统编程原理：进程管理、并发编程、IO模型、性能优化',
     questionCount: 30,
     mode: 'practice',
@@ -1479,7 +1479,7 @@ gcc -fsanitize=address program.c
 
 **read/write系统调用开销**
 - 用户态→内核态切换：约100-200ns
-- 数据拷贝：用户缓冲区↔页缓存↔磁盘
+- 数据拷贝：用户缓冲区ArrowLeftRight页缓存ArrowLeftRight磁盘
 - 上下文切换成本：保存/恢复寄存器
 
 **零拷贝技术**
@@ -1664,7 +1664,7 @@ gcc -fsanitize=address program.c
   {
     id: 'linux-cmds',
     name: 'Linux常用命令',
-    icon: '⌨️',
+    icon: 'Keyboard️',
     description: '掌握Linux开发必备命令：文件操作、进程管理、网络调试、文本处理',
     questionCount: 20,
     mode: 'practice',
@@ -1802,7 +1802,7 @@ gcc -fsanitize=address program.c
   {
     id: 'embedded',
     name: '嵌入式Linux应用',
-    icon: '🔧',
+    icon: 'Settings',
     description: '嵌入式Linux应用开发：文件IO、进程线程、IPC通信、设备操作',
     questionCount: 25,
     mode: 'practice',
@@ -1964,7 +1964,7 @@ gcc -fsanitize=address program.c
   {
     id: 'cpp',
     name: 'C++基础入门',
-    icon: '🔷',
+    icon: 'Square',
     description: '从C到C++：引用、类与对象、继承多态、STL容器、智能指针、移动语义、模板',
     questionCount: 30,
     mode: 'practice',
@@ -6509,7 +6509,7 @@ int a = i++ + ++i;
 int b = ++j + j++;
 printf("%d %d %d %d", i, j, a, b);`,
     correctOutput: '3 3 4 4',
-    explanation: '这是一个★★★难度的综合题，考察前缀/后缀自增的求值时机和副作用顺序。\n\n**变量i的执行过程：**\n1. i初始值为1\n2. i++：先返回1，然后i变为2\n3. ++i：先i变为3，然后返回3\n4. a = 1 + 3 = 4\n5. 最终i = 3\n\n**变量j的执行过程：**\n1. j初始值为1\n2. ++j：先j变为2，然后返回2\n3. j++：先返回2，然后j变为3\n4. b = 2 + 2 = 4\n5. 最终j = 3\n\n**关键记忆口诀：**\n- 前缀++i：「先加后用」，表达式用新值\n- 后缀i++：「先用后加」，表达式用旧值\n\n**⚠️ 注意：** 同一变量在表达式中多次自增是未定义行为(UB)，实际面试/考试中不会出现，但本题i和j是独立变量，用于理解求值顺序。',
+    explanation: '这是一个StarStarStar难度的综合题，考察前缀/后缀自增的求值时机和副作用顺序。\n\n**变量i的执行过程：**\n1. i初始值为1\n2. i++：先返回1，然后i变为2\n3. ++i：先i变为3，然后返回3\n4. a = 1 + 3 = 4\n5. 最终i = 3\n\n**变量j的执行过程：**\n1. j初始值为1\n2. ++j：先j变为2，然后返回2\n3. j++：先返回2，然后j变为3\n4. b = 2 + 2 = 4\n5. 最终j = 3\n\n**关键记忆口诀：**\n- 前缀++i：「先加后用」，表达式用新值\n- 后缀i++：「先用后加」，表达式用旧值\n\n**AlertTriangle️ 注意：** 同一变量在表达式中多次自增是未定义行为(UB)，实际面试/考试中不会出现，但本题i和j是独立变量，用于理解求值顺序。',
     difficulty: 3,
     knowledgePoints: ['自增运算符', '前缀vs后缀', '表达式求值', '副作用顺序', '未定义行为'],
     hint: '分开看每个变量：i++返回旧值，++i返回新值。注意自增的副作用(变量值改变)在序列点之前完成。',
@@ -6559,7 +6559,7 @@ printf("%d ", arr[___②___]);
       { hint: '先自增，再用新值', answer: '++i' },
       { hint: '最终i的值', answer: ['2', '2;'] }
     ],
-    explanation: '★★★实战题：理解前缀/后缀自增在实际编程中的选择。\n\n**场景分析：**\n\n1. **arr[i++]** - 「先用后加」\n   - 先访问arr[0]的值10\n   - 然后i自增为1\n   - 适合：先处理当前元素，再准备下一个\n\n2. **arr[++i]** - 「先加后用」\n   - 先i自增为2\n   - 然后访问arr[2]的值30\n   - 适合：跳过当前，直接处理下一个\n\n**最终i = 2**\n\n**编程建议：**\n- 循环遍历通常用i++（标准写法）\n- 需要跳过第一个元素时用++i\n- 嵌入式中，++i可能更高效（避免临时变量）',
+    explanation: 'StarStarStar实战题：理解前缀/后缀自增在实际编程中的选择。\n\n**场景分析：**\n\n1. **arr[i++]** - 「先用后加」\n   - 先访问arr[0]的值10\n   - 然后i自增为1\n   - 适合：先处理当前元素，再准备下一个\n\n2. **arr[++i]** - 「先加后用」\n   - 先i自增为2\n   - 然后访问arr[2]的值30\n   - 适合：跳过当前，直接处理下一个\n\n**最终i = 2**\n\n**编程建议：**\n- 循环遍历通常用i++（标准写法）\n- 需要跳过第一个元素时用++i\n- 嵌入式中，++i可能更高效（避免临时变量）',
     difficulty: 3,
     knowledgePoints: ['自增运算符', '数组访问', '循环索引', '前缀vs后缀选择', '代码优化'],
     hint: 'i++返回旧值，++i返回新值。想想数组索引的变化顺序。',
@@ -8901,11 +8901,11 @@ printf("0x%X", u.i);`,
         title: '数组越界可视化',
         description: 'regs[4]只有索引0-3，i<=4导致访问regs[4]越界',
         steps: [
-          { array: ['regs[0]', 'regs[1]', 'regs[2]', 'regs[3]', '???'], i: 0, action: 'i=0: 访问regs[0] ✓' },
-          { array: ['regs[0]', 'regs[1]', 'regs[2]', 'regs[3]', '???'], i: 1, action: 'i=1: 访问regs[1] ✓' },
-          { array: ['regs[0]', 'regs[1]', 'regs[2]', 'regs[3]', '???'], i: 2, action: 'i=2: 访问regs[2] ✓' },
-          { array: ['regs[0]', 'regs[1]', 'regs[2]', 'regs[3]', '???'], i: 3, action: 'i=3: 访问regs[3] ✓' },
-          { array: ['regs[0]', 'regs[1]', 'regs[2]', 'regs[3]', '危险!'], i: 4, action: 'i=4: 访问regs[4] ✗ 越界！可能损坏硬件' }
+          { array: ['regs[0]', 'regs[1]', 'regs[2]', 'regs[3]', '???'], i: 0, action: 'i=0: 访问regs[0] Check' },
+          { array: ['regs[0]', 'regs[1]', 'regs[2]', 'regs[3]', '???'], i: 1, action: 'i=1: 访问regs[1] Check' },
+          { array: ['regs[0]', 'regs[1]', 'regs[2]', 'regs[3]', '???'], i: 2, action: 'i=2: 访问regs[2] Check' },
+          { array: ['regs[0]', 'regs[1]', 'regs[2]', 'regs[3]', '???'], i: 3, action: 'i=3: 访问regs[3] Check' },
+          { array: ['regs[0]', 'regs[1]', 'regs[2]', 'regs[3]', '危险!'], i: 4, action: 'i=4: 访问regs[4] X 越界！可能损坏硬件' }
         ],
         note: '数组索引从0开始，regs[4]的有效索引是0,1,2,3。i<=4会访问到regs[4]造成越界'
       }
@@ -9149,7 +9149,7 @@ printf("%d", square(5));`,
           to: 'src内存',
           description: '*d++ = *s++ 每次复制1字节，然后两个指针都后移'
         },
-        note: '⚠️ memcpy不处理内存重叠！重叠时请用memmove'
+        note: 'AlertTriangle️ memcpy不处理内存重叠！重叠时请用memmove'
       }
     }
   },

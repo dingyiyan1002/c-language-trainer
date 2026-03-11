@@ -7,7 +7,7 @@ export const level1Chapters: Chapter[] = [
   {
     id: 'level1',
     name: 'Level 1 入门',
-    icon: '🌱',
+    icon: 'Sprout',
     description: 'C语言基础：printf、变量、运算符、条件、循环、函数、数组、宏、字符串、作用域',
     questionCount: 80,
     lessons: [

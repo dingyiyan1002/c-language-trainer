@@ -1,11 +1,11 @@
 import { Question, CodeLineAnalysis, MemoryVisualization } from './lessons';
 
 const DIFFICULTY_LABELS: Record<number, { text: string; class: string }> = {
-  1: { text: '⭐ 基础', class: 'diff-easy' },
-  2: { text: '⭐⭐ 进阶', class: 'diff-medium' },
-  3: { text: '⭐⭐⭐ 困难', class: 'diff-hard' },
-  4: { text: '💀 地狱', class: 'diff-hell' },
-  5: { text: '💀💀 专家', class: 'diff-hell' }
+  1: { text: 'Star 基础', class: 'diff-easy' },
+  2: { text: 'StarStar 进阶', class: 'diff-medium' },
+  3: { text: 'StarStarStar 困难', class: 'diff-hard' },
+  4: { text: 'Skull 地狱', class: 'diff-hell' },
+  5: { text: 'SkullSkull 专家', class: 'diff-hell' }
 };
 
 const KNOWLEDGE_TAGS: Record<string, string[]> = {

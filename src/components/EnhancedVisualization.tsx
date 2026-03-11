@@ -525,7 +525,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
       
       <div className="viz-header">
         <div className="viz-title">
-          <span>🎯</span>
+          <span>Target</span>
           {title}
         </div>
         <div className="viz-controls">
@@ -584,7 +584,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
         
         {step?.note && (
           <div className="note">
-            💡 {step.note}
+            Lightbulb {step.note}
           </div>
         )}
       </div>

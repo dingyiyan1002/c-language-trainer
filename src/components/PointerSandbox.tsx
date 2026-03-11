@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { memo, useState, useRef, useCallback } from 'react';
 import { Play, RotateCcw, AlertTriangle, Info, Bug, StepForward, ChevronRight, Gauge, Pause } from 'lucide-react';
 
 type MemoryCell = {
@@ -59,7 +59,7 @@ const INITIAL_MEMORY = (): MemoryCell[] => {
   return memory;
 };
 
-export function PointerSandbox() {
+export const PointerSandbox = memo(function PointerSandbox() {
   const [code, setCode] = useState(`int main() {
     int a = 100;
     int *p = &a;
@@ -735,7 +735,7 @@ export function PointerSandbox() {
     executeStep();
   };
 
-  const reset = () => {
+  const reset = useCallback(() => {
     if (intervalRef.current) {
       clearTimeout(intervalRef.current);
     }
@@ -744,9 +744,9 @@ export function PointerSandbox() {
     setOperations([]);
     setConsoleOutput([]);
     setIsRunning(false);
-  };
+  }, []);
 
-  const stepForward = () => {
+  const stepForward = useCallback(() => {
     if (operations.length === 0) {
       const ops = parseAndExecute(code);
       setOperations(ops);
@@ -757,16 +757,16 @@ export function PointerSandbox() {
       }
       return;
     }
-    
+
     if (currentStep < operations.length - 1) {
       const next = currentStep + 1;
       setCurrentStep(next);
       setMemory(operations[next].memoryAfter);
       setConsoleOutput(operations[next].consoleOutput);
     }
-  };
+  }, [operations, currentStep, code, parseAndExecute]);
 
-  const stepBackward = () => {
+  const stepBackward = useCallback(() => {
     if (currentStep > 0) {
       const prev = currentStep - 1;
       setCurrentStep(prev);
@@ -777,9 +777,9 @@ export function PointerSandbox() {
       setMemory(INITIAL_MEMORY());
       setConsoleOutput([]);
     }
-  };
+  }, [currentStep, operations]);
 
-  const toggleBreakpoint = (lineNum: number) => {
+  const toggleBreakpoint = useCallback((lineNum: number) => {
     const newBreakpoints = new Set(breakpoints);
     if (newBreakpoints.has(lineNum)) {
       newBreakpoints.delete(lineNum);
@@ -787,9 +787,9 @@ export function PointerSandbox() {
       newBreakpoints.add(lineNum);
     }
     setBreakpoints(newBreakpoints);
-  };
+  }, [breakpoints]);
 
-  const loadExample = (example: typeof examples[0]) => {
+  const loadExample = useCallback((example: typeof examples[0]) => {
     if (intervalRef.current) {
       clearTimeout(intervalRef.current);
     }
@@ -799,7 +799,7 @@ export function PointerSandbox() {
     setOperations([]);
     setConsoleOutput([]);
     setIsRunning(false);
-  };
+  }, []);
 
   const stackMemory = memory.filter(m => m.region === 'stack');
   const heapMemory = memory.filter(m => m.region === 'heap');
@@ -1158,4 +1158,6 @@ export function PointerSandbox() {
       </div>
     </div>
   );
-}
+});
+
+export default PointerSandbox;

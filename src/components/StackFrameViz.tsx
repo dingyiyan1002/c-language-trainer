@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { memo, useState, useCallback, useEffect } from 'react';
 
 // 函数栈帧可视化 - 深度交互组件
 // 理解：函数调用、栈帧结构、局部变量、返回地址
@@ -19,7 +19,7 @@ type ExecutionStep = {
   console?: string;
 };
 
-export function StackFrameViz() {
+export const StackFrameViz = memo(function StackFrameViz() {
   const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -220,7 +220,7 @@ export function StackFrameViz() {
       {/* 标题和场景选择 */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
-          <h3 className="text-xl font-bold text-white mb-1">📚 函数栈帧可视化</h3>
+          <h3 className="text-xl font-bold text-white mb-1">BookOpen 函数栈帧可视化</h3>
           <p className="text-slate-400 text-sm">理解函数调用时栈的变化</p>
         </div>
         <div className="flex gap-2">
@@ -257,7 +257,7 @@ export function StackFrameViz() {
                 onClick={() => setIsPlaying(!isPlaying)}
                 className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-medium"
               >
-                {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                {isPlaying ? 'Pause 暂停' : 'Play 播放'}
               </button>
               <button
                 onClick={() => setCurrentStep(Math.min(currentSteps.length - 1, currentStep + 1))}
@@ -373,7 +373,7 @@ export function StackFrameViz() {
       {/* 教学提示 */}
       <div className="mt-6 grid sm:grid-cols-3 gap-4">
         <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700">
-          <h4 className="text-xs font-bold text-slate-300 mb-1">📌 栈帧包含</h4>
+          <h4 className="text-xs font-bold text-slate-300 mb-1">Pin 栈帧包含</h4>
           <ul className="text-xs text-slate-400 space-y-0.5">
             <li>• 参数（传入的值）</li>
             <li>• 局部变量</li>
@@ -381,7 +381,7 @@ export function StackFrameViz() {
           </ul>
         </div>
         <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700">
-          <h4 className="text-xs font-bold text-slate-300 mb-1">🔄 调用过程</h4>
+          <h4 className="text-xs font-bold text-slate-300 mb-1">RefreshCcw 调用过程</h4>
           <ul className="text-xs text-slate-400 space-y-0.5">
             <li>• 参数压栈</li>
             <li>• 保存返回地址</li>
@@ -389,7 +389,7 @@ export function StackFrameViz() {
           </ul>
         </div>
         <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700">
-          <h4 className="text-xs font-bold text-slate-300 mb-1">⚠️ 栈溢出</h4>
+          <h4 className="text-xs font-bold text-slate-300 mb-1">AlertTriangle️ 栈溢出</h4>
           <ul className="text-xs text-slate-400 space-y-0.5">
             <li>• 递归太深会导致</li>
             <li>• 栈空间有限（~8MB）</li>
@@ -399,4 +399,6 @@ export function StackFrameViz() {
       </div>
     </div>
   );
-}
+});
+
+export default StackFrameViz;

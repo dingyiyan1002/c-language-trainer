@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>React 测试</title>
+</head>
+<body style="background: #0a0e17; color: #fff; padding: 20px; font-family: sans-serif;">
+    <div id="root"></div>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script>
+        const { createElement: h } = React;
+        
+        function App() {
+            return h('div', null,
+                h('h1', null, '✅ React 正常运行！'),
+                h('p', null, '时间：' + new Date().toLocaleString()),
+                h('p', null, '如果看到这个，说明 React 完全正常')
+            );
+        }
+        
+        ReactDOM.createRoot(document.getElementById('root')).render(
+            h(App)
+        );
+    </script>
+</body>
+</html>

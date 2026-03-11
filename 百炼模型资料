@@ -1,0 +1,456 @@
+在OpenClaw接入阿里云 Coding Plan。OpenClaw （原名Moltbot/Clawdbot ）是一个开源的个人 AI 助手平台，支持通过多种消息渠道与 AI 交互。
+
+## **安装 OpenClaw**
+
+1.  安装或更新 [Node.js](https://nodejs.org/en/download/)（v22.0 或更高版本）。
+    
+2.  执行以下命令开始安装。
+    
+    **说明**
+    
+    如果不熟悉命令行操作，建议参考[快速部署OpenClaw](https://www.aliyun.com/benefit/scene/moltbot)，采用轻量应用服务器或无影云电脑进行图形化界面操作。
+    
+    ## macOS/Linux
+    
+    在终端执行以下命令。
+    
+    ```
+    curl -fsSL https://openclaw.ai/install.sh | bash
+    ```
+    
+    ## Windows
+    
+    在PowerShell中执行以下命令。
+    
+    ```
+    iwr -useb https://openclaw.ai/install.ps1 | iex
+    ```
+    
+3.  安装结束后会自动出现提示信息，请根据提示信息完成 OpenClaw 配置，参考配置如下：
+    
+    | **配置项** | **配置内容** |
+    | --- | --- |
+    | I understand this is powerful and inherently risky. Continue? | 选择 ”Yes” |
+    | Onboarding mode | 选择 “QuickStart” |
+    | Model/auth provider | 选择 “Skip for now”，后续可以配置 |
+    | Filter models by provider | 选择 “All providers” |
+    | Default model | 使用默认配置 |
+    | Select channel (QuickStart) | 选择 “Skip for now”，后续可以配置 |
+    | Configure skills now? (recommended) | 选择 “No”，后续可以配置。 |
+    | Enable hooks? | 按空格键选中，选择“Skip for now”，按回车键进入下一步。 |
+    | How do you want to hatch your bot? | 选择 “Hatch in TUI”。 |
+    
+
+## **在 OpenClaw 中配置 Coding Plan**
+
+## 方式一：通过Web UI修改配置文件
+
+1.  在终端执行以下命令打开 Web UI。
+    
+    ```
+    openclaw dashboard
+    ```
+    
+2.  在Web UI的左侧菜单栏中选择**配置** > **All Settings** > **RAW**。
+    
+    1.  复制以下内容到**Raw JSONS**输入框，替换已有内容。
+        
+        > 若需保留已有配置，请勿直接全量替换，详见[已有配置如何安全修改？](#56a69a77cdfos)
+        
+    2.  将`YOUR_API_KEY`替换为Coding Plan 专属 [API Key](https://bailian.console.aliyun.com/cn-beijing/?tab=model#/efm/coding_plan)。
+        
+    
+    ```
+    {
+      "models": {
+        "mode": "merge",
+        "providers": {
+          "bailian": {
+            "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+            "apiKey": "YOUR_API_KEY",
+            "api": "openai-completions",
+            "models": [
+              {
+                "id": "qwen3.5-plus",
+                "name": "qwen3.5-plus",
+                "reasoning": false,
+                "input": ["text", "image"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 1000000,
+                "maxTokens": 65536
+              },
+              {
+                "id": "qwen3-max-2026-01-23",
+                "name": "qwen3-max-2026-01-23",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 262144,
+                "maxTokens": 65536
+              },
+              {
+                "id": "qwen3-coder-next",
+                "name": "qwen3-coder-next",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 262144,
+                "maxTokens": 65536
+              },
+              {
+                "id": "qwen3-coder-plus",
+                "name": "qwen3-coder-plus",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 1000000,
+                "maxTokens": 65536
+              },
+              {
+                "id": "MiniMax-M2.5",
+                "name": "MiniMax-M2.5",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 196608,
+                "maxTokens": 32768
+              },
+              {
+                "id": "glm-5",
+                "name": "glm-5",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 202752,
+                "maxTokens": 16384
+              },
+              {
+                "id": "glm-4.7",
+                "name": "glm-4.7",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 202752,
+                "maxTokens": 16384
+              },
+              {
+                "id": "kimi-k2.5",
+                "name": "kimi-k2.5",
+                "reasoning": false,
+                "input": ["text", "image"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 262144,
+                "maxTokens": 32768
+              }
+            ]
+          }
+        }
+      },
+      "agents": {
+        "defaults": {
+          "model": {
+            "primary": "bailian/qwen3.5-plus"
+          },
+          "models": {
+            "bailian/qwen3.5-plus": {},
+            "bailian/qwen3-max-2026-01-23": {},
+            "bailian/qwen3-coder-next": {},
+            "bailian/qwen3-coder-plus": {},
+            "bailian/MiniMax-M2.5": {},
+            "bailian/glm-5": {},
+            "bailian/glm-4.7": {},
+            "bailian/kimi-k2.5": {}
+          }
+        }
+      },
+      "gateway": {
+        "mode": "local"
+      }
+    }
+    ```
+    
+3.  单击右上角 **Save** 保存，然后单击 **Update**使配置生效。
+    
+    > 保存成功后，apiKey将显示为“\_\_OPENCLAW\_REDACTED\_\_”。脱敏保护，仅用于前端界面隐藏，不影响实际调用。
+    
+    ![image](https://help-static-aliyun-doc.aliyuncs.com/assets/img/zh-CN/3073052771/p1055860.png)
+    
+
+## 方式二：通过终端修改配置文件
+
+1.  在终端执行以下命令打开配置文件。
+    
+    ```
+    nano ~/.openclaw/openclaw.json
+    ```
+    
+2.  复制以下内容到配置文件。将`YOUR_API_KEY`替换为Coding Plan 专属 [API Key](https://bailian.console.aliyun.com/cn-beijing/?tab=model#/efm/coding_plan)。
+    
+    > 若需保留已有配置，请勿直接全量替换，详见[已有配置如何安全修改？](#56a69a77cdfos)
+    
+    ```
+    {
+      "models": {
+        "mode": "merge",
+        "providers": {
+          "bailian": {
+            "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+            "apiKey": "YOUR_API_KEY",
+            "api": "openai-completions",
+            "models": [
+              {
+                "id": "qwen3.5-plus",
+                "name": "qwen3.5-plus",
+                "reasoning": false,
+                "input": ["text", "image"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 1000000,
+                "maxTokens": 65536
+              },
+              {
+                "id": "qwen3-max-2026-01-23",
+                "name": "qwen3-max-2026-01-23",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 262144,
+                "maxTokens": 65536
+              },
+              {
+                "id": "qwen3-coder-next",
+                "name": "qwen3-coder-next",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 262144,
+                "maxTokens": 65536
+              },
+              {
+                "id": "qwen3-coder-plus",
+                "name": "qwen3-coder-plus",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 1000000,
+                "maxTokens": 65536
+              },
+              {
+                "id": "MiniMax-M2.5",
+                "name": "MiniMax-M2.5",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 196608,
+                "maxTokens": 32768
+              },
+              {
+                "id": "glm-5",
+                "name": "glm-5",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 202752,
+                "maxTokens": 16384
+              },
+              {
+                "id": "glm-4.7",
+                "name": "glm-4.7",
+                "reasoning": false,
+                "input": ["text"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 202752,
+                "maxTokens": 16384
+              },
+              {
+                "id": "kimi-k2.5",
+                "name": "kimi-k2.5",
+                "reasoning": false,
+                "input": ["text", "image"],
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+                "contextWindow": 262144,
+                "maxTokens": 32768
+              }
+            ]
+          }
+        }
+      },
+      "agents": {
+        "defaults": {
+          "model": {
+            "primary": "bailian/qwen3.5-plus"
+          },
+          "models": {
+            "bailian/qwen3.5-plus": {},
+            "bailian/qwen3-max-2026-01-23": {},
+            "bailian/qwen3-coder-next": {},
+            "bailian/qwen3-coder-plus": {},
+            "bailian/MiniMax-M2.5": {},
+            "bailian/glm-5": {},
+            "bailian/glm-4.7": {},
+            "bailian/kimi-k2.5": {}
+          }
+        }
+      },
+      "gateway": {
+        "mode": "local"
+      }
+    }
+    ```
+    
+3.  保存文件并退出，运行以下命令来使配置生效。
+    
+    ```
+    openclaw gateway restart
+    ```
+    
+
+## **使用** OpenClaw
+
+支持通过 Web UI 和 TUI 的方式使用 OpenClaw。
+
+## Web UI
+
+1.  新开一个终端，运行以下命令。
+    
+    ```
+    openclaw dashboard
+    ```
+    
+2.  在Web UI中进行对话。
+    
+    ![image](https://help-static-aliyun-doc.aliyuncs.com/assets/img/zh-CN/1774069671/p1050227.png)
+    
+
+## TUI
+
+1.  新开一个终端，运行以下命令，进入TUI 界面。
+    
+    ```
+    openclaw tui
+    ```
+    
+2.  开始对话。
+    
+    ![image](https://help-static-aliyun-doc.aliyuncs.com/assets/img/zh-CN/1774069671/p1050228.png)
+    
+
+## **切换模型**
+
+-   **在当前会话切换模型（临时有效）**
+    
+    在终端输入`openclaw tui`，进入 **TUI 界面**，使用 `/model <模型名称>` 在当前会话中切换模型。
+    
+    ```
+    /model qwen3-coder-next
+    ```
+    
+    > 界面返回提示“model set to qwen3-coder-next” 即表示生效。
+    
+-   **切换默认模型（永久有效）**
+    
+    如需在每次新会话中使用指定模型，修改 `agents.defaults.model.primary` 字段为目标模型。请参考[修改配置文件](#cc5b5358b3woj)。
+    
+    ```
+    {
+        "agents": {
+            "defaults": {
+                "model": {
+                    "primary": "bailian/qwen3.5-plus"
+                }
+            }
+        }
+    }
+    ```
+    
+
+## 常见问题
+
+#### **如何查看coding plan已配置的模型？**
+
+在终端输入`openclaw tui`，进入TUI 界面，接着输入`/model`查看模型列表。按回车键选中模型，按Esc键退出模型列表。
+
+![image](https://help-static-aliyun-doc.aliyuncs.com/assets/img/zh-CN/5143052771/p1055791.png)
+
+#### **为什么报错"HTTP 401: Incorrect API key provided."？**
+
+可能原因：
+
+1.  API Key 无效、过期、为空、格式错误，或与端点环境不匹配，请检查 API Key 是否为 Coding Plan 套餐专属 Key，复制完整且无空格；确认订阅状态有效。
+    
+2.  OpenClaw的历史配置缓存导致配置错误，请删除`~/.openclaw/agents/main/agent/models.json`文件中的`providers.bailian`配置项，并重启OpenClaw。
+    
+
+#### **我已经配置过钉钉等其他渠道，如何安全地添加 Coding Plan 模型（防止原有配置丢失）？**
+
+-   **请勿直接全量覆盖**。直接“全部替换”会覆盖掉你的自定义配置，请进行**局部修改**。
+    
+-   根据[Coding Plan 配置信息](#cc5b5358b3woj)，在已有的配置文件中找到 `models`、`agents`和`gateway`字段，把Coding plan的配置信息粘贴到对应的字段下。若已有配置文件没有这些字段，手动添加到配置文件即可。
+    
+
+更多问题请参考[常见问题](https://help.aliyun.com/zh/model-studio/coding-plan-faq)。
+
+我的订阅
+Pro高级套餐
+套餐状态
+生效中
+剩余天数
+10天
+开始时间
+2026-02-21 16:58:21
+结束时间
+2026-03-22 00:00:00
+自动续费
+未开启
+用量消耗
+最后统计时间2026-03-11 15:50:11
+近5小时用量
+2026-03-11 15:50:12重置
+14%
+0%50%90%100%
+近一周用量
+2026-03-16 00:00:00重置
+17%
+0%50%90%100%
+近一月用量
+2026-03-22 00:00:00重置
+27%
+0%50%90%100%
+套餐专属API Key
+请妥善保存您的密钥信息,不要与他人共享,或者暴露在客户端代码中。
+为保护您的账户安全,我们可能会自动禁用任何公开泄漏的APIKey，您也可以随时重置以生成新的密钥。
+sk-sp-06daa8bda2ae465ab***********3f87
+套餐专属Base URL
+兼容 OpenAI 接口协议工具
+https://coding.dashscope.aliyuncs.com/v1
+兼容 Anthropic 接口协议工具
+https://coding.dashscope.aliyuncs.com/apps/anthropic
+快速接入 AI 编程工具
+可使用模型
+Coding Plan 提供最新最强的编程模型,包括千问系列和优秀的第三方模型,提供强大的Coding Agent能力,用户可以按需自由切换。
+当前订阅套餐只支持使用以下模型列表
+品牌
+模型
+模型能力
+千问
+qwen3.5-plus
+文本生成、深度思考、视觉理解
+qwen3-max-2026-01-23
+文本生成、深度思考
+qwen3-coder-next
+文本生成
+qwen3-coder-plus
+文本生成
+智谱
+glm-5
+文本生成、深度思考
+glm-4.7
+文本生成、深度思考
+Kimi
+kimi-k2.5
+文本生成、深度思考、视觉理解
+MiniMax
+MiniMax-M2.5
+文本生成、深度思考
+
+
+
