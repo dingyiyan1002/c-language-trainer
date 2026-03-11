@@ -259,6 +259,63 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
 
   const isFinished = userInput.length >= code.length && code.length > 0;
 
+  // 处理点击定位光标
+  const handleContainerClick = useCallback((e: React.MouseEvent) => {
+    if (!containerRef.current) return;
+
+    // 聚焦容器
+    containerRef.current.focus();
+
+    const pre = containerRef.current.querySelector('pre');
+    if (!pre) return;
+
+    const rect = pre.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    // 使用 pre 元素的字体设置来计算
+    const computedStyle = window.getComputedStyle(pre);
+    const fontSize = parseFloat(computedStyle.fontSize);
+    const fontFamily = computedStyle.fontFamily;
+
+    // 创建一个临时元素来测量字符宽度
+    const tempSpan = document.createElement('span');
+    tempSpan.style.font = computedStyle.font;
+    tempSpan.style.visibility = 'hidden';
+    tempSpan.style.position = 'absolute';
+    tempSpan.textContent = 'M';
+    pre.appendChild(tempSpan);
+    const charWidth = tempSpan.offsetWidth;
+    pre.removeChild(tempSpan);
+
+    const lineHeight = fontSize * 1.6;
+
+    const clickedLine = Math.floor(clickY / lineHeight);
+    const clickedCol = Math.floor(clickX / charWidth);
+
+    // 计算代码中的绝对位置
+    let pos = 0;
+    let line = 0;
+    for (let i = 0; i < code.length; i++) {
+      if (code[i] === '\n') {
+        if (line === clickedLine) {
+          pos = i;
+          break;
+        }
+        line++;
+        pos = i + 1;
+      }
+    }
+
+    // 添加列偏移
+    pos = Math.min(pos + clickedCol, code.length);
+
+    console.log(`Click: x=${clickX}, y=${clickY}, line=${clickedLine}, col=${clickedCol}, pos=${pos}`);
+
+    // 截断 userInput 到点击位置
+    onInput(userInput.slice(0, pos));
+  }, [code, userInput, onInput]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // 修饰键组合跳过处理
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -268,30 +325,119 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       typingStartTimeGlobal = Date.now();
     }
 
-    // 方向键和导航键 - 允许默认行为（移动光标）
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-         'Home', 'End', 'PageUp', 'PageDown',
-         'Escape'].includes(e.key)) {
+    const cursorPos = userInput.length;
+
+    // 方向键和导航键 - 允许移动光标（通过调整 userInput 长度）
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      if (cursorPos > 0) {
+        onInput(userInput.slice(0, cursorPos - 1));
+      }
+      return;
+    }
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      if (cursorPos < code.length) {
+        // 向右移动时，如果后面有已输入的字符，恢复它们
+        onInput(userInput + code[cursorPos]);
+      }
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      // 移动到上一行相同列位置
+      let lineStart = 0;
+      for (let i = 0; i < cursorPos; i++) {
+        if (code[i] === '\n') lineStart = i + 1;
+      }
+      if (lineStart > 0) {
+        // 找到上一行的行首
+        let prevLineStart = 0;
+        for (let i = 0; i < lineStart - 1; i++) {
+          if (code[i] === '\n') prevLineStart = i + 1;
+        }
+        // 计算当前列
+        const col = cursorPos - lineStart;
+        const newPos = Math.min(prevLineStart + col, lineStart - 1);
+        onInput(userInput.slice(0, newPos));
+      }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      // 移动到下一行相同列位置
+      let nextLineStart = -1;
+      for (let i = cursorPos; i < code.length; i++) {
+        if (code[i] === '\n') {
+          nextLineStart = i + 1;
+          break;
+        }
+      }
+      if (nextLineStart >= 0) {
+        // 找到下下行的行首
+        let nextNextLineStart = -1;
+        for (let i = nextLineStart; i < code.length; i++) {
+          if (code[i] === '\n') {
+            nextNextLineStart = i + 1;
+            break;
+          }
+        }
+        // 计算当前列
+        let lineStart = 0;
+        for (let i = 0; i < cursorPos; i++) {
+          if (code[i] === '\n') lineStart = i + 1;
+        }
+        const col = cursorPos - lineStart;
+        const targetEnd = nextNextLineStart >= 0 ? nextNextLineStart - 1 : code.length;
+        const newPos = Math.min(nextLineStart + col, targetEnd);
+        onInput(userInput.slice(0, newPos));
+      }
+      return;
+    }
+    if (e.key === 'Home') {
+      e.preventDefault();
+      // 移动到行首
+      let lineStart = 0;
+      for (let i = 0; i < cursorPos; i++) {
+        if (code[i] === '\n') lineStart = i + 1;
+      }
+      onInput(userInput.slice(0, lineStart));
+      return;
+    }
+    if (e.key === 'End') {
+      e.preventDefault();
+      // 移动到行尾
+      let lineEnd = cursorPos;
+      for (let i = cursorPos; i < code.length; i++) {
+        if (code[i] === '\n') {
+          lineEnd = i;
+          break;
+        }
+        lineEnd = i + 1;
+      }
+      onInput(userInput.slice(0, lineEnd));
+      return;
+    }
+    if (e.key === 'PageUp' || e.key === 'PageDown' || e.key === 'Escape') {
       return;
     }
 
-    // Backspace 处理
+    // Backspace 处理 - 删除光标前的字符
     if (e.key === 'Backspace') {
       e.preventDefault();
-      onInput(userInput.slice(0, -1));
+      if (cursorPos > 0) {
+        onInput(userInput.slice(0, cursorPos - 1));
+      }
       return;
     }
 
     // Tab 键处理 - 自动补全缩进
     if (e.key === 'Tab') {
       e.preventDefault();
-      const remaining = code.substring(userInput.length);
+      const remaining = code.substring(cursorPos);
       const spacesMatch = remaining.match(/^( {1,4})/);
-      if (spacesMatch) {
-        onInput(userInput + spacesMatch[1]);
-      } else {
-        onInput(userInput + '    ');
-      }
+      const spaces = spacesMatch ? spacesMatch[1] : '    ';
+      onInput(userInput + spaces);
       return;
     }
 
@@ -303,7 +449,6 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
     }
 
     // 所有单个字符都允许输入（包括符号 < > & \ ; ) 等）
-    // 不阻止默认行为，让容器 focus 保持
     if (e.key.length === 1) {
       e.preventDefault();
       onInput(userInput + e.key);
@@ -325,11 +470,17 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       let className = 'text-slate-500';
 
       // 已输入的部分：检查是否正确
-      if (i < userInput.length) {
-        className = userInput[i] === char ? 'text-cyan-300' : 'text-red-400 bg-red-500/20';
+      if (i < cursorPos) {
+        const userInputChar = userInput[i];
+        className = userInputChar === char ? 'text-cyan-300' : 'text-red-400 bg-red-500/20';
       }
 
-      // 换行符单独处理
+      // 如果当前位置是光标位置，在字符前添加光标
+      if (i === cursorPos) {
+        elements.push(<span key={`cursor-${i}`} className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
+      }
+
+      // 渲染字符
       if (char === '\n') {
         elements.push(
           <span key={i} className={className}>
@@ -340,21 +491,11 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       } else {
         elements.push(<span key={i} className={className}>{char}</span>);
       }
-
-      // 在已输入的最后一个字符后面添加光标
-      if (i === cursorPos - 1) {
-        elements.push(<span key={`cursor-${i}`} className="bg-cyan-500/30">&ZeroWidthSpace;</span>);
-      }
     }
 
-    // 如果还没有输入任何内容，光标在最前面
-    if (cursorPos === 0) {
-      elements.unshift(<span key="cursor-start" className="bg-cyan-500/30">&ZeroWidthSpace;</span>);
-    }
-
-    // 如果全部输入完成，光标在最后
-    if (cursorPos === code.length && code.length > 0) {
-      elements.push(<span key="cursor-end" className="bg-cyan-500/30">&ZeroWidthSpace;</span>);
+    // 如果光标在最后，添加光标
+    if (cursorPos === code.length) {
+      elements.push(<span key="cursor-end" className="bg-cyan-500/50 w-[2px] inline-block h-[1.2em] align-middle">&nbsp;</span>);
     }
 
     return elements;
@@ -409,6 +550,7 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
       <div
         ref={containerRef}
         tabIndex={0}
+        onClick={handleContainerClick}
         onKeyDown={handleKeyDown}
         className="flex-1 overflow-auto p-4 focus:outline-none cursor-text"
         style={{ caretColor: 'transparent' }}
