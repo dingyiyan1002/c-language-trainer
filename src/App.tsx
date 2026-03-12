@@ -114,11 +114,8 @@ import {
   Tv,
   Star,
   X,
-  Check
-} from 'lucide-react';
-
-// 导入额外的章节图标
-import {
+  Check,
+  // 章节图标
   Shield, Bird, Briefcase, Sprout, TrendingUp, Crown, Hand
 } from 'lucide-react';
 

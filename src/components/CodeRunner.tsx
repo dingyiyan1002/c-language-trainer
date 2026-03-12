@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import React, { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Play, Loader2, AlertCircle, CheckCircle2, Terminal, X, Copy, Check, Maximize2, Minimize2, RotateCcw, Settings, ChevronDown, Keyboard } from 'lucide-react';
 import { CodeTypingPractice } from './CodeTypingPractice';
 
@@ -230,20 +230,7 @@ const TOKEN_COLORS: Record<Token['type'], string> = {
   newline: '',
 };
 
-function HighlightedLine({ tokens }: { tokens: Token[] }) {
-  return (
-    <>
-      {tokens.map((token, i) => {
-        // 直接渲染字符，不使用 HTML 实体编码，确保宽度一致
-        return (
-          <span key={i} className={TOKEN_COLORS[token.type]}>
-            {token.value}
-          </span>
-        );
-      })}
-    </>
-  );
-}
+// 移除 HighlightedLine 组件，不再使用双层渲染
 
 interface TypingAreaProps {
   code: string;
@@ -655,40 +642,119 @@ int main() {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const highlightRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragStartY = useRef(0);
   const dragStartHeight = useRef(0);
   const runCodeRef = useRef<() => void>(() => {});
   const settingsRef = useRef<HTMLDivElement>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
-  const tokenizedLines = useMemo(() => {
-    const allTokens = tokenize(code);
-    const lines: Token[][] = [[]];
-    for (const token of allTokens) {
-      if (token.type === 'newline') {
-        lines.push([]);
-      } else if (token.type === 'comment' && token.value.includes('\n')) {
-        const parts = token.value.split('\n');
-        parts.forEach((part, idx) => {
-          lines[lines.length - 1].push({ type: 'comment', value: part });
-          if (idx < parts.length - 1) {
-            lines.push([]);
-          }
-        });
-      } else {
-        lines[lines.length - 1].push(token);
+  const lineCount = useMemo(() => code.split('\n').length, [code]);
+
+  const renderCodeToCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    const textarea = textareaRef.current;
+    if (!canvas || !textarea) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // 取消之前的渲染请求
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+
+    animationFrameRef.current = requestAnimationFrame(() => {
+      // 设置 canvas 尺寸
+      const rect = textarea.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      ctx.scale(dpr, dpr);
+
+      // 设置字体
+      const fontFamily = 'JetBrains Mono, monospace';
+      const fontSizeStr = `${fontSize}px`;
+      ctx.font = `${fontSizeStr} ${fontFamily}`;
+      ctx.textBaseline = 'bottom';
+
+      // 计算字符宽度（使用 'M' 作为参考）
+      const charWidth = ctx.measureText('M').width;
+      const lineHeight = fontSize * 1.6;
+
+      // 清空画布
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      // 分词并渲染
+      const tokens = tokenize(code);
+      let x = fontSize; // padding-left
+      let y = fontSize * 1.5 + lineHeight; // 使用 bottom baseline，文本会向上绘制
+
+      for (const token of tokens) {
+        if (token.type === 'newline') {
+          x = fontSize;
+          y += lineHeight;
+          continue;
+        }
+
+        if (token.type === 'whitespace') {
+          x += ctx.measureText(token.value).width;
+          continue;
+        }
+
+        // 设置颜色
+        const colorClass = TOKEN_COLORS[token.type];
+        let fillStyle = '#e2e8f0'; // default
+
+        if (colorClass) {
+          if (colorClass.includes('purple')) fillStyle = '#c084fc';
+          else if (colorClass.includes('cyan')) fillStyle = '#22d3ee';
+          else if (colorClass.includes('orange')) fillStyle = '#fb923c';
+          else if (colorClass.includes('green')) fillStyle = '#4ade80';
+          else if (colorClass.includes('amber')) fillStyle = '#fbbf24';
+          else if (colorClass.includes('blue')) fillStyle = '#60a5fa';
+          else if (colorClass.includes('sky')) fillStyle = '#7dd3fc';
+          else if (colorClass.includes('slate-500')) fillStyle = '#64748b';
+          else if (colorClass.includes('slate-300')) fillStyle = '#cbd5e1';
+          else if (colorClass.includes('slate-200')) fillStyle = '#e2e8f0';
+        }
+
+        ctx.fillStyle = fillStyle;
+        ctx.fillText(token.value, x, y);
+        x += ctx.measureText(token.value).width;
       }
-    }
-    return lines;
-  }, [code]);
+    });
+  }, [code, fontSize]);
 
-  const lineCount = tokenizedLines.length;
+  useEffect(() => {
+    renderCodeToCanvas();
+  }, [renderCodeToCanvas]);
 
-  const syncScroll = useCallback(() => {
-    if (textareaRef.current && highlightRef.current) {
-      highlightRef.current.scrollTop = textareaRef.current.scrollTop;
-      highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
-    }
+  // 监听 textarea 滚动，同步更新 canvas 的显示位置
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    const canvas = canvasRef.current;
+    if (!textarea || !canvas) return;
+
+    const handleScroll = () => {
+      // canvas 和 textarea 共享同一个容器，通过 transform 来同步滚动
+      canvas.style.transform = `translate(${-textarea.scrollLeft}px, ${-textarea.scrollTop}px)`;
+    };
+
+    textarea.addEventListener('scroll', handleScroll);
+    // 初始化时也设置一次
+    handleScroll();
+    return () => textarea.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
   }, []);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -1202,27 +1268,17 @@ int main() {
             </div>
 
             <div className="flex-1 relative">
-              <div ref={highlightRef} className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
-                <pre className="whitespace-pre-wrap break-normal" style={{
-                  fontSize: `${fontSize}px`,
-                  lineHeight: `${fontSize * 1.6}px`,
-                  margin: 0,
-                  padding: `${fontSize * 1.5}px ${fontSize}px`,
-                  fontFamily: 'JetBrains Mono, monospace',
-                  fontVariantNumeric: 'tabular-nums',
-                  fontFeatureSettings: '"calt" 0',
-                  WebkitFontSmoothing: 'antialiased',
-                  MozOsxFontSmoothing: 'grayscale',
-                }}>
-                  {tokenizedLines.map((lineTokens, lineIdx) => (
-                    <div key={lineIdx} style={{ minHeight: `${fontSize * 1.6}px` }}>
-                      <HighlightedLine tokens={lineTokens} />
-                      {lineTokens.length === 0 && <span>&nbsp;</span>}
-                    </div>
-                  ))}
-                </pre>
-              </div>
-
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  pointerEvents: 'none',
+                }}
+              />
               <textarea
                 ref={textareaRef}
                 value={code}
@@ -1236,7 +1292,6 @@ int main() {
                     setCursorPosition({ line: lines.length - 1, col: lines[lines.length - 1].length });
                   }
                 }}
-                onScroll={syncScroll}
                 onKeyDown={handleKeyDown}
                 className="whitespace-pre-wrap break-normal outline-none overflow-auto"
                 style={{
@@ -1250,13 +1305,8 @@ int main() {
                   fontSize: `${fontSize}px`,
                   lineHeight: `${fontSize * 1.6}px`,
                   fontFamily: 'JetBrains Mono, monospace',
-                  fontVariantNumeric: 'tabular-nums',
-                  fontFeatureSettings: '"calt" 0',
-                  WebkitFontSmoothing: 'antialiased',
-                  MozOsxFontSmoothing: 'grayscale',
-                  color: 'rgba(255, 255, 255, 0.01)',
+                  color: 'transparent',
                   caretColor: '#22d3ee',
-                  WebkitTextFillColor: 'rgba(255, 255, 255, 0.01)',
                   border: 'none',
                   boxSizing: 'border-box',
                 }}
