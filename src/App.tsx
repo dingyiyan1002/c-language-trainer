@@ -19,6 +19,7 @@ import { generateStepsFromCode } from './utils/generateStepsFromCode';
 import { useSoundEffects, useKeyboardShortcuts } from './hooks/useInteractions';
 import { useUserStats, StatsPanel, AchievementsPanel, StreakDisplay } from './components/StatsAndAchievements';
 import { loadProgress as loadProgressApi, saveProgress as saveProgressApi, type Progress } from './services/progressApi';
+import { Icon, type IconName } from './components/ui/Icon';
 
 // 样式常量 - 性能优化
 const textStyles = {
@@ -116,6 +117,11 @@ import {
   Check
 } from 'lucide-react';
 
+// 导入额外的章节图标
+import {
+  Shield, Bird, Briefcase, Sprout, TrendingUp, Crown, Hand
+} from 'lucide-react';
+
 // 图标名称到组件的映射
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   BookOpen,
@@ -202,7 +208,15 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   Tv,
   Star,
   X,
-  Check
+  Check,
+  // 章节图标
+  Hand,
+  Shield,
+  Bird,
+  Briefcase,
+  Sprout,
+  TrendingUp,
+  Crown
 };
 
 const CodeBlock = memo(function CodeBlock({
@@ -2046,7 +2060,7 @@ const StatsView = memo(function StatsView({ progress, onReset, isDarkMode }: { p
         <div className="space-y-4">
           {chapterStats.map(chapter => (
             <div key={chapter.id} className="flex items-center gap-4">
-              <span className="text-2xl">{chapter.icon}</span>
+              <Icon name={chapter.icon as IconName} className={isDarkMode ? 'text-cyan-400' : 'text-cyan-600'} size={24} />
               <div className="flex-1">
                 <div className="flex justify-between text-sm mb-1">
                   <span className={isDarkMode ? 'text-white' : 'text-slate-800'}>{chapter.name}</span>

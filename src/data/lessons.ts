@@ -76,8 +76,8 @@ export const chapters: Chapter[] = [
   {
     id: 'basics-test',
     name: '基础入门',
-    icon: 'BookOpen',
-    description: 'C语言基础知识选择题 - 零基础入门，查漏补缺',
+    icon: 'Sparkles',
+    description: 'C 语言基础知识选择题 - 零基础入门，查漏补缺',
     questionCount: 178,
     mode: 'practice',
     lessons: [
@@ -400,8 +400,8 @@ int result = func_ptr(3, 4);
   {
     id: 'level1',
     name: 'Level 1 入门真题',
-    icon: 'Target',
-    description: 'C语言基础：printf、变量、运算符、条件、循环、函数、数组、宏、字符串、作用域 - 工作第一周就会用到',
+    icon: 'GraduationCap',
+    description: 'C 语言基础：printf、变量、运算符、条件、循环、函数、数组、宏、字符串、作用域 - 工作第一周就会用到',
     questionCount: 80,
     mode: 'real',
     lessons: [
@@ -495,7 +495,7 @@ int result = func_ptr(3, 4);
   {
     id: 'level2',
     name: 'Level 2 进阶真题',
-    icon: 'Target',
+    icon: 'TrendingUp',
     description: '指针基础、结构体、联合体、枚举进阶、函数指针、多文件编程 - 工作第一个月必备',
     questionCount: 100,
     mode: 'real',
@@ -582,7 +582,7 @@ int result = func_ptr(3, 4);
   {
     id: 'level3',
     name: 'Level 3 核心真题',
-    icon: 'Target',
+    icon: 'Brain',
     description: '内存管理、文件操作、位操作进阶、预处理进阶、复杂声明 - 工作三个月核心技能',
     questionCount: 150,
     mode: 'real',
@@ -658,7 +658,7 @@ int result = func_ptr(3, 4);
   {
     id: 'level4',
     name: 'Level 4 高级真题',
-    icon: 'Target',
+    icon: 'Zap',
     description: '多线程编程、进程通信、网络编程、信号处理、高级指针 - 工作半年进阶技能',
     questionCount: 120,
     mode: 'real',
@@ -735,7 +735,7 @@ int result = func_ptr(3, 4);
   {
     id: 'level5',
     name: 'Level 5 专家真题',
-    icon: 'Target',
+    icon: 'Crown',
     description: '内核编程、驱动开发、性能优化、安全编程、架构设计 - 资深工程师必备',
     questionCount: 50,
     mode: 'real',
@@ -1134,7 +1134,7 @@ do {
   {
     id: 'functions',
     name: '函数',
-    icon: 'Settings️',
+    icon: 'Cpu',
     description: '代码复用的核心，理解函数调用机制',
     questionCount: 11,
     mode: 'practice',
@@ -1229,8 +1229,8 @@ sizeof(str);  // 返回6（含\\0）
   {
     id: 'pointers',
     name: '指针陷阱',
-    icon: 'Finger',
-    description: '指针是C的灵魂，也是最大的坑',
+    icon: 'Hand',
+    description: '指针是 C 的灵魂，也是最大的坑',
     questionCount: 16,
     mode: 'practice',
     lessons: [
@@ -1280,7 +1280,7 @@ free(p);
   {
     id: 'memory',
     name: '内存安全',
-    icon: 'Shield️',
+    icon: 'Shield',
     description: '理解内存管理，避免内存泄漏和溢出',
     questionCount: 8,
     mode: 'practice',
@@ -1663,9 +1663,9 @@ gcc -fsanitize=address program.c
   },
   {
     id: 'linux-cmds',
-    name: 'Linux常用命令',
-    icon: 'Keyboard️',
-    description: '掌握Linux开发必备命令：文件操作、进程管理、网络调试、文本处理',
+    name: 'Linux 常用命令',
+    icon: 'Keyboard',
+    description: '掌握 Linux 开发必备命令：文件操作、进程管理、网络调试、文本处理',
     questionCount: 20,
     mode: 'practice',
     lessons: [
@@ -1801,9 +1801,9 @@ gcc -fsanitize=address program.c
   },
   {
     id: 'embedded',
-    name: '嵌入式Linux应用',
-    icon: 'Settings',
-    description: '嵌入式Linux应用开发：文件IO、进程线程、IPC通信、设备操作',
+    name: '嵌入式 Linux 应用',
+    icon: 'Cpu',
+    description: '嵌入式 Linux 应用开发：文件 IO、进程线程、IPC 通信、设备操作',
     questionCount: 25,
     mode: 'practice',
     lessons: [
@@ -1964,7 +1964,7 @@ gcc -fsanitize=address program.c
   {
     id: 'cpp',
     name: 'C++基础入门',
-    icon: 'Square',
+    icon: 'Code2',
     description: '从C到C++：引用、类与对象、继承多态、STL容器、智能指针、移动语义、模板',
     questionCount: 30,
     mode: 'practice',
