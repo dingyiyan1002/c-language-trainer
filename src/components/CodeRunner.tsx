@@ -1,6 +1,6 @@
 import React, { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Play, Loader2, AlertCircle, CheckCircle2, Terminal, X, Copy, Check, Maximize2, Minimize2, RotateCcw, Settings, ChevronDown, Keyboard, Lightbulb } from 'lucide-react';
-import { CodeTypingPractice } from './CodeTypingPractice';
+import CodeTypingPractice from './CodeTypingPractice';
 
 interface RunResult {
   success: boolean;
@@ -263,7 +263,6 @@ function TypingArea({ code, userInput, onInput, onComplete, onBack }: TypingArea
     // 使用 pre 元素的字体设置来计算
     const computedStyle = window.getComputedStyle(pre);
     const fontSize = parseFloat(computedStyle.fontSize);
-    const fontFamily = computedStyle.fontFamily;
 
     // 创建一个临时元素来测量字符宽度
     const tempSpan = document.createElement('span');
@@ -612,7 +611,6 @@ int main() {
   const [typeQueryInput, setTypeQueryInput] = useState('int');
   const [availableTools, setAvailableTools] = useState<Record<string, any>>({});
   const [typingMode, setTypingMode] = useState<'edit' | 'typing'>('edit');
-  const [cursorPosition, setCursorPosition] = useState({ line: 0, col: 0 });
 
   useEffect(() => {
     fetch('http://localhost:3001/api/tools')
@@ -687,8 +685,6 @@ int main() {
       ctx.font = `${fontSizeStr} ${fontFamily}`;
       ctx.textBaseline = 'alphabetic';
 
-      // 计算字符宽度（使用 'M' 作为参考）
-      const charWidth = ctx.measureText('M').width;
       const lineHeight = fontSize * 1.6;
 
       // 清空画布
@@ -1648,7 +1644,7 @@ int main() {
                         <div className="mt-2 bg-slate-800/50 rounded p-2 border border-slate-600/30">
                           <div className="text-xs text-slate-400 mb-1">📚 小贴士：</div>
                           <ul className="text-xs text-slate-300 space-y-1">
-                            {tip.tips.map((t, i) => (
+                            {tip.tips.map((t: string, i: number) => (
                               <li key={i} className="flex items-start gap-1.5">
                                 <span className="text-cyan-400 mt-0.5">•</span>
                                 <span>{t}</span>
