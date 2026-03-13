@@ -1,6 +1,6 @@
 import React, { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import type { JSX } from 'react';
 import { Play, Loader2, AlertCircle, CheckCircle2, Terminal, X, Copy, Check, Maximize2, Minimize2, RotateCcw, Settings, ChevronDown, Keyboard, Lightbulb } from 'lucide-react';
-import CodeTypingPractice from './CodeTypingPractice';
 
 interface RunResult {
   success: boolean;
@@ -611,6 +611,7 @@ int main() {
   const [typeQueryInput, setTypeQueryInput] = useState('int');
   const [availableTools, setAvailableTools] = useState<Record<string, any>>({});
   const [typingMode, setTypingMode] = useState<'edit' | 'typing'>('edit');
+  const [cursorPosition, setCursorPosition] = useState({ line: 0, col: 0 });
 
   useEffect(() => {
     fetch('http://localhost:3001/api/tools')
