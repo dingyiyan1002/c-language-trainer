@@ -1,5 +1,5 @@
 import React, { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, Loader2, AlertCircle, CheckCircle2, Terminal, X, Copy, Check, Maximize2, Minimize2, RotateCcw, Settings, ChevronDown, Keyboard } from 'lucide-react';
+import { Play, Loader2, AlertCircle, CheckCircle2, Terminal, X, Copy, Check, Maximize2, Minimize2, RotateCcw, Settings, ChevronDown, Keyboard, Lightbulb } from 'lucide-react';
 import { CodeTypingPractice } from './CodeTypingPractice';
 
 interface RunResult {
@@ -650,6 +650,7 @@ int main() {
   const animationFrameRef = useRef<number | null>(null);
   const [scrollPosition, setScrollPosition] = useState(0);
   const [errorLines, setErrorLines] = useState<number[]>([]);
+  const [smartTips, setSmartTips] = useState<any[]>([]);
 
   const lineCount = useMemo(() => {
     const lines = code.split('\n');
@@ -964,6 +965,12 @@ int main() {
         setErrorLines(data.errorLines);
       } else {
         setErrorLines([]);
+      }
+      // 更新智能提示
+      if (data.smartTips && Array.isArray(data.smartTips)) {
+        setSmartTips(data.smartTips);
+      } else {
+        setSmartTips([]);
       }
     } catch (error) {
       setResult({
@@ -1587,6 +1594,80 @@ int main() {
                 {result.output || '(无输出)'}
               </pre>
             </div>
+            
+            {/* 智能提示区域 */}
+            {!result.success && smartTips.length > 0 && (
+              <div className="border-t border-slate-700/50 bg-slate-800/30">
+                <div className="px-4 py-2 bg-gradient-to-r from-amber-900/50 to-transparent">
+                  <div className="flex items-center gap-2">
+                    <Lightbulb className="w-4 h-4 text-amber-400" />
+                    <span className="text-sm font-semibold text-amber-300">智能提示</span>
+                  </div>
+                </div>
+                <div className="px-4 py-3 space-y-4 max-h-96 overflow-auto">
+                  {smartTips.map((tip, index) => (
+                    <div key={index} className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          tip.severity === 'error' ? 'bg-red-900/50 text-red-300' :
+                          tip.severity === 'warning' ? 'bg-yellow-900/50 text-yellow-300' :
+                          'bg-blue-900/50 text-blue-300'
+                        }`}>
+                          {tip.type === 'syntax' ? '语法错误' :
+                           tip.type === 'semantic' ? '语义错误' :
+                           tip.type === 'type' ? '类型错误' :
+                           tip.type === 'format' ? '格式错误' : '其他'}
+                        </span>
+                        <span className="text-sm font-semibold text-slate-200">{tip.title}</span>
+                      </div>
+                      
+                      <div className="text-sm text-slate-300 mb-2">
+                        <p>{tip.explanation}</p>
+                      </div>
+                      
+                      <div className="text-sm text-cyan-300 mb-2">
+                        <span className="font-medium">💡 建议：</span>
+                        <span>{tip.suggestion}</span>
+                      </div>
+                      
+                      {tip.correctExample && (
+                        <div className="mt-2 bg-slate-900/80 rounded p-2 border border-green-900/50">
+                          <div className="text-xs text-green-400 mb-1">✅ 正确示例：</div>
+                          <pre className="text-xs text-green-300 font-mono whitespace-pre-wrap">{tip.correctExample}</pre>
+                        </div>
+                      )}
+                      
+                      {tip.wrongExample && (
+                        <div className="mt-2 bg-slate-900/80 rounded p-2 border border-red-900/50">
+                          <div className="text-xs text-red-400 mb-1">❌ 错误示例：</div>
+                          <pre className="text-xs text-red-300 font-mono whitespace-pre-wrap">{tip.wrongExample}</pre>
+                        </div>
+                      )}
+                      
+                      {tip.tips && tip.tips.length > 0 && (
+                        <div className="mt-2 bg-slate-800/50 rounded p-2 border border-slate-600/30">
+                          <div className="text-xs text-slate-400 mb-1">📚 小贴士：</div>
+                          <ul className="text-xs text-slate-300 space-y-1">
+                            {tip.tips.map((t, i) => (
+                              <li key={i} className="flex items-start gap-1.5">
+                                <span className="text-cyan-400 mt-0.5">•</span>
+                                <span>{t}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {tip.knowledgePoint && (
+                        <div className="mt-2 text-xs text-slate-500">
+                          📖 相关知识点：<span className="text-cyan-400">{tip.knowledgePoint}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

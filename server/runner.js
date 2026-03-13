@@ -15,6 +15,186 @@ if (!fs.existsSync(CODE_TEMP_DIR)) {
 
 const TIMEOUT_MS = 3000;
 
+// 智能错误分析模块
+const SMART_ERROR_ANALYZER = {
+  // 常见错误模式及其智能提示
+  patterns: [
+    {
+      // 头文件空格错误
+      regex: /stdio\.\s*h|stdlib\.\s*h|math\.\s*h|string\.\s*h/,
+      type: 'syntax',
+      severity: 'error',
+      title: '头文件名格式错误',
+      explanation: '头文件名不能包含空格。GCC 会将 `stdio. h` 识别为两个不同的标记。',
+      suggestion: '移除头文件名中的空格，确保使用正确的格式。',
+      correctExample: '#include <stdio.h>',
+      wrongExample: '#include <stdio. h>',
+      knowledgePoint: '预处理指令',
+      tips: ['头文件必须使用尖括号 <> 或双引号 "" 包裹', '文件名中不能有空格', '常见的头文件有 stdio.h, stdlib.h, math.h 等']
+    },
+    {
+      // 缺少分号
+      regex: /expected ';' before/,
+      type: 'syntax',
+      severity: 'error',
+      title: '缺少分号',
+      explanation: 'C 语言中，每条语句必须以分号 ; 结尾。这是最常见的语法错误之一。',
+      suggestion: '在语句末尾添加分号。',
+      correctExample: 'printf("Hello");\nreturn 0;',
+      wrongExample: 'printf("Hello")\nreturn 0',
+      knowledgePoint: '语句格式',
+      tips: ['每个语句必须以分号结尾', '控制结构（if, for, while）的括号后不需要分号', '函数定义后不需要分号']
+    },
+    {
+      // 未声明的标识符
+      regex: /undeclared identifier|use of undeclared identifier/,
+      type: 'semantic',
+      severity: 'error',
+      title: '使用了未声明的标识符',
+      explanation: '在 C 语言中，所有变量和函数必须先声明后使用。编译器不知道这个标识符是什么。',
+      suggestion: '检查是否：1) 拼写错误 2) 忘记声明 3) 忘记包含头文件',
+      correctExample: 'int x = 10;\nprintf("%d", x);',
+      wrongExample: 'printf("%d", x); // x 未声明',
+      knowledgePoint: '变量声明',
+      tips: ['变量使用前必须声明类型', '注意大小写敏感（x 和 X 是不同的）', '检查是否拼写错误']
+    },
+    {
+      // 隐式函数声明
+      regex: /implicit declaration of function/,
+      type: 'semantic',
+      severity: 'error',
+      title: '函数隐式声明',
+      explanation: '调用了一个没有声明的函数。在 C99 标准之后，隐式函数声明已被废弃。',
+      suggestion: '1) 添加函数声明 2) 包含正确的头文件 3) 检查函数名拼写',
+      correctExample: '#include <stdio.h>\nint main() {\n    printf("Hello");\n}',
+      wrongExample: 'int main() {\n    printf("Hello"); // 未包含 stdio.h\n}',
+      knowledgePoint: '函数声明',
+      tips: ['使用标准库函数前包含对应的头文件', '自定义函数要先声明后使用', '启用 -Werror 将警告转为错误']
+    },
+    {
+      // 类型不匹配
+      regex: /incompatible implicit declaration|conflicting types/,
+      type: 'type',
+      severity: 'error',
+      title: '类型不兼容',
+      explanation: '函数的实际使用与声明不匹配，或者隐式声明的类型与实际类型冲突。',
+      suggestion: '检查函数声明和调用的参数类型、返回值类型是否一致。',
+      correctExample: 'int add(int a, int b);\nadd(1, 2);',
+      wrongExample: 'int add(int a, int b);\nadd(1.5, 2.5); // 类型不匹配',
+      knowledgePoint: '类型系统',
+      tips: ['C 是强类型语言', '注意隐式类型转换', '启用编译器警告']
+    },
+    {
+      // 字符串未终止
+      regex: /unterminated string|missing terminating/,
+      type: 'syntax',
+      severity: 'error',
+      title: '字符串未终止',
+      explanation: '字符串常量缺少结束的双引号 "。',
+      suggestion: '在字符串末尾添加双引号。',
+      correctExample: 'printf("Hello, World!");',
+      wrongExample: 'printf("Hello, World!);',
+      knowledgePoint: '字符串常量',
+      tips: ['字符串必须用双引号包裹', '转义双引号使用 \\"', '换行使用 \\n']
+    },
+    {
+      // 注释未终止
+      regex: /unterminated comment/,
+      type: 'syntax',
+      severity: 'error',
+      title: '注释未终止',
+      explanation: '多行注释 /* */ 缺少结束的 */。',
+      suggestion: '在注释末尾添加 */。',
+      correctExample: '/* 这是一个注释 */',
+      wrongExample: '/* 这是一个注释',
+      knowledgePoint: '注释语法',
+      tips: ['单行注释使用 //', '多行注释使用 /* */', '注意不要嵌套多行注释']
+    },
+    {
+      // 括号不匹配
+      regex: /expected '}'|expected ')'|expected ']'|unmatched '|mismatched/,
+      type: 'syntax',
+      severity: 'error',
+      title: '括号不匹配',
+      explanation: '代码中的括号（圆括号、方括号、花括号）没有正确配对。',
+      suggestion: '检查每个左括号是否有对应的右括号。建议使用编辑器的括号匹配功能。',
+      correctExample: 'int main() {\n    if (x > 0) {\n        printf("positive");\n    }\n}',
+      wrongExample: 'int main() {\n    if (x > 0 {\n        printf("positive");\n    }\n}',
+      knowledgePoint: '括号匹配',
+      tips: ['使用编辑器的括号高亮功能', '保持代码缩进', '写左括号后立即写右括号']
+    },
+    {
+      // 格式化字符串错误
+      regex: /format .* expects argument|conversion specifies/,
+      type: 'format',
+      severity: 'error',
+      title: '格式化字符串错误',
+      explanation: 'printf/scanf 的格式化字符串与实际参数不匹配。',
+      suggestion: '检查格式化占位符（%d, %f, %s 等）是否与参数类型一致。',
+      correctExample: 'int x = 10;\nprintf("%d", x);',
+      wrongExample: 'int x = 10;\nprintf("%s", x); // %s 需要 char*',
+      knowledgePoint: '格式化 I/O',
+      tips: ['%d - int', '%f - float/double', '%c - char', '%s - 字符串', '%p - 指针']
+    },
+    {
+      // 数组越界
+      regex: /array index is not an integer|array subscript is not an integer/,
+      type: 'semantic',
+      severity: 'error',
+      title: '数组索引错误',
+      explanation: '数组索引必须是整数类型。',
+      suggestion: '使用整数作为数组索引。',
+      correctExample: 'int arr[5];\narr[2] = 10;',
+      wrongExample: 'int arr[5];\narr[2.5] = 10; // 索引必须是整数',
+      knowledgePoint: '数组',
+      tips: ['数组索引从 0 开始', '确保索引在有效范围内', '注意不要越界']
+    }
+  ],
+  
+  // 分析错误并返回智能提示
+  analyze(errorMsg) {
+    const result = {
+      originalError: errorMsg,
+      smartTips: [],
+      knowledgePoints: []
+    };
+    
+    for (const pattern of this.patterns) {
+      if (pattern.regex.test(errorMsg)) {
+        result.smartTips.push({
+          type: pattern.type,
+          severity: pattern.severity,
+          title: pattern.title,
+          explanation: pattern.explanation,
+          suggestion: pattern.suggestion,
+          correctExample: pattern.correctExample,
+          wrongExample: pattern.wrongExample,
+          knowledgePoint: pattern.knowledgePoint,
+          tips: pattern.tips
+        });
+        result.knowledgePoints.push(pattern.knowledgePoint);
+      }
+    }
+    
+    // 如果没有匹配到特定模式，返回通用提示
+    if (result.smartTips.length === 0) {
+      result.smartTips.push({
+        type: 'general',
+        severity: 'error',
+        title: '编译错误',
+        explanation: '代码存在语法或语义错误，编译器无法生成可执行文件。',
+        suggestion: '仔细阅读错误信息，检查错误位置附近的代码。',
+        correctExample: null,
+        wrongExample: null,
+        knowledgePoint: '编译基础',
+        tips: ['从上到下阅读错误信息', '先修复第一个错误（后续错误可能是连锁反应）', '注意错误提示的行号']
+      });
+    }
+    
+    return result;
+  }
+};
+
 // GCC 错误信息翻译词典
 const ERROR_TRANSLATIONS = {
   // 常见错误类型
@@ -330,11 +510,16 @@ export async function runCode(codeSource, options = {}) {
         }
       }
       
+      // 使用智能错误分析
+      const smartAnalysis = SMART_ERROR_ANALYZER.analyze(compileResult.error);
+      
       return { 
         success: false, 
         output: formatCompileError(compileResult.error, CODE_TEMP_DIR), 
         type: 'compile_error',
-        errorLines: errorLines
+        errorLines: errorLines,
+        smartTips: smartAnalysis.smartTips,
+        knowledgePoints: smartAnalysis.knowledgePoints
       };
     }
 
