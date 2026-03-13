@@ -21,10 +21,13 @@ const ERROR_TRANSLATIONS = {
   'error:': '错误：',
   'warning:': '警告：',
   'note:': '提示：',
+  'fatal error:': '致命错误：',
 
   // #include 指令
   '#include': '#include',
   'extra tokens at end of #include directive': '#include 指令末尾有多余的标记',
+  'No such file or directory': '没有那个文件或目录',
+  'cannot find': '找不到',
 
   // 具体错误信息
   'implicit declaration of function': '函数的隐式声明',
@@ -83,7 +86,40 @@ const ERROR_TRANSLATIONS = {
   'attribute': '属性',
   'noreturn': '不返回',
   'does return': '会返回',
-  'unknown type name': '未知的类型名',
+  
+  // 语法错误
+  'syntax error': '语法错误',
+  'invalid syntax': '无效的语法',
+  'unexpected token': '意外的标记',
+  'invalid preprocessing directive': '无效的预处理指令',
+  'unterminated comment': '未终止的注释',
+  'unterminated string or character constant': '未终止的字符串或字符常量',
+  'missing terminating': '缺少终止',
+  'stray': ' stray 字符',
+  'unrecognized character escape': '未识别的字符转义',
+  
+  // 链接错误
+  'undefined reference to': '未定义的引用',
+  'multiple definition of': '多重定义',
+  'ld returned 1 exit status': '链接器返回退出状态 1',
+  
+  // 运行时错误
+  'segmentation fault': '段错误',
+  'stack overflow': '栈溢出',
+  'heap-buffer-overflow': '堆缓冲区溢出',
+  'stack-buffer-overflow': '栈缓冲区溢出',
+  'use-after-free': '释放后使用',
+  'memory leak': '内存泄漏',
+  'double free': '重复释放',
+  'invalid free': '无效的释放',
+  'uninitialized value': '未初始化的值',
+  'out of bounds': '越界',
+  'null pointer dereference': '空指针解引用',
+  'division by zero': '除以零',
+  'floating point exception': '浮点异常',
+  'integer overflow': '整数溢出',
+  'timeout': '超时',
+  'killed': '被终止',
 
   // 建议信息
   'or provide a declaration': '或提供声明',
@@ -280,10 +316,25 @@ export async function runCode(codeSource, options = {}) {
     });
 
     if (compileResult.exitCode !== 0) {
+      // 解析错误行号
+      const errorLines = [];
+      const lines = compileResult.error.split('\n');
+      for (const line of lines) {
+        // 匹配 GCC 错误格式：main.c:5:2: error: ...
+        const match = line.match(/main\.c:(\d+):\d+:/);
+        if (match) {
+          const lineNum = parseInt(match[1]);
+          if (!errorLines.includes(lineNum)) {
+            errorLines.push(lineNum);
+          }
+        }
+      }
+      
       return { 
         success: false, 
         output: formatCompileError(compileResult.error, CODE_TEMP_DIR), 
-        type: 'compile_error' 
+        type: 'compile_error',
+        errorLines: errorLines
       };
     }
 

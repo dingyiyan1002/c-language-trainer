@@ -649,6 +649,7 @@ int main() {
   const settingsRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const [scrollPosition, setScrollPosition] = useState(0);
+  const [errorLines, setErrorLines] = useState<number[]>([]);
 
   const lineCount = useMemo(() => {
     const lines = code.split('\n');
@@ -697,11 +698,13 @@ int main() {
       let x = fontSize; // padding-left
       // 使用 alphabetic baseline，计算方式：padding-top + (lineHeight - fontSize) / 2 + fontSize * 0.8
       let y = fontSize * 1.5 + (lineHeight - fontSize) / 2 + fontSize * 0.8;
+      let currentLine = 1;
 
       for (const token of tokens) {
         if (token.type === 'newline') {
           x = fontSize;
           y += lineHeight;
+          currentLine++;
           continue;
         }
 
@@ -731,8 +734,36 @@ int main() {
         ctx.fillText(token.value, x, y);
         x += ctx.measureText(token.value).width;
       }
+
+      // 绘制错误行的红色波浪线
+      if (errorLines.length > 0) {
+        ctx.strokeStyle = '#ef4444'; // 红色
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        
+        for (const lineNum of errorLines) {
+          const lineY = fontSize * 1.5 + (lineNum - 1) * lineHeight + (lineHeight - fontSize) / 2 + fontSize * 0.8 + 3;
+          
+          // 计算该行的宽度
+          ctx.beginPath();
+          const waveAmplitude = 2;
+          const waveFrequency = 4;
+          const startX = fontSize;
+          const endX = rect.width - fontSize;
+          
+          for (let wx = startX; wx < endX; wx += 1) {
+            const wy = lineY + Math.sin((wx - startX) / waveFrequency) * waveAmplitude;
+            if (wx === startX) {
+              ctx.moveTo(wx, wy);
+            } else {
+              ctx.lineTo(wx, wy);
+            }
+          }
+          ctx.stroke();
+        }
+      }
     });
-  }, [code, fontSize]);
+  }, [code, fontSize, errorLines]);
 
   useEffect(() => {
     renderCodeToCanvas();
@@ -928,6 +959,12 @@ int main() {
       });
       const data = await response.json();
       setResult(data);
+      // 更新错误行号
+      if (data.errorLines && Array.isArray(data.errorLines)) {
+        setErrorLines(data.errorLines);
+      } else {
+        setErrorLines([]);
+      }
     } catch (error) {
       setResult({
         success: false,
