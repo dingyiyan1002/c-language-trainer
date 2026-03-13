@@ -648,8 +648,13 @@ int main() {
   const runCodeRef = useRef<() => void>(() => {});
   const settingsRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const [scrollPosition, setScrollPosition] = useState(0);
 
-  const lineCount = useMemo(() => code.split('\n').length, [code]);
+  const lineCount = useMemo(() => {
+    const lines = code.split('\n');
+    // 如果最后一行为空，说明用户在最后按了回车，仍需要显示该行
+    return lines.length;
+  }, [code]);
 
   const renderCodeToCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -678,7 +683,7 @@ int main() {
       const fontFamily = 'JetBrains Mono, monospace';
       const fontSizeStr = `${fontSize}px`;
       ctx.font = `${fontSizeStr} ${fontFamily}`;
-      ctx.textBaseline = 'bottom';
+      ctx.textBaseline = 'alphabetic';
 
       // 计算字符宽度（使用 'M' 作为参考）
       const charWidth = ctx.measureText('M').width;
@@ -690,7 +695,8 @@ int main() {
       // 分词并渲染
       const tokens = tokenize(code);
       let x = fontSize; // padding-left
-      let y = fontSize * 1.5 + lineHeight; // 使用 bottom baseline，文本会向上绘制
+      // 使用 alphabetic baseline，计算方式：padding-top + (lineHeight - fontSize) / 2 + fontSize * 0.8
+      let y = fontSize * 1.5 + (lineHeight - fontSize) / 2 + fontSize * 0.8;
 
       for (const token of tokens) {
         if (token.type === 'newline') {
@@ -741,6 +747,8 @@ int main() {
     const handleScroll = () => {
       // canvas 和 textarea 共享同一个容器，通过 transform 来同步滚动
       canvas.style.transform = `translate(${-textarea.scrollLeft}px, ${-textarea.scrollTop}px)`;
+      // 更新滚动状态，让行号也能同步
+      setScrollPosition(textarea.scrollTop);
     };
 
     textarea.addEventListener('scroll', handleScroll);
@@ -1258,7 +1266,7 @@ int main() {
         <div ref={editorRef} className="relative overflow-hidden" style={{ height: isMaximized ? '60%' : `${editorHeight}px` }}>
           <div className="absolute inset-0 flex overflow-hidden">
             <div className="flex-shrink-0 bg-slate-850 border-r border-slate-700/50 select-none overflow-hidden" style={{ width: `${Math.max(3, String(lineCount).length) * 10 + 24}px` }}>
-              <div style={{ padding: `${fontSize * 1.5}px 0`, transform: `translateY(-${textareaRef.current?.scrollTop || 0}px)`, fontSize: `${fontSize}px`, lineHeight: `${fontSize * 1.6}px` }}>
+              <div style={{ padding: `${fontSize * 1.5}px 0`, transform: `translateY(-${scrollPosition}px)`, fontSize: `${fontSize}px`, lineHeight: `${fontSize * 1.6}px` }}>
                 {Array.from({ length: lineCount }, (_, i) => (
                   <div key={i} className="text-right pr-3 text-slate-600 hover:text-slate-400 transition-colors" style={{ height: `${fontSize * 1.6}px` }}>
                     {i + 1}

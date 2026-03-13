@@ -248,7 +248,10 @@ export async function runCode(codeSource, options = {}) {
     const compileArgs = [
       srcPath,
       '-o', exePath,
-      '-g'
+      '-g',
+      '-Wall',  // 启用所有警告
+      '-Werror',  // 将警告视为错误
+      '-pedantic'  // 严格遵循标准
     ];
 
     if (asanAvailable) {
