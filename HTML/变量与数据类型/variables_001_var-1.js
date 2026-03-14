@@ -1,159 +1,39 @@
 window.LESSON_DATA = {
   meta: {
-    chapter: 'variables',
-    lessonId: 'var-1',
+    id: 'var-1',
     title: '变量声明与初始化',
-    description: '学会声明变量，理解不同数据类型'
+    chapter: '变量与数据类型',
+    index: 1,
+    filename: 'variable_decl.c',
+    keyPoints: ['变量声明', '数据类型', '初始化']
   },
-
   codeLines: [
-    [
-      { type: 'kw', text: 'int' },
-      { type: 'ws', text: ' ' },
-      { type: 'id', text: 'age' },
-      { type: 'ws', text: ' ' },
-      { type: 'op', text: '=' },
-      { type: 'ws', text: ' ' },
-      { type: 'num', text: '20' },
-      { type: 'punc', text: ';' },
-      { type: 'ws', text: '       ' },
-      { type: 'cmt', text: '// 整型变量' }
-    ],
-    [
-      { type: 'kw', text: 'float' },
-      { type: 'ws', text: ' ' },
-      { type: 'id', text: 'price' },
-      { type: 'ws', text: ' ' },
-      { type: 'op', text: '=' },
-      { type: 'ws', text: ' ' },
-      { type: 'num', text: '9.9' },
-      { type: 'punc', text: ';' },
-      { type: 'ws', text: '  ' },
-      { type: 'cmt', text: '// 浮点型' }
-    ],
-    [
-      { type: 'kw', text: 'char' },
-      { type: 'ws', text: ' ' },
-      { type: 'id', text: 'grade' },
-      { type: 'ws', text: ' ' },
-      { type: 'op', text: '=' },
-      { type: 'ws', text: ' ' },
-      { type: 'str', text: "'A'" },
-      { type: 'punc', text: ';' },
-      { type: 'ws', text: '   ' },
-      { type: 'cmt', text: '// 字符型' }
-    ]
+    { num: 1, tokens: [{ type: 'pp', text: '#include' }, { type: 'ws', text: ' ' }, { type: 'str', text: '<stdio.h>' }] },
+    { num: 2, tokens: [{ type: 'ws', text: ' ' }] },
+    { num: 3, tokens: [{ type: 'kw', text: 'int' }, { type: 'ws', text: ' ' }, { type: 'kw', text: 'main' }, { type: 'punc', text: '(' }, { type: 'kw', text: 'void' }, { type: 'punc', text: ')' }] },
+    { num: 4, tokens: [{ type: 'punc', text: '{' }] },
+    { num: 5, tokens: [{ type: 'ws', text: '    ' }, { type: 'kw', text: 'int' }, { type: 'ws', text: ' ' }, { type: 'id', text: 'age' }, { type: 'ws', text: ' ' }, { type: 'op', text: '=' }, { type: 'ws', text: ' ' }, { type: 'num', text: '20' }, { type: 'punc', text: ';' }] },
+    { num: 6, tokens: [{ type: 'ws', text: '    ' }, { type: 'kw', text: 'float' }, { type: 'ws', text: ' ' }, { type: 'id', text: 'price' }, { type: 'ws', text: ' ' }, { type: 'op', text: '=' }, { type: 'ws', text: ' ' }, { type: 'num', text: '9.9f' }, { type: 'punc', text: ';' }] },
+    { num: 7, tokens: [{ type: 'ws', text: '    ' }, { type: 'kw', text: 'char' }, { type: 'ws', text: ' ' }, { type: 'id', text: 'grade' }, { type: 'ws', text: ' ' }, { type: 'op', text: '=' }, { type: 'ws', text: ' ' }, { type: 'str', text: "'A'" }, { type: 'punc', text: ';' }] },
+    { num: 8, tokens: [{ type: 'ws', text: '    ' }, { type: 'kw', text: 'return' }, { type: 'ws', text: ' ' }, { type: 'num', text: '0' }, { type: 'punc', text: ';' }] },
+    { num: 9, tokens: [{ type: 'punc', text: '}' }] }
   ],
-
   varConfig: [
-    { name: 'age', color: '#3b82f6', appearStep: 1, type: 'int' },
-    { name: 'price', color: '#22c55e', appearStep: 2, type: 'float' },
-    { name: 'grade', color: '#f59e0b', appearStep: 3, type: 'char' }
+    { key: 'age', name: 'age', type: 'int', addr: '0x7fff00', glowColor: 'rgba(34,197,94,0.35)', accentCls: 'text-green-400', badgeCls: 'text-green-400 border-green-500/30 bg-green-500/12', appearStep: 1 },
+    { key: 'price', name: 'price', type: 'float', addr: '0x7fff04', glowColor: 'rgba(59,130,246,0.35)', accentCls: 'text-blue-400', badgeCls: 'text-blue-400 border-blue-500/30 bg-blue-500/12', appearStep: 1 },
+    { key: 'grade', name: 'grade', type: 'char', addr: '0x7fff08', glowColor: 'rgba(234,179,8,0.35)', accentCls: 'text-yellow-400', badgeCls: 'text-yellow-400 border-yellow-500/30 bg-yellow-500/12', appearStep: 1 }
   ],
-
   scenes: [
-    {
-      step: 0,
-      line: -1,
-      executedLines: [],
-      vars: {},
-      explanation: {
-        text: '程序开始执行，准备声明变量',
-        detail: '在 C 语言中，变量声明告诉编译器变量的类型和名称。这里我们将声明三个不同类型的变量。',
-        actor: 'Compiler',
-        icon: 'CPU',
-        color: 'blue'
-      }
-    },
-    {
-      step: 1,
-      line: 0,
-      executedLines: [0],
-      vars: { age: { value: 20, type: 'int', address: '0x7ffd1000' } },
-      explanation: {
-        text: '第 1 行：声明整型变量 age 并初始化为 20',
-        detail: 'int 类型用于存储整数，占用 4 字节内存。变量 age 被分配内存地址 0x7ffd1000，存储值 20。',
-        actor: 'CPU',
-        icon: 'Memory',
-        color: 'green'
-      }
-    },
-    {
-      step: 2,
-      line: 1,
-      executedLines: [0, 1],
-      vars: {
-        age: { value: 20, type: 'int', address: '0x7ffd1000' },
-        price: { value: 9.9, type: 'float', address: '0x7ffd1004' }
-      },
-      explanation: {
-        text: '第 2 行：声明浮点型变量 price 并初始化为 9.9',
-        detail: 'float 类型用于存储带小数的数值，占用 4 字节。price 被分配地址 0x7ffd1004，存储值 9.9。',
-        actor: 'CPU',
-        icon: 'Memory',
-        color: 'green'
-      }
-    },
-    {
-      step: 3,
-      line: 2,
-      executedLines: [0, 1, 2],
-      vars: {
-        age: { value: 20, type: 'int', address: '0x7ffd1000' },
-        price: { value: 9.9, type: 'float', address: '0x7ffd1004' },
-        grade: { value: "'A'", type: 'char', address: '0x7ffd1008' }
-      },
-      explanation: {
-        text: '第 3 行：声明字符型变量 grade 并初始化为 \'A\'',
-        detail: 'char 类型用于存储单个字符，占用 1 字节。字符用单引号包围，\'A\'的 ASCII 码值为 65。',
-        actor: 'CPU',
-        icon: 'Memory',
-        color: 'green'
-      }
-    }
+    { step: 0, line: -1, executedLines: [], vars: {}, highlightVar: null, isDanger: false, output: [], explanation: { icon: 'rocket', text: '点击播放，学习变量声明与初始化', color: 'blue', actor: null, detail: null }, prediction: null, misconception: null, actor: null, target: null, timing: null },
+    { step: 1, line: 5, executedLines: [1,2,3,4], vars: { age: 20 }, highlightVar: 'age', isDanger: false, output: [], explanation: { icon: 'variable', text: 'int age = 20 — 声明整型变量', color: 'green', actor: 'CPU', detail: 'int 声明整型变量，占用 4 字节。= 是赋值运算符，将 20 存入 age 的内存空间。' }, prediction: { question: '以下哪个变量名合法？', options: ['2ndPlace', '_count', 'my-var'], answer: 1 }, misconception: null, actor: 'CPU', target: 'var:age', timing: 'runtime' },
+    { step: 2, line: 6, executedLines: [1,2,3,4,5], vars: { age: 20, price: 9.9 }, highlightVar: 'price', isDanger: false, output: [], explanation: { icon: 'decimal', text: 'float price = 9.9f — 声明浮点型变量', color: 'blue', actor: 'CPU', detail: 'float 是单精度浮点型，占用 4 字节，适合存储小数。f 后缀表示 float 字面量。' }, prediction: null, misconception: { title: '浮点数精度', text: 'float 约 7 位有效数字，double 约 15 位。金融计算建议用整数避免浮点误差。' }, actor: 'CPU', target: 'var:price', timing: 'runtime' },
+    { step: 3, line: 7, executedLines: [1,2,3,4,5,6], vars: { age: 20, price: 9.9, grade: 65 }, highlightVar: 'grade', isDanger: false, output: [], explanation: { icon: 'character', text: 'char grade = \'A\' — 声明字符型变量', color: 'yellow', actor: 'CPU', detail: 'char 占用 1 字节，存储字符的 ASCII 码。单引号表示字符字面量。\'A\' 的 ASCII 码是 65。' }, prediction: null, misconception: null, actor: 'CPU', target: 'var:grade', timing: 'runtime' },
+    { step: 4, line: 8, executedLines: [1,2,3,4,5,6,7], vars: { age: 20, price: 9.9, grade: 65 }, highlightVar: null, isDanger: false, output: [{ type: 'success', text: 'Program ended' }], explanation: { icon: 'check', text: '变量声明要点：类型 + 名称 + 初始化', color: 'green', actor: 'Teacher', detail: '变量声明三要素：1) 数据类型 2) 变量名 3) 初始化（推荐）。好习惯：声明时就初始化。' }, prediction: null, misconception: null, actor: 'Teacher', target: 'exit', timing: 'runtime' }
   ],
-
-  predictions: [
-    {
-      question: '以下哪个变量声明是正确的？',
-      options: [
-        { text: 'int 1name = 10;', feedback: '错误！变量名不能以数字开头。' },
-        { text: 'int name = 10;', feedback: '正确！符合命名规则。' },
-        { text: 'int = 10;', feedback: '错误！缺少变量名。' },
-        { text: 'int int = 10;', feedback: '错误！不能使用关键字作为变量名。' }
-      ],
-      correctIndex: 1
-    }
-  ],
-
-  misconceptions: [
-    {
-      myth: '变量名可以任意命名，包括数字开头',
-      truth: '变量名必须以字母或下划线开头，只能包含字母、数字、下划线，且不能使用关键字（如 int、if、for 等）'
-    },
-    {
-      myth: 'float 和 int 可以互换使用',
-      truth: 'int 存储整数（如 20），float 存储小数（如 9.9）。将 float 赋值给 int 会截断小数部分。'
-    },
-    {
-      myth: '字符可以用双引号表示',
-      truth: '字符用单引号（\'A\'），字符串用双引号（"Hello"）。\'A\'是 char 类型，"A"是字符串（含\'\\0\'结尾）。'
-    }
-  ],
-
   summary: {
-    keyPoints: [
-      '变量声明语法：类型 变量名 = 初始值;',
-      'int 存储整数（4 字节）',
-      'float 存储小数（4 字节）',
-      'char 存储单个字符（1 字节）',
-      '变量名规则：字母/下划线开头，只能含字母数字下划线'
-    ],
-    pitfalls: [
-      '变量名不能以数字开头（如 1name 非法）',
-      '不能使用关键字作为变量名（如 int int 非法）',
-      '字符用单引号，字符串用双引号，不要混淆'
-    ],
-    transferQuestion: '如果要存储圆周率 3.14159，应该使用什么类型？如果要存储字母\'B\'呢？'
+    oneLiner: '变量声明：类型 + 名称 + 初始化（推荐）— int 整数/float 小数/char 字符',
+    pitfalls: ['未初始化的局部变量是垃圾值，使用前必须初始化', '变量名只能包含字母、数字、下划线，且不能数字开头', '= 是赋值，== 是比较，不要混淆'],
+    transferQuestion: '如何声明一个 double 类型的变量并初始化为 3.14159？',
+    miniExercise: { bugCode: 'int 2ndPlace = 2;', hint: '变量名不能数字开头！应该改为 secondPlace 或 place_2。' }
   }
 };
