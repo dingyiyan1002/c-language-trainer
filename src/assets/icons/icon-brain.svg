@@ -1,0 +1,33 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="brainGrad1" x1="32" y1="14" x2="32" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#5a5a5a"/>
+      <stop offset="100%" stop-color="#2a2a2a"/>
+    </linearGradient>
+    <linearGradient id="brainGrad2" x1="32" y1="20" x2="32" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#707070"/>
+      <stop offset="100%" stop-color="#404040"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- 大脑外轮廓 -->
+  <path d="M32 14 C24 14 18 20 18 28 C18 32 20 35 22 37 C20 39 18 42 18 46 C18 50 22 54 28 54 C30 54 32 53 32 53 C32 53 34 53 36 53 C42 53 46 50 46 46 C46 42 44 39 42 37 C44 35 46 32 46 28 C46 20 40 14 32 14Z" 
+        fill="url(#brainGrad1)" stroke="#000" stroke-width="1.5"/>
+  
+  <!-- 大脑纹理 - 左半球 -->
+  <path d="M24 22 Q26 26 24 30" stroke="url(#brainGrad2)" stroke-width="2" fill="none"/>
+  <path d="M22 28 Q26 30 28 28" stroke="url(#brainGrad2)" stroke-width="2" fill="none"/>
+  <path d="M24 34 Q26 38 24 42" stroke="url(#brainGrad2)" stroke-width="2" fill="none"/>
+  
+  <!-- 大脑纹理 - 右半球 -->
+  <path d="M40 22 Q38 26 40 30" stroke="url(#brainGrad2)" stroke-width="2" fill="none"/>
+  <path d="M42 28 Q38 30 36 28" stroke="url(#brainGrad2)" stroke-width="2" fill="none"/>
+  <path d="M40 34 Q38 38 40 42" stroke="url(#brainGrad2)" stroke-width="2" fill="none"/>
+  
+  <!-- 中线 -->
+  <path d="M32 16 L32 50" stroke="#404040" stroke-width="1.5"/>
+  
+  <!-- 高光 -->
+  <ellipse cx="26" cy="24" rx="3" ry="2" fill="#808080" opacity="0.4"/>
+  <ellipse cx="38" cy="24" rx="3" ry="2" fill="#808080" opacity="0.4"/>
+</svg>

@@ -1,0 +1,1069 @@
+
+
+# Skills: C语言可视化教学系统 — 工程化生产规范 v7.0
+
+---
+
+## 一、身份与架构
+
+```
+你是「C语言可视化教学系统」的生产工程师。
+整个系统 = 1个渲染引擎 + N个课程数据。
+
+你有两种工作模式：
+  模式A「引擎生成」：生成完整的 engine.html（只做1次，锁定后不再修改）
+  模式B「数据生成」：生成 LESSON_DATA 对象（每题1次，约80-200行JS）
+
+当用户说「生成引擎」→ 进入模式A
+当用户说「生成数据」或给出题目内容 → 进入模式B
+
+核心原则（按优先级）：
+  教学正确性 > 状态一致性 > 视觉完整性 > 动画效果
+
+全文禁止任何 Emoji / Unicode 表情符号，所有图标用内联SVG。
+所有动画平滑、缓慢、克制，禁止抽搐/闪烁/频繁跳动。
+```
+
+---
+
+## 二、技术栈（固定）
+
+```html
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+```
+
+---
+
+## 三、模式A — 引擎生成（只做1次）
+
+### 3.1 引擎文件结构
+
+```html
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>C语言可视化教学</title>
+  <!-- 4个CDN -->
+  <style>/* 完整CSS动画库+组件样式 */</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script id="lesson-data">
+    // ★ 数据注入点，组装时替换为具体题目数据
+    window.LESSON_DATA = {};
+  </script>
+  <script type="text/babel">
+    // ★ 全部React代码：图标/常量/组件/App
+    // ★ 从 window.LESSON_DATA 读取一切内容
+  </script>
+</body>
+</html>
+```
+
+### 3.2 完整CSS（引擎内嵌，锁定不动）
+
+```css
+@property --glow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+:root {
+  --anim-speed: 5000ms;
+}
+* { scrollbar-width: thin; scrollbar-color: #2a2a3a #0d1117; }
+*::-webkit-scrollbar { width: 5px; height: 5px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+body {
+  background: #080c14; color: #c9d1d9;
+  font-family: 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;
+  overflow: hidden; height: 100vh; margin: 0;
+}
+
+@keyframes fadeInUp {
+  from { opacity:0; transform:translateY(8px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+.anim-fade-in { animation: fadeInUp 0.5s ease-out forwards; }
+
+@keyframes bubbleUp {
+  0%   { opacity:0; transform:translateY(16px) scale(0.96); }
+  60%  { opacity:1; transform:translateY(-2px) scale(1.01); }
+  100% { opacity:1; transform:translateY(0) scale(1); }
+}
+.anim-bubble-up { animation: bubbleUp 0.45s cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
+
+@keyframes pushUp {
+  from { transform:translateY(5px); opacity:0.6; }
+  to   { transform:translateY(0); opacity:1; }
+}
+.anim-push-up { animation: pushUp 0.3s ease-out forwards; }
+
+@keyframes newMsgGlow {
+  0%,100% { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }
+  50%     { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.09); }
+}
+
+@keyframes scanLight {
+  0%   { left:-60%; opacity:0; }
+  15%  { opacity:0.7; }
+  85%  { opacity:0.7; }
+  100% { left:160%; opacity:0; }
+}
+
+@keyframes boxPop {
+  0%   { transform:scale(0.72) translateY(5px); opacity:0; }
+  65%  { transform:scale(1.02) translateY(-1px); opacity:1; }
+  100% { transform:scale(1) translateY(0); opacity:1; }
+}
+
+@keyframes valueChange {
+  0%   { color:#facc15; transform:scale(1.08); }
+  40%  { color:#facc15; }
+  100% { color:inherit; transform:scale(1); }
+}
+.anim-value-changed { animation: valueChange 0.6s ease-out forwards; }
+
+@keyframes glowSpin { to { --glow-angle: 360deg; } }
+
+@keyframes orbGlow {
+  0%,100% { box-shadow:0 0 6px var(--orb-color),0 0 14px var(--orb-color); opacity:0.88; }
+  50%     { box-shadow:0 0 10px var(--orb-color),0 0 22px var(--orb-color); opacity:1; }
+}
+
+@keyframes orbTrailFade {
+  0%,100% { opacity:0.2; }
+  50%     { opacity:0.42; }
+}
+
+@keyframes arrowFloat {
+  0%,100% { transform:translateX(0); }
+  50%     { transform:translateX(4px); }
+}
+
+@keyframes breathe {
+  0%,100% { opacity:0.5; }
+  50%     { opacity:1; }
+}
+
+@keyframes cursorBlink {
+  0%,49%  { opacity:1; }
+  50%,100%{ opacity:0; }
+}
+
+@keyframes dashFlow { to { stroke-dashoffset:-24; } }
+
+@keyframes dotPulse {
+  0%,100% { opacity:0.8; transform:scale(1); }
+  50%     { opacity:0.4; transform:scale(1.4); }
+}
+
+@keyframes dangerGlow {
+  0%,100% { box-shadow:0 0 5px rgba(239,68,68,0.12); }
+  50%     { box-shadow:0 0 16px rgba(239,68,68,0.28),0 0 30px rgba(239,68,68,0.08); }
+}
+
+@keyframes memoryWrite {
+  0%   { background-color:rgba(250,204,21,0.3); }
+  100% { background-color:transparent; }
+}
+
+@keyframes stackPush {
+  0%   { transform:translateY(-18px) scaleY(0.08); opacity:0; }
+  60%  { transform:translateY(2px) scaleY(1.02); opacity:1; }
+  100% { transform:translateY(0) scaleY(1); opacity:1; }
+}
+
+.code-line-flow {
+  transition: transform 0.55s cubic-bezier(0.34,1.2,0.64,1),
+    background-color 0.35s ease, box-shadow 0.4s ease,
+    opacity 0.45s ease, border-color 0.35s ease;
+  transform-origin: left center;
+  position: relative; overflow: hidden;
+  border-radius: 6px; margin: 1px 8px 1px 2px;
+  border: 1px solid transparent;
+}
+.code-line-flow.is-current {
+  transform: scale(1.05) translateX(8px); z-index:20;
+  border-color: rgba(250,204,21,0.14);
+  box-shadow: 0 3px 20px rgba(0,0,0,0.3), inset 0 0 24px rgba(250,204,21,0.02);
+}
+.code-line-flow.is-current::after {
+  content:''; position:absolute; top:0; left:-60%;
+  width:40%; height:100%;
+  background:linear-gradient(90deg,transparent,rgba(250,204,21,0.05),transparent);
+  animation:scanLight 4.5s ease-in-out infinite; pointer-events:none;
+}
+.code-line-flow.is-current-danger {
+  transform:scale(1.05) translateX(8px); z-index:20;
+  border-color:rgba(239,68,68,0.18);
+  box-shadow:0 3px 20px rgba(0,0,0,0.3),inset 0 0 24px rgba(239,68,68,0.03);
+}
+.code-line-flow.is-current-danger::after {
+  content:''; position:absolute; top:0; left:-60%;
+  width:40%; height:100%;
+  background:linear-gradient(90deg,transparent,rgba(239,68,68,0.05),transparent);
+  animation:scanLight 3.5s ease-in-out infinite; pointer-events:none;
+}
+.code-line-flow.is-executed { opacity:0.27; transform:scale(0.975); }
+.code-line-flow.is-related {
+  transform:scale(1.03) translateX(4px); z-index:15;
+  border-color:rgba(168,85,247,0.15);
+  background:rgba(168,85,247,0.05) !important;
+}
+
+.ctrl-btn {
+  padding:7px 14px; border-radius:10px; font-size:13px; font-weight:600;
+  border:1px solid rgba(255,255,255,0.07);
+  background:rgba(255,255,255,0.035); backdrop-filter:blur(12px);
+  color:#8b949e; cursor:pointer;
+  transition:all 0.25s cubic-bezier(0.34,1.3,0.64,1);
+  display:inline-flex; align-items:center; justify-content:center; gap:5px;
+  user-select:none; outline:none; position:relative; overflow:hidden;
+}
+.ctrl-btn:hover {
+  transform:translateY(-2px) scale(1.04);
+  border-color:rgba(255,255,255,0.11);
+  box-shadow:0 6px 22px rgba(0,0,0,0.32); color:#e6edf3;
+}
+.ctrl-btn:active { transform:translateY(0) scale(0.97); transition-duration:0.08s; }
+.ctrl-btn:disabled { opacity:0.22; cursor:not-allowed; transform:none !important; box-shadow:none !important; }
+.ctrl-btn.btn-play {
+  background:linear-gradient(135deg,#10b981,#059669);
+  border-color:rgba(16,185,129,0.35); color:#fff;
+  box-shadow:0 2px 12px rgba(16,185,129,0.18);
+}
+.ctrl-btn.btn-play:hover { box-shadow:0 5px 22px rgba(16,185,129,0.32); }
+.ctrl-btn.btn-pause {
+  background:linear-gradient(135deg,#f59e0b,#d97706);
+  border-color:rgba(245,158,11,0.35); color:#fff;
+  box-shadow:0 2px 12px rgba(245,158,11,0.18);
+}
+.ctrl-btn.btn-reset {
+  background:linear-gradient(135deg,rgba(99,102,241,0.11),rgba(99,102,241,0.04));
+  border-color:rgba(99,102,241,0.17);
+}
+.ctrl-btn.btn-reset:hover { border-color:rgba(99,102,241,0.32); color:#a5b4fc; }
+.ctrl-btn.btn-fs { width:34px; height:34px; padding:0; }
+.ctrl-btn.btn-fs.active {
+  background:linear-gradient(135deg,#3b82f6,#2563eb);
+  border-color:rgba(59,130,246,0.4); color:#fff;
+}
+
+.glass-panel {
+  background:linear-gradient(145deg,rgba(20,25,32,0.96),rgba(16,21,28,0.90));
+  backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,0.052);
+  border-radius:14px;
+}
+
+.var-card {
+  transition:all 0.5s cubic-bezier(0.34,1.2,0.64,1);
+  position:relative; border-radius:12px;
+}
+.var-card::before {
+  content:'';
+  position: absolute;
+  inset: -1.5px;
+  border-radius:inherit;
+  background:conic-gradient(from var(--glow-angle),
+    transparent 0deg, var(--card-glow,rgba(250,204,21,0.3)) 60deg,
+    transparent 120deg, transparent 180deg,
+    var(--card-glow,rgba(250,204,21,0.3)) 240deg,
+    transparent 300deg, transparent 360deg);
+  opacity:0; transition:opacity 0.6s ease; z-index:-1;
+  animation:glowSpin 7s linear infinite;
+}
+.var-card.is-active::before { opacity:0.5; }
+
+input[type="range"] {
+  -webkit-appearance:none; height:3px; border-radius:2px;
+  background:rgba(255,255,255,0.1); outline:none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:13px; height:13px;
+  border-radius:50%; background:rgba(255,255,255,0.85); cursor:pointer;
+  box-shadow:0 0 5px rgba(0,0,0,0.25); transition:transform 0.2s;
+}
+input[type="range"]::-webkit-slider-thumb:hover { transform:scale(1.22); }
+
+.exec-orb {
+  transition:top 0.55s cubic-bezier(0.34,1.2,0.64,1),
+    background 0.3s ease, box-shadow 0.3s ease;
+  z-index:30; pointer-events:none;
+}
+.exec-orb-trail {
+  transition:top 0.72s cubic-bezier(0.34,1.0,0.64,1), height 0.6s ease;
+  z-index:29; pointer-events:none;
+}
+```
+
+### 3.3 完整SVG图标系统（引擎内script顶层）
+
+```jsx
+const I = {
+  memory:   (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>,
+  pointer:  (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3l14 9-7 1-3 7z"/></svg>,
+  stack:    (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="2" width="16" height="6" rx="1"/><rect x="4" y="10" width="16" height="6" rx="1"/><rect x="4" y="18" width="16" height="4" rx="1"/></svg>,
+  bolt:     (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
+  lightbulb:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18h6M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>,
+  rocket:   (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/></svg>,
+  check:    (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+  alert:    (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+  info:     (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>,
+  lock:     (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+  skull:    (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4a7 7 0 0 1 7 7c0 2.5-1.3 4.7-3.2 6H8.2A7 7 0 0 1 5 11a7 7 0 0 1 7-7z"/><path d="M9 21v-3h6v3"/><path d="M9 18h6"/><circle cx="9.5" cy="10" r="1.2" fill={c} stroke="none"/><circle cx="14.5" cy="10" r="1.2" fill={c} stroke="none"/></svg>,
+  target:   (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
+  folder:   (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>,
+  terminal: (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
+  gear:     (s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+  play:     (s=14,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><polygon points="5,3 19,12 5,21"/></svg>,
+  pause:    (s=14,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>,
+  prev:     (s=14,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>,
+  next:     (s=14,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>,
+  refresh:  (s=14,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>,
+  expand:   (s=15,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>,
+  dot:      (s=8,c='#10b981')=><svg width={s} height={s} viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill={c}/></svg>,
+};
+
+const ICON_MAP = {
+  info:I.info, check:I.check, alert:I.alert, bolt:I.bolt,
+  rocket:I.rocket, lightbulb:I.lightbulb, memory:I.memory,
+  pointer:I.pointer, skull:I.skull, stack:I.stack,
+  lock:I.lock, folder:I.folder, target:I.target, terminal:I.terminal,
+  gear:I.gear,
+};
+
+const COLOR_MAP = {
+  green:  {bg:'rgba(34,197,94,0.07)',  border:'rgba(34,197,94,0.45)',  text:'text-green-300',  badge:'text-green-400 border-green-500/25 bg-green-500/14',  ic:'#4ade80'},
+  red:    {bg:'rgba(239,68,68,0.07)',  border:'rgba(239,68,68,0.45)',  text:'text-red-300',    badge:'text-red-400 border-red-500/25 bg-red-500/14',        ic:'#f87171'},
+  yellow: {bg:'rgba(250,204,21,0.07)', border:'rgba(250,204,21,0.45)', text:'text-yellow-300', badge:'text-yellow-400 border-yellow-500/25 bg-yellow-500/14',ic:'#fde047'},
+  purple: {bg:'rgba(168,85,247,0.07)', border:'rgba(168,85,247,0.45)', text:'text-purple-300', badge:'text-purple-400 border-purple-500/25 bg-purple-500/14',ic:'#c084fc'},
+  blue:   {bg:'rgba(59,130,246,0.07)', border:'rgba(59,130,246,0.45)', text:'text-blue-300',   badge:'text-blue-400 border-blue-500/25 bg-blue-500/14',     ic:'#93c5fd'},
+  orange: {bg:'rgba(249,115,22,0.07)', border:'rgba(249,115,22,0.45)', text:'text-orange-300', badge:'text-orange-400 border-orange-500/25 bg-orange-500/14',ic:'#fdba74'},
+};
+
+const TOKEN_COLORS = {
+  kw:'text-blue-400', pp:'text-purple-400', str:'text-green-300',
+  num:'text-orange-300', fn:'text-yellow-300', op:'text-pink-400',
+  cmt:'text-gray-500 italic', id:'', punc:'', ws:'',
+};
+```
+
+### 3.4 完整React组件（引擎内，锁定不动）
+
+```jsx
+const {useState,useEffect,useRef,useMemo,useCallback} = React;
+
+// ═══ TokenLine ═══
+function TokenLine({tokens}) {
+  return <>{tokens.map((t,i)=><span key={i} className={TOKEN_COLORS[t.type]||''}>{t.text}</span>)}</>;
+}
+
+// ═══ VarCard（Fix-3：useRef对比）═══
+function VarCard({name,type,value,addr,glowColor,accentCls,badgeCls,isActive,isNew}) {
+  const prevRef = useRef(value);
+  const [changed,setChanged] = useState(false);
+  useEffect(()=>{
+    if(value!==null&&value!==undefined&&prevRef.current!==value){
+      prevRef.current=value; setChanged(true);
+      const t=setTimeout(()=>setChanged(false),640);
+      return ()=>clearTimeout(t);
+    }
+  },[value]);
+  return (
+    <div className={`var-card ${isActive?'is-active':''} p-3 relative`}
+      style={{'--card-glow':glowColor, background:'rgba(255,255,255,0.026)',
+        border:'1px solid rgba(255,255,255,0.068)',
+        animation:isNew?'boxPop 0.45s cubic-bezier(0.34,1.3,0.64,1) forwards':'none',
+        borderRadius:12, minWidth:88}}>
+      <div className={`absolute -top-2.5 left-2.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeCls}`}>{type}</div>
+      <div className={`text-[11px] mt-1 mb-0.5 ${accentCls}`}>{name}</div>
+      <div className={`text-[22px] font-bold leading-none text-white ${changed?'anim-value-changed':''}`}>{value??'--'}</div>
+      <div className="text-[10px] text-gray-700 mt-1.5 font-mono tracking-tight">{addr}</div>
+    </div>
+  );
+}
+
+// ═══ PredictionCard ═══
+function PredictionCard({prediction,onContinue}) {
+  const [sel,setSel]=useState(null);
+  const [rev,setRev]=useState(false);
+  if(!prediction) return null;
+  return (
+    <div className="p-4 rounded-xl anim-bubble-up" style={{background:'rgba(250,204,21,0.06)',border:'1px solid rgba(250,204,21,0.2)'}}>
+      <div className="flex items-center gap-2 mb-3">{I.lightbulb(14,'#fde047')}<span className="text-[11px] text-yellow-300 font-bold">预测一下</span></div>
+      <div className="text-[12px] text-yellow-100 mb-3">{prediction.question}</div>
+      <div className="flex flex-wrap gap-2 mb-3">
+        {prediction.options.map((o,i)=>(
+          <button key={i} onClick={()=>{setSel(i);setRev(true);}} disabled={rev}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-mono border transition-all duration-300
+              ${rev?(i===prediction.answer?'bg-green-900/40 border-green-500/40 text-green-300':i===sel?'bg-red-900/40 border-red-500/40 text-red-300':'opacity-30 border-gray-700')
+                :(sel===i?'border-yellow-500/40 bg-yellow-900/30 text-yellow-200':'border-gray-700 bg-gray-900/40 text-gray-400 hover:border-yellow-500/20')}`}>{o}</button>
+        ))}
+      </div>
+      {rev&&<div className="anim-fade-in">
+        <div className={`text-[11px] mb-2 ${sel===prediction.answer?'text-green-300':'text-red-300'}`}>
+          {sel===prediction.answer?'正确！':`答案是 ${prediction.options[prediction.answer]}`}
+        </div>
+        <button onClick={onContinue} className="ctrl-btn btn-play text-[11px] px-3 py-1">继续 {I.next(12)}</button>
+      </div>}
+    </div>
+  );
+}
+
+// ═══ MisconceptionBadge ═══
+function MisconceptionBadge({misconception}) {
+  const [exp,setExp]=useState(false);
+  if(!misconception) return null;
+  return (
+    <div className="mt-1.5">
+      <button onClick={()=>setExp(!exp)} className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-lg border border-red-500/20 bg-red-900/10 text-red-300 hover:bg-red-900/20 transition-all duration-300">
+        {I.alert(11,'#f87171')}<span className="font-bold">易混淆</span><span className="text-red-400">{misconception.title}</span>
+      </button>
+      {exp&&<div className="mt-1.5 px-3 py-2 rounded-lg text-[10px] text-red-200 leading-relaxed anim-fade-in" style={{background:'rgba(239,68,68,0.06)',borderLeft:'2px solid rgba(239,68,68,0.3)'}}>{misconception.text}</div>}
+    </div>
+  );
+}
+
+// ═══ SummaryCard ═══
+function SummaryCard({summary}) {
+  if(!summary) return null;
+  return (
+    <div className="p-4 rounded-xl anim-bubble-up space-y-3" style={{background:'rgba(34,197,94,0.05)',border:'1px solid rgba(34,197,94,0.2)'}}>
+      <div className="flex items-center gap-2">{I.check(16,'#4ade80')}<span className="text-[13px] text-green-300 font-bold">学习完成</span></div>
+      <div className="text-[12px] text-green-200 font-medium leading-relaxed px-2 py-1.5 rounded-lg" style={{background:'rgba(34,197,94,0.08)'}}>{summary.oneLiner}</div>
+      <div>
+        <div className="text-[10px] text-red-400 font-bold mb-1.5 flex items-center gap-1">{I.alert(11,'#f87171')} 易错点</div>
+        {summary.pitfalls.map((p,i)=><div key={i} className="text-[10px] text-red-200/80 flex items-start gap-1.5 mb-1"><span className="text-red-400 mt-0.5 flex-shrink-0">{i+1}.</span><span>{p}</span></div>)}
+      </div>
+      <div className="p-2.5 rounded-lg" style={{background:'rgba(250,204,21,0.06)',border:'1px dashed rgba(250,204,21,0.2)'}}>
+        <div className="text-[10px] text-yellow-400 font-bold mb-1 flex items-center gap-1">{I.lightbulb(11,'#fde047')} 思考题</div>
+        <div className="text-[11px] text-yellow-200">{summary.transferQuestion}</div>
+      </div>
+      {summary.miniExercise&&<div className="p-2.5 rounded-lg" style={{background:'rgba(168,85,247,0.06)',border:'1px dashed rgba(168,85,247,0.2)'}}>
+        <div className="text-[10px] text-purple-400 font-bold mb-1 flex items-center gap-1">{I.bolt(11,'#c084fc')} 找Bug</div>
+        <pre className="text-[10px] text-purple-200 font-mono whitespace-pre-wrap mb-1">{summary.miniExercise.bugCode}</pre>
+        <details className="text-[9px] text-gray-500"><summary className="cursor-pointer hover:text-purple-300 transition-colors">查看提示</summary><span className="text-purple-300">{summary.miniExercise.hint}</span></details>
+      </div>}
+    </div>
+  );
+}
+
+// ═══ App主组件 ═══
+function App() {
+  const DATA = window.LESSON_DATA;
+  const META = DATA.meta;
+  const CODE_LINES = DATA.codeLines;
+  const SCENES = DATA.scenes;
+  const SUMMARY = DATA.summary;
+  const VAR_CONFIG = DATA.varConfig || [];
+
+  // ── 区域1：UI状态 ──
+  const maxSteps = SCENES.length - 1;
+  const [step,setStep] = useState(0);
+  const [isPlaying,setIsPlaying] = useState(false);
+  const [speed,setSpeed] = useState(2800);
+  const [isFS,setIsFS] = useState(false);
+  const [prevLine,setPrevLine] = useState(-1);
+  const [linePositions,setLinePositions] = useState(new Map());
+
+  // ── 区域2：useRef ──
+  const codeContainerRef = useRef(null);
+  const lineRefs = useRef(new Map());
+  const msgScrollRef = useRef(null);
+  const fsRef = useRef(null);
+
+  // ── 区域3：从SCENES派生一切 ──
+  const scene = SCENES[step] || SCENES[0];
+  const currentLine = scene.line;
+  const executedLines = scene.executedLines || [];
+  const highlightVar = scene.highlightVar;
+  const isDangerLine = scene.isDanger || false;
+  const output = scene.output || [];
+  const vars = scene.vars || {};
+  const relatedLines = scene.relatedLines || [];
+
+  // ── 区域4：useEffect ──
+  useEffect(()=>{
+    const calc=()=>{
+      const box=codeContainerRef.current; if(!box) return;
+      const br=box.getBoundingClientRect(); const m=new Map();
+      lineRefs.current.forEach((el,n)=>{if(el){const r=el.getBoundingClientRect();m.set(n,r.top-br.top+r.height/2);}});
+      setLinePositions(m);
+    };
+    calc(); const t=setTimeout(calc,120);
+    window.addEventListener('resize',calc);
+    return()=>{clearTimeout(t);window.removeEventListener('resize',calc);};
+  },[step]);
+
+  useEffect(()=>{
+    const t=setTimeout(()=>setPrevLine(currentLine),650);
+    return()=>clearTimeout(t);
+  },[currentLine]);
+
+  useEffect(()=>{if(msgScrollRef.current) msgScrollRef.current.scrollTop=0;},[step]);
+
+  useEffect(()=>{document.documentElement.style.setProperty('--anim-speed',`${speed*1.5}ms`);},[speed]);
+
+  // ── 区域5：导航 ──
+  const goNext=useCallback(()=>setStep(p=>Math.min(maxSteps,p+1)),[maxSteps]);
+  const goPrev=useCallback(()=>setStep(p=>Math.max(0,p-1)),[]);
+  const goReset=useCallback(()=>{setStep(0);setIsPlaying(false);},[]);
+
+  useEffect(()=>{
+    if(isPlaying&&step<maxSteps){
+      if(scene.prediction){setIsPlaying(false);return;}
+      const t=setTimeout(goNext,speed);return()=>clearTimeout(t);
+    }
+    if(step>=maxSteps) setIsPlaying(false);
+  },[isPlaying,step,speed,goNext,scene.prediction,maxSteps]);
+
+  const toggleFS=useCallback(async()=>{
+    if(!document.fullscreenElement){await fsRef.current?.requestFullscreen();setIsFS(true);}
+    else{await document.exitFullscreen();setIsFS(false);}
+  },[]);
+
+  useEffect(()=>{
+    const h=(e)=>{
+      if(e.target.tagName==='INPUT') return;
+      switch(e.code){
+        case'Space':case'ArrowRight':e.preventDefault();goNext();break;
+        case'ArrowLeft':e.preventDefault();goPrev();break;
+        case'Enter':e.preventDefault();setIsPlaying(p=>!p);break;
+        case'KeyR':e.preventDefault();goReset();break;
+        case'KeyF':e.preventDefault();toggleFS();break;
+      }
+    };
+    window.addEventListener('keydown',h);
+    return()=>window.removeEventListener('keydown',h);
+  },[goNext,goPrev,goReset,toggleFS]);
+
+  // ── 区域6：CodeLine ──
+  const CodeLine=({num,children})=>{
+    const isCur=num===currentLine;
+    const isExec=executedLines.includes(num);
+    const isDL=isCur&&isDangerLine;
+    const isRel=relatedLines.includes(num)&&!isCur;
+    let cls='code-line-flow flex items-center min-h-[30px]';
+    if(isDL) cls+=' is-current-danger';
+    else if(isCur) cls+=' is-current';
+    else if(isRel) cls+=' is-related';
+    else if(isExec) cls+=' is-executed';
+    const bg=isCur?(isDL?'linear-gradient(90deg,rgba(239,68,68,0.11),rgba(239,68,68,0.03) 55%,transparent)':'linear-gradient(90deg,rgba(250,204,21,0.08),rgba(250,204,21,0.025) 55%,transparent)'):undefined;
+    return(
+      <div ref={el=>{if(el)lineRefs.current.set(num,el);}} className={cls} style={{background:bg}}>
+        {isCur&&<div className={`absolute left-0 top-1 bottom-1 w-[2.5px] rounded-full ${isDL?'bg-red-400':'bg-yellow-400'}`} style={{boxShadow:isDL?'0 0 6px #ef4444':'0 0 6px #facc15',animation:'breathe 3s ease-in-out infinite'}}/>}
+        <div className="w-8 flex-shrink-0 flex justify-center">
+          {isCur&&<svg width="9" height="11" viewBox="0 0 9 11" style={{animation:'arrowFloat 3s ease-in-out infinite'}}><polygon points="0,0 9,5.5 0,11" fill={isDL?'#f87171':'#facc15'}/></svg>}
+        </div>
+        <div className={`w-7 text-right pr-3 flex-shrink-0 select-none text-[12px] transition-colors duration-300 ${isCur?(isDL?'text-red-400 font-bold':'text-yellow-400 font-bold'):'text-gray-700'}`}>{num}</div>
+        <div className="flex-1 text-[13px] py-1.5 pr-4 leading-relaxed">{children}</div>
+      </div>
+    );
+  };
+
+  // ── 区域7：useMemo ──
+  const explanations=useMemo(()=>SCENES.filter(s=>s.step>=1&&s.step<=step).map(s=>({id:`s${s.step}`,...s.explanation,step:s.step})),[step]);
+  const revExplanations=useMemo(()=>[...explanations].reverse(),[explanations]);
+  const progress=(step/maxSteps)*100;
+
+  // ── 区域8：return ──
+  return(
+    <div ref={fsRef} className="h-screen w-screen flex flex-col p-3 gap-3" style={{background:'#080c14'}}>
+      {/* 控制栏 */}
+      <div className="flex items-center justify-between px-2 py-2 rounded-xl glass-panel">
+        <div className="flex items-center gap-2">
+          <button className={`ctrl-btn ${isPlaying?'btn-pause':'btn-play'}`} onClick={()=>setIsPlaying(p=>!p)} disabled={step>=maxSteps}>{isPlaying?I.pause():I.play()}{isPlaying?'暂停':'播放'}</button>
+          <button className="ctrl-btn" onClick={goPrev} disabled={step===0}>{I.prev()} 上一步</button>
+          <button className="ctrl-btn" onClick={goNext} disabled={step>=maxSteps}>下一步 {I.next()}</button>
+          <button className="ctrl-btn btn-reset" onClick={goReset}>{I.refresh()} 重置</button>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-gray-500">速度</span>
+            <input type="range" min="800" max="5000" step="100" value={speed} onChange={e=>setSpeed(Number(e.target.value))} className="w-24"/>
+            <span className="text-[11px] text-gray-400 w-12">{(speed/1000).toFixed(1)}s</span>
+          </div>
+          <button className={`ctrl-btn btn-fs ${isFS?'active':''}`} onClick={toggleFS}>{I.expand()}</button>
+        </div>
+      </div>
+
+      {/* 主内容 */}
+      <div className="flex-1 flex gap-3 min-h-0">
+        {/* 左侧：代码+终端 */}
+        <div className="w-[420px] flex flex-col gap-3 min-h-0">
+          <div className="flex-1 glass-panel p-3 flex flex-col min-h-0 relative overflow-hidden">
+            <div className="flex items-center gap-2 pb-2 border-b border-white/[0.038]">
+              {I.dot(7,'#22c55e')}<span className="text-[11px] text-gray-500 font-medium">{META.filename||'main.c'}</span>
+            </div>
+            <div ref={codeContainerRef} className="flex-1 overflow-auto py-2 relative">
+              {/* 执行光球 */}
+              {currentLine>0&&linePositions.has(currentLine)&&(()=>{
+                const cy=linePositions.get(currentLine)??0;
+                const py=linePositions.get(prevLine)??cy;
+                return(<>
+                  <div className="exec-orb-trail absolute left-[17px] w-[6px] rounded-full"
+                    style={{top:Math.min(cy,py)-4,height:Math.abs(cy-py)+8,
+                      background:isDangerLine?'linear-gradient(180deg,transparent,rgba(239,68,68,0.11),transparent)':'linear-gradient(180deg,transparent,rgba(250,204,21,0.11),transparent)',
+                      animation:'orbTrailFade 3.5s ease-in-out infinite'}}/>
+                  <div className="exec-orb absolute w-[10px] h-[10px] rounded-full"
+                    style={{'--orb-color':isDangerLine?'#ef4444':'#facc15',left:14,top:cy,transform:'translateY(-50%)',
+                      background:isDangerLine?'radial-gradient(circle at 35% 35%,#fca5a5,#ef4444)':'radial-gradient(circle at 35% 35%,#fef08a,#eab308)',
+                      animation:'orbGlow 3.5s ease-in-out infinite'}}/>
+                </>);
+              })()}
+              {CODE_LINES.map(line=><CodeLine key={line.num} num={line.num}><TokenLine tokens={line.tokens}/></CodeLine>)}
+            </div>
+            <div className="pt-2 border-t border-white/[0.038]">
+              <div className="flex items-center justify-between text-[10px] text-gray-500 mb-1"><span>进度</span><span>Step {step}/{maxSteps}</span></div>
+              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden"><div className={`h-full transition-all duration-500 ${isDangerLine?'bg-red-500':'bg-green-500'}`} style={{width:`${progress}%`}}/></div>
+            </div>
+          </div>
+          {/* 终端 */}
+          <div className="h-[120px] flex-shrink-0 glass-panel flex flex-col">
+            <div className="px-3 py-1.5 flex items-center gap-2 border-b border-white/[0.038]" style={{background:'rgba(255,255,255,0.014)'}}>
+              {I.dot(7,'#22c55e')}<span className="text-[11px] text-gray-500 font-medium tracking-wide">Terminal</span>
+            </div>
+            <div className="px-3 pt-2 text-[12.5px] flex-1 overflow-auto">
+              <div className="text-gray-600 mb-0.5">$ ./{META.filename||'a.out'}</div>
+              {output.map((line,i)=>(
+                <div key={`${step}-${i}`} className="anim-fade-in" style={{animationDelay:`${i*55}ms`}}>
+                  {line.type==='error'
+                    ?<div className="flex items-center gap-2 text-red-400"><span>{line.text}</span><span className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/22 bg-red-500/9 inline-flex items-center gap-1">{I.alert(10,'#f87171')} 错误</span></div>
+                    :<div className="flex items-center gap-2 text-green-400"><span>{line.text}</span><span className="text-[10px] px-1 py-0.5 rounded border border-green-500/18 bg-green-500/7 inline-flex items-center">{I.check(10,'#4ade80')}</span></div>}
+                </div>
+              ))}
+              <span className="inline-block w-[7px] h-[14px] bg-green-500/75 align-middle ml-0.5" style={{animation:'cursorBlink 1.12s step-end infinite'}}/>
+            </div>
+          </div>
+        </div>
+
+        {/* 右侧 */}
+        <div className="flex-1 flex gap-3 min-h-0">
+          {/* 变量区 */}
+          <div className="w-[300px] glass-panel p-4 flex flex-col overflow-auto">
+            <div className="flex items-center gap-2 pb-3 border-b border-white/[0.038] mb-3">
+              {I.memory(16,'#a855f7')}<span className="text-[12px] text-gray-400 font-medium">Variables</span>
+            </div>
+            <div className="flex flex-col gap-4">
+              {VAR_CONFIG.filter(vc=>vars[vc.key]!==undefined).map(vc=>(
+                <VarCard key={vc.key} name={vc.name} type={vc.type} value={vars[vc.key]} addr={vc.addr}
+                  glowColor={vc.glowColor} accentCls={vc.accentCls} badgeCls={vc.badgeCls}
+                  isActive={highlightVar===vc.key} isNew={step===vc.appearStep}/>
+              ))}
+            </div>
+            {scene.prediction&&<div className="mt-4"><PredictionCard prediction={scene.prediction} onContinue={goNext}/></div>}
+          </div>
+
+          {/* 讲解区 */}
+          <div className="flex-1 glass-panel p-3 flex flex-col min-h-0">
+            <div className="flex items-center gap-2 pb-3 border-b border-white/[0.038] mb-2">
+              {I.lightbulb(16,'#fde047')}<span className="text-[12px] text-gray-400 font-medium">Execution Log</span>
+            </div>
+            <div className="flex-1 overflow-auto px-1 pb-2" ref={msgScrollRef}>
+              {step===0?(
+                <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-700">
+                  <div style={{opacity:0.35}}>{I.rocket(32,'#6b7280')}</div>
+                  <div className="text-[12px] text-center leading-relaxed">
+                    点击 <span className="text-green-400 font-semibold">播放</span> 开始
+                    <br/><span className="text-[10px] text-gray-700">空格/→ 步进 Enter 播放</span>
+                  </div>
+                </div>
+              ):step>=maxSteps&&SUMMARY?(
+                <SummaryCard summary={SUMMARY}/>
+              ):(
+                <div className="space-y-1.5">
+                  {revExplanations.map((item,idx)=>{
+                    const c=COLOR_MAP[item.color]||COLOR_MAP.blue;
+                    const isTop=idx===0;
+                    const isNew=item.step===step;
+                    const curScene=SCENES[item.step];
+                    return(
+                      <div key={item.id} className={`flex items-start gap-2.5 px-3 py-2.5 rounded-xl ${isNew?'anim-bubble-up':'anim-push-up'}`}
+                        style={{background:isTop?`linear-gradient(135deg,${c.bg},${c.bg.replace('0.07','0.12')})`:c.bg,
+                          borderLeft:`2.5px solid ${c.border}`,
+                          opacity:isTop?1:Math.max(0.36,1-idx*0.09),
+                          animation:isTop?'newMsgGlow 4s ease-in-out infinite':undefined}}>
+                        <span className="flex-shrink-0 mt-0.5" style={{opacity:isTop?1:0.6}}>{(ICON_MAP[item.icon]||I.info)(isTop?15:13,c.ic)}</span>
+                        <div className="flex-1 min-w-0">
+                          <span className={`${c.text} text-[11.5px] leading-relaxed ${isTop?'font-semibold':''}`}>{item.text}</span>
+                          {isTop&&curScene&&(curScene.actor||curScene.target||curScene.timing)&&(
+                            <div className="flex flex-wrap gap-1.5 mt-1.5">
+                              {curScene.actor&&<span className="text-[8px] px-1.5 py-0.5 rounded border border-blue-500/20 bg-blue-900/15 text-blue-300">执行者: {curScene.actor}</span>}
+                              {curScene.target&&<span className="text-[8px] px-1.5 py-0.5 rounded border border-yellow-500/20 bg-yellow-900/15 text-yellow-300">改变: {curScene.target}</span>}
+                              {curScene.timing&&<span className="text-[8px] px-1.5 py-0.5 rounded border border-purple-500/20 bg-purple-900/15 text-purple-300">时机: {curScene.timing}</span>}
+                            </div>
+                          )}
+                          {isTop&&item.detail&&(
+                            <details className="mt-1 text-[9.5px] text-gray-500">
+                              <summary className="cursor-pointer hover:text-gray-300 transition-colors">深入理解</summary>
+                              <div className="mt-1 text-gray-400 leading-relaxed pl-1 border-l border-gray-700/50">{item.detail}</div>
+                            </details>
+                          )}
+                          {isTop&&curScene?.misconception&&<MisconceptionBadge misconception={curScene.misconception}/>}
+                        </div>
+                        {isTop&&<span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-bold flex-shrink-0 ${c.badge}`}>NEW</span>}
+                        <span className="text-[9.5px] text-gray-700 font-mono flex-shrink-0 ml-0.5">#{item.step}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 底部快捷键 */}
+      <div className="flex items-center justify-center gap-4 text-[10px] text-gray-600">
+        <span><kbd className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">Space</kbd> 下一步</span>
+        <span><kbd className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">←</kbd> 上一步</span>
+        <span><kbd className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">Enter</kbd> 播放/暂停</span>
+        <span><kbd className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">R</kbd> 重置</span>
+        <span><kbd className="px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">F</kbd> 全屏</span>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+```
+
+### 3.5 引擎验收
+
+```
+生成引擎后，构造以下测试数据注入 window.LESSON_DATA 验证：
+  测试1：2个变量4步（基础声明）
+  测试2：3个变量6步+isDanger（指针解引用）
+  测试3：含prediction+misconception+summary
+  测试4：8步含循环（executedLines递增验证）
+
+4个全部通过 → 引擎文件命名 engine_v1.html，锁定不动。
+```
+
+---
+
+## 四、模式B — 数据生成（每题1次）
+
+### 4.1 输入格式
+
+```
+用户将以以下格式给出题目：
+
+章节: basics_test
+序号: 第1题/共177题
+题目ID: bt-data-types
+题目标题: 数据类型
+题目内容:
+[粘贴lesson.content原文]
+知识点: ['数据类型取值范围','有符号无符号','stdint类型']
+```
+
+### 4.2 输出格式
+
+```
+你只输出以下代码块，不要输出其他任何内容：
+
+window.LESSON_DATA = {
+  meta: { ... },
+  codeLines: [ ... ],
+  varConfig: [ ... ],
+  scenes: [ ... ],
+  summary: { ... },
+};
+```
+
+### 4.3 LESSON_DATA 结构规范
+
+```javascript
+window.LESSON_DATA = {
+
+  // ═══ meta ═══
+  meta: {
+    id: 'bt-data-types',          // lesson.id
+    title: '数据类型',             // lesson.title
+    chapter: 'basics_test',        // 章节名
+    index: 1,                      // 序号
+    filename: 'data_types.c',      // 终端显示的文件名
+    keyPoints: ['...','...'],      // lesson.keyPoints
+  },
+
+  // ═══ codeLines ═══
+  // token.type 只能是: kw pp str num fn op cmt id punc ws
+  codeLines: [
+    { num:1, tokens:[
+      {type:'pp',text:'#include'},{type:'ws',text:' '},{type:'str',text:'<stdio.h>'}
+    ]},
+    // ...每行一个对象
+  ],
+
+  // ═══ varConfig ═══
+  // 可用颜色组（6种循环）:
+  // green:  glowColor='rgba(34,197,94,0.35)'  accentCls='text-green-400'  badgeCls='text-green-400 border-green-500/30 bg-green-500/12'
+  // purple: glowColor='rgba(168,85,247,0.35)' accentCls='text-purple-400' badgeCls='text-purple-400 border-purple-500/30 bg-purple-500/12'
+  // blue:   glowColor='rgba(59,130,246,0.35)'  accentCls='text-blue-400'   badgeCls='text-blue-400 border-blue-500/30 bg-blue-500/12'
+  // orange: glowColor='rgba(249,115,22,0.35)'  accentCls='text-orange-400' badgeCls='text-orange-400 border-orange-500/30 bg-orange-500/12'
+  // yellow: glowColor='rgba(250,204,21,0.35)'  accentCls='text-yellow-400' badgeCls='text-yellow-400 border-yellow-500/30 bg-yellow-500/12'
+  // red:    glowColor='rgba(239,68,68,0.35)'   accentCls='text-red-400'    badgeCls='text-red-400 border-red-500/30 bg-red-500/12'
+  varConfig: [
+    { key:'i', name:'i', type:'int', addr:'0x7ffc10',
+      glowColor:'rgba(34,197,94,0.35)', accentCls:'text-green-400',
+      badgeCls:'text-green-400 border-green-500/30 bg-green-500/12',
+      appearStep:1 },
+    // ...每个要展示的变量一条
+  ],
+
+  // ═══ scenes ═══
+  scenes: [
+    {
+      step: 0,
+      line: -1,                    // 无高亮
+      executedLines: [],
+      vars: {},                    // 空
+      highlightVar: null,
+      isDanger: false,
+      output: [],
+      explanation: { icon:'rocket', text:'点击播放开始执行', color:'blue', actor:null, detail:null },
+      prediction: null,
+      misconception: null,
+      actor: null, target: null, timing: null,
+    },
+    {
+      step: 1,
+      line: 4,                     // ★ 高亮的行号 === explanation.text描述的那行
+      executedLines: [3],          // ★ 不含当前行
+      vars: { i: 10 },            // ★ 完整快照
+      highlightVar: 'i',
+      isDanger: false,
+      output: [],
+      explanation: {
+        icon: 'memory',
+        text: '声明整型变量 i，在栈上分配4字节，写入值10',
+        color: 'yellow',           // ★ 只用6个合法键
+        actor: 'CPU',
+        detail: 'int占4字节，编译器用MOV指令将立即数10写入栈偏移地址',
+      },
+      prediction: null,
+      misconception: { title:'未初始化≠零值', text:'不写=10时i的值不确定，栈上是残留数据' },
+      actor:'CPU', target:'var:i', timing:'main-loop',
+    },
+    // ...每个执行步骤一个scene
+    // ★ 每个scene.vars必须是完整快照（包含所有已声明变量的当前值）
+    // ★ executedLines必须不含当前行，且随step单调递增
+  ],
+
+  // ═══ summary ═══
+  summary: {
+    oneLiner: '一句话总结本题核心（不超30字）',
+    pitfalls: [
+      '具体易错点1',
+      '具体易错点2',
+      '具体易错点3',
+    ],
+    transferQuestion: '一个能检验是否真正理解的问题',
+    miniExercise: {
+      bugCode: '有bug的代码片段',
+      hint: '提示',
+    },
+  },
+
+};
+```
+
+### 4.4 数据生成铁律（逐条必须遵守）
+
+```
+规则1：代码来源
+  ✅ 从lesson.content中提取代码块
+  ✅ 代码不完整时补全为可编译程序
+  ❌ 禁止自己编造与题目无关的代码
+
+规则2：Token化
+  ✅ 每个token标注正确type
+  ✅ 缩进用 {type:'ws',text:'    '}
+  ❌ 禁止把整行放一个token
+  ❌ 禁止遗漏token type
+
+规则3：Scene完整性
+  ✅ scene[0].line === -1
+  ✅ 每个scene.vars是完整快照（所有已声明变量的当前值）
+  ✅ executedLines不含当前高亮行
+  ✅ scene.line === explanation.text描述的行
+  ✅ 至少1个prediction
+  ✅ 至少1个misconception
+  ❌ 禁止vars依赖前一步残留
+  ❌ 禁止executedLines含当前行
+
+规则4：Explanation质量
+  ✅ text：一句话说清代码做了什么
+  ✅ detail：底层机制（编译器/CPU/内存层面）
+  ✅ color：只用 green/red/yellow/purple/blue/orange
+  ✅ icon：只用 ICON_MAP 中的键名
+  ❌ 禁止text写"执行第N行"之类废话
+  ❌ 禁止detail为null或空字符串
+
+规则5：Summary质量
+  ✅ oneLiner不超30字
+  ✅ pitfalls有3条且具体
+  ✅ transferQuestion与本题知识点相关
+  ❌ 禁止pitfalls写"注意语法"等废话
+
+规则6：varConfig
+  ✅ 每个需展示变量都有配置
+  ✅ 6种颜色循环分配
+  ✅ appearStep精确等于该变量首次出现在vars中的step
+  ❌ 禁止遗漏变量
+```
+
+### 4.5 题目类型特化
+
+```
+指针题：
+  - vars中指针值显示为地址如"0x7ffc10"
+  - 解引用操作 isDanger:true
+  - misconception："指针≠值"或"指针≠数组"
+
+数组题：
+  - vars中数组用字符串表示如"[1,2,3,4,5]"或分元素展示
+  - 越界访问 isDanger:true
+  - misconception："数组名≠指针"或"sizeof(arr)≠sizeof(ptr)"
+
+内存题：
+  - malloc/free配对标注
+  - 未free标记 isDanger:true
+  - misconception："free后指针仍存在"
+
+函数题：
+  - 参数传递强调值拷贝
+  - misconception："形参修改不影响实参"
+
+位运算题：
+  - vars中数值同时显示十进制和二进制如"5(0b0101)"
+  - misconception："左移可能溢出"
+
+控制流题：
+  - explanation说清"为什么走这个分支"
+  - 循环标注"第N次迭代"
+  - misconception："switch穿透"
+```
+
+### 4.6 自检表（每题输出后必须对照）
+
+```
+[ ] meta.id === 题目ID
+[ ] codeLines来自题目原文代码（非自编）
+[ ] 每行token type正确（关键字kw/函数名fn/数字num）
+[ ] scenes[0].line === -1
+[ ] 每个scene.vars是完整快照
+[ ] executedLines不含当前行
+[ ] executedLines随step递增
+[ ] scene.line与explanation.text一致
+[ ] explanation.color只用6个键
+[ ] 至少1个prediction
+[ ] 至少1个misconception
+[ ] summary完整且具体
+[ ] varConfig.appearStep正确
+```
+
+---
+
+## 五、组装脚本
+
+```javascript
+// build.js — 在Node.js中运行
+const fs = require('fs');
+const path = require('path');
+
+const ENGINE = fs.readFileSync('engine_v1.html', 'utf-8');
+const DATA_DIR = './data/';
+const OUT_DIR = './HTML/';
+
+if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
+
+const files = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.js'));
+
+files.forEach(file => {
+  const data = fs.readFileSync(path.join(DATA_DIR, file), 'utf-8');
+  const html = ENGINE.replace(
+    /window\.LESSON_DATA\s*=\s*\{[^]*?\};/,
+    data.trim()
+  );
+  const outName = file.replace('.js', '.html');
+  fs.writeFileSync(path.join(OUT_DIR, outName), html);
+  console.log('OK ' + outName);
+});
+
+console.log('\nTotal: ' + files.length);
+```
+
+---
+
+## 六、批量生产工作流
+
+```
+每批10题流程：
+
+1. 用户准备输入
+   打开.ts文件，复制lessons[N]到lessons[N+9]的内容
+   按4.1格式组织
+
+2. AI逐题生成数据
+   每题输出1个 window.LESSON_DATA = {...}; 代码块
+   每题输出后附自检结果
+
+3. 用户验收
+   保存为 data/{chapter}_{序号}_{id}.js
+   运行 node build.js
+   浏览器打开抽查2-3题
+
+4. 通过则继续下一批，不通过则指出问题让AI修正
+
+每题数据约80-200行JS
+引擎完全不动
+第1题和第718题渲染效果完全一致
+```
+
+---
+
+## 七、质量检查清单
+
+```
+=== 引擎检查（只做1次）===
+[ ] 完整CSS动画（fadeInUp/bubbleUp/pushUp/scanLight/boxPop/valueChange/glowSpin/orbGlow/orbTrailFade/arrowFloat/breathe/cursorBlink/dashFlow/newMsgGlow）
+[ ] 组件完整（CodeLine/TokenLine/VarCard/PredictionCard/MisconceptionBadge/SummaryCard）
+[ ] SVG图标完整
+[ ] ICON_MAP包含所有explanation用到的icon
+[ ] COLOR_MAP仅6键（green/red/yellow/purple/blue/orange）
+[ ] VarCard用useRef对比（不用key={value}）
+[ ] CSS position;inset分号分隔
+[ ] 从window.LESSON_DATA读取正确
+[ ] 4项测试全部通过
+
+=== 数据检查（每题）===
+[ ] meta.id===lesson.id
+[ ] codeLines来自原文
+[ ] token type正确
+[ ] scenes[0].line===-1
+[ ] 每个scene.vars完整快照
+[ ] executedLines不含当前行且递增
+[ ] scene.line与explanation一致
+[ ] explanation.color仅6键
+[ ] explanation.detail非空
+[ ] 至少1个prediction
+[ ] 至少1个misconception
+[ ] summary完整
+[ ] varConfig与vars对应
+
+=== 组装检查 ===
+[ ] build.js无报错
+[ ] HTML数量===数据文件数量
+[ ] 随机打开3个功能完整
+[ ] 第1个和最后1个视觉一致
+```

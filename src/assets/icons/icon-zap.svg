@@ -1,0 +1,25 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="zapGrad1" x1="32" y1="12" x2="32" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#606060"/>
+      <stop offset="100%" stop-color="#303030"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- 闪电主体 -->
+  <path d="M34 12 L20 34 L28 34 L26 52 L42 28 L34 28 L34 12Z" 
+        fill="url(#zapGrad1)" stroke="#000" stroke-width="1.5"/>
+  
+  <!-- 内层闪电 -->
+  <path d="M32 18 L24 32 L28 32 L27 44 L38 28 L32 28 L32 18Z" 
+        fill="#808080" opacity="0.5"/>
+  
+  <!-- 装饰光晕 -->
+  <circle cx="34" cy="10" r="2" fill="#707070"/>
+  <circle cx="18" cy="34" r="2" fill="#707070"/>
+  <circle cx="26" cy="54" r="2" fill="#707070"/>
+  <circle cx="44" cy="28" r="2" fill="#707070"/>
+  
+  <!-- 高光 -->
+  <path d="M28 22 L30 28" stroke="#909090" stroke-width="1.5" opacity="0.6"/>
+</svg>

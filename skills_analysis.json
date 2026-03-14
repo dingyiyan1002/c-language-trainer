@@ -1,0 +1,632 @@
+{
+  "C": {
+    "count": 115,
+    "percentage": 57.5,
+    "importance": "核心"
+  },
+  "C/C++": {
+    "count": 45,
+    "percentage": 22.5,
+    "importance": "加分"
+  },
+  "C++": {
+    "count": 40,
+    "percentage": 20.0,
+    "importance": "加分"
+  },
+  "RTOS": {
+    "count": 39,
+    "percentage": 19.5,
+    "importance": "加分"
+  },
+  "低功耗": {
+    "count": 25,
+    "percentage": 12.5,
+    "importance": "加分"
+  },
+  "ARM": {
+    "count": 24,
+    "percentage": 12.0,
+    "importance": "加分"
+  },
+  "BSP": {
+    "count": 24,
+    "percentage": 12.0,
+    "importance": "加分"
+  },
+  "Linux": {
+    "count": 19,
+    "percentage": 9.5,
+    "importance": "加分"
+  },
+  "ARM Cortex-M": {
+    "count": 15,
+    "percentage": 7.5,
+    "importance": "加分"
+  },
+  "多线程": {
+    "count": 14,
+    "percentage": 7.0,
+    "importance": "加分"
+  },
+  "网络编程": {
+    "count": 14,
+    "percentage": 7.0,
+    "importance": "加分"
+  },
+  "Linux 内核": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "驱动开发": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "IPC": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "汇编": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "ESP32": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "WiFi": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "蓝牙": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "ISP": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "外设驱动": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "Linux Kernel": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "U-Boot": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "Device Tree": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "PMIC": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "SLAM": {
+    "count": 13,
+    "percentage": 6.5,
+    "importance": "加分"
+  },
+  "AutoSAR": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "UDS": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "功能安全": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "ADC": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "SOC 算法": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "电池管理": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "FreeRTOS": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "MQTT": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "HAL": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "编解码": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "传感器融合": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "H.264": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "H.265": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "RTSP": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "8051": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "触摸算法": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "Android Framework": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "Kernel": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "运动控制": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "机器视觉": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "EtherCAT": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "CAN": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "Verilog": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "Zynq": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "ARM+FPGA": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "高速接口": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "ROS": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "导航": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "NPU": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "边缘计算": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "设备树": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "硬件调试": {
+    "count": 12,
+    "percentage": 6.0,
+    "importance": "加分"
+  },
+  "伺服": {
+    "count": 11,
+    "percentage": 5.5,
+    "importance": "加分"
+  },
+  "TFLite": {
+    "count": 11,
+    "percentage": 5.5,
+    "importance": "加分"
+  },
+  "AI 部署": {
+    "count": 11,
+    "percentage": 5.5,
+    "importance": "加分"
+  },
+  "Android": {
+    "count": 4,
+    "percentage": 2.0,
+    "importance": "加分"
+  },
+  "EMC": {
+    "count": 3,
+    "percentage": 1.5,
+    "importance": "加分"
+  },
+  "多媒体": {
+    "count": 3,
+    "percentage": 1.5,
+    "importance": "加分"
+  },
+  "传感器": {
+    "count": 2,
+    "percentage": 1.0,
+    "importance": "加分"
+  },
+  "Bootloader": {
+    "count": 2,
+    "percentage": 1.0,
+    "importance": "加分"
+  },
+  "示波器": {
+    "count": 2,
+    "percentage": 1.0,
+    "importance": "加分"
+  },
+  "CUDA": {
+    "count": 2,
+    "percentage": 1.0,
+    "importance": "加分"
+  },
+  "DSP": {
+    "count": 2,
+    "percentage": 1.0,
+    "importance": "加分"
+  },
+  "路径规划": {
+    "count": 2,
+    "percentage": 1.0,
+    "importance": "加分"
+  },
+  "Git": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "内存管理": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "控制算法": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "调试": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "硬件原理图": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "JTAG": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Protobuf": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "gRPC": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "CAN 总线": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "ISO26262": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "DPDK": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "网络协议": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "多核编程": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "性能优化": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "音视频": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "OpenGL": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "TensorRT": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "实时系统": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "QNX": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "ONVIF": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "指纹识别": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Display": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Camera": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Performance": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Power Management": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Thermal": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Debug": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Fastboot": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "OTA": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "客户支持": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Zigbee": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Matter": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Rockchip": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "AI": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "QT": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "显示技术": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "触控": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "伺服驱动": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "PLC": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "数字电源": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "PID 控制": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "PMBus": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "FOC": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "SVPWM": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "电机控制": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "Python": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "自动化测试": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "逻辑分析仪": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "测试用例": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "信号处理": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "控制理论": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "状态估计": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "TensorFlow Lite": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "人脸识别": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "深度相机": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "点云处理": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  },
+  "标定": {
+    "count": 1,
+    "percentage": 0.5,
+    "importance": "加分"
+  }
+}

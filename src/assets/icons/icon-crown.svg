@@ -1,0 +1,28 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="crownGrad1" x1="32" y1="16" x2="32" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#656565"/>
+      <stop offset="100%" stop-color="#353535"/>
+    </linearGradient>
+    <linearGradient id="crownGrad2" x1="32" y1="24" x2="32" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#757575"/>
+      <stop offset="100%" stop-color="#454545"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- 皇冠主体 -->
+  <path d="M16 24 L16 40 C16 44 20 48 32 48 C44 48 48 44 48 40 L48 24 L40 32 L32 16 L24 32 L16 24Z" 
+        fill="url(#crownGrad1)" stroke="#000" stroke-width="1.5"/>
+  
+  <!-- 皇冠内层 -->
+  <path d="M20 28 L20 38 C20 41 23 44 32 44 C41 44 44 41 44 38 L44 28 L38 34 L32 22 L26 34 L20 28Z" 
+        fill="url(#crownGrad2)" opacity="0.7"/>
+  
+  <!-- 宝石 -->
+  <circle cx="32" cy="20" r="3" fill="#505050" stroke="#000" stroke-width="1"/>
+  <circle cx="24" cy="30" r="2" fill="#505050" stroke="#000" stroke-width="1"/>
+  <circle cx="40" cy="30" r="2" fill="#505050" stroke="#000" stroke-width="1"/>
+  
+  <!-- 高光 -->
+  <path d="M22 26 L42 26" stroke="#858585" stroke-width="1" opacity="0.5"/>
+</svg>

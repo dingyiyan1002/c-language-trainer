@@ -1,0 +1,31 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="birdGrad1" x1="32" y1="18" x2="32" y2="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#5a5a5a"/>
+      <stop offset="100%" stop-color="#2a2a2a"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- 鸟的身体 -->
+  <ellipse cx="32" cy="32" rx="14" ry="10" 
+           fill="url(#birdGrad1)" stroke="#000" stroke-width="1.5"/>
+  
+  <!-- 头部 -->
+  <circle cx="42" cy="28" r="6" fill="#505050" stroke="#000" stroke-width="1.5"/>
+  
+  <!-- 鸟喙 -->
+  <path d="M48 26 L54 28 L48 30 L48 26Z" fill="#454545" stroke="#000" stroke-width="1"/>
+  
+  <!-- 翅膀 -->
+  <path d="M26 30 Q32 26 38 30 Q32 34 26 30Z" fill="#656565" stroke="#000" stroke-width="1"/>
+  
+  <!-- 尾巴 -->
+  <path d="M18 32 L12 28 L12 36 L18 32Z" fill="#4a4a4a" stroke="#000" stroke-width="1"/>
+  
+  <!-- 眼睛 -->
+  <circle cx="44" cy="27" r="1.5" fill="#202020"/>
+  <circle cx="44.5" cy="26.5" r="0.5" fill="#ffffff"/>
+  
+  <!-- 装饰线 -->
+  <path d="M22 36 Q28 40 36 38" stroke="#707070" stroke-width="1.5" fill="none" opacity="0.6"/>
+</svg>
