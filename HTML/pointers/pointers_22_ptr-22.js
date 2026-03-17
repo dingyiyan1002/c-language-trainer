@@ -1,31 +1,23 @@
-/**
- * 指针面试题 22 - 指针数组与字符串
+﻿/**
+ * 指针高级练习 22
+ * 难度：高级 ⭐⭐⭐⭐
+ * 考点：指针综合应用
  */
-export const pointer_interview_22 = {
-  title: '指针数组与字符串',
-  difficulty: '中级',
-  question: `分析以下代码`,
-  code: `#include <stdio.h>
 
-int main() {
-    char *fruits[] = {"Apple", "Banana", "Orange"};
-    
-    for (int i = 0; i < 3; i++) {
-        printf("%s\n", fruits[i]);
-    }
-    
-    // 排序
-    for (int i = 0; i < 2; i++) {
-        for (int j = i + 1; j < 3; j++) {
-            if (strcmp(fruits[i], fruits[j]) > 0) {
-                char *temp = fruits[i];
-                fruits[i] = fruits[j];
-                fruits[j] = temp;
-            }
-        }
-    }
-    return 0;
-}`,
-  answer: `指针数组存储字符串`,
-  keyPoints: ['指针高级应用', '内存模型', '实际场景']
+const exercise = {
+    id: 22,
+    title: "指针综合练习 22",
+    difficulty: "高级",
+    category: "pointers",
+    description: "本题考察指针的高级应用...",
+    hints: [
+        "提示 1: 分析指针类型",
+        "提示 2: 注意内存布局",
+        "提示 3: 考虑边界情况"
+    ],
+    solution: "详细解答..."
 };
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = exercise;
+}

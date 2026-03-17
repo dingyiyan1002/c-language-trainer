@@ -1,12 +1,12 @@
 ﻿/**
- * 指针高级练习 21
+ * 指针高级练习 26
  * 难度：高级 ⭐⭐⭐⭐
  * 考点：指针综合应用
  */
 
 const exercise = {
-    id: 21,
-    title: "指针综合练习 21",
+    id: 26,
+    title: "指针综合练习 26",
     difficulty: "高级",
     category: "pointers",
     description: "本题考察指针的高级应用...",

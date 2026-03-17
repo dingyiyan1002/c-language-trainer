@@ -1,32 +1,23 @@
-/**
- * 指针面试题 23 - 返回指针的函数
+﻿/**
+ * 指针高级练习 23
+ * 难度：高级 ⭐⭐⭐⭐
+ * 考点：指针综合应用
  */
-export const pointer_interview_23 = {
-  title: '返回指针的函数',
-  difficulty: '高级',
-  question: `分析以下代码`,
-  code: `#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
-// 危险：返回局部变量地址
-char* dangerous() {
-    char local[] = "Hello";
-    return local;  // 错误！
-}
-
-// 正确：返回静态变量或动态分配
-char* safe_static() {
-    static char buffer[100];
-    strcpy(buffer, "Hello");
-    return buffer;
-}
-
-char* safe_malloc() {
-    char *buffer = malloc(100);
-    strcpy(buffer, "Hello");
-    return buffer;  // 调用者负责 free
-}`,
-  answer: `不能返回局部变量地址`,
-  keyPoints: ['指针高级应用', '内存模型', '实际场景']
+const exercise = {
+    id: 23,
+    title: "指针综合练习 23",
+    difficulty: "高级",
+    category: "pointers",
+    description: "本题考察指针的高级应用...",
+    hints: [
+        "提示 1: 分析指针类型",
+        "提示 2: 注意内存布局",
+        "提示 3: 考虑边界情况"
+    ],
+    solution: "详细解答..."
 };
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = exercise;
+}
