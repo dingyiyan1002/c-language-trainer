@@ -1,23 +1,27 @@
-﻿/**
- * 指针高级练习 21
- * 难度：高级 ⭐⭐⭐⭐
- * 考点：指针综合应用
+/**
+ * 指针面试题 21 - 指针与二维数组
  */
+export const pointer_interview_21 = {
+  title: '指针与二维数组',
+  difficulty: '高级',
+  question: `分析以下代码`,
+  code: `#include <stdio.h>
 
-const exercise = {
-    id: 21,
-    title: "指针综合练习 21",
-    difficulty: "高级",
-    category: "pointers",
-    description: "本题考察指针的高级应用...",
-    hints: [
-        "提示 1: 分析指针类型",
-        "提示 2: 注意内存布局",
-        "提示 3: 考虑边界情况"
-    ],
-    solution: "详细解答..."
+int main() {
+    int arr[3][4] = {
+        {1, 2, 3, 4},
+        {5, 6, 7, 8},
+        {9, 10, 11, 12}
+    };
+    
+    // 指向数组的指针
+    int (*p)[4] = arr;
+    
+    printf("%d\n", *(*(p + 1) + 2));  // 输出 7
+    printf("%d\n", p[1][2]);          // 输出 7
+    
+    return 0;
+}`,
+  answer: `二维数组与指针的关系`,
+  keyPoints: ['指针高级应用', '内存模型', '实际场景']
 };
-
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = exercise;
-}
