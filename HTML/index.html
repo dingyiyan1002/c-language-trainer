@@ -1,0 +1,74 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C 语言可视化课程 - 章节目录</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 40px 20px; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 20px; padding: 40px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+        h1 { text-align: center; color: #667eea; margin-bottom: 10px; font-size: 2.5em; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 1.1em; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 40px; }
+        .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 15px; text-align: center; }
+        .stat-number { font-size: 2.5em; font-weight: bold; display: block; }
+        .stat-label { font-size: 0.9em; opacity: 0.9; margin-top: 5px; }
+        .category { margin-bottom: 30px; }
+        .category-title { font-size: 1.5em; color: #333; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 3px solid #667eea; }
+        .chapter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
+        .chapter-card { background: #f8f9fa; border-radius: 10px; padding: 20px; transition: all 0.3s ease; border-left: 4px solid #667eea; }
+        .chapter-card:hover { transform: translateY(-3px); box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2); }
+        .chapter-name { font-weight: 600; color: #333; margin-bottom: 8px; font-size: 1.1em; }
+        .chapter-count { color: #667eea; font-size: 0.9em; }
+        .footer { text-align: center; margin-top: 40px; padding-top: 30px; border-top: 2px solid #eee; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🦞 C 语言可视化课程</h1>
+        <p class="subtitle">完整学习路径 · 交互式练习 · 即时反馈</p>
+        <div class="stats">
+            <div class="stat-card"><span class="stat-number">60+</span><span class="stat-label">章节目录</span></div>
+            <div class="stat-card"><span class="stat-number">361</span><span class="stat-label">JS 课程文件</span></div>
+            <div class="stat-card"><span class="stat-number">85+</span><span class="stat-label">核心知识点</span></div>
+            <div class="stat-card"><span class="stat-number">718</span><span class="stat-label">练习题目</span></div>
+        </div>
+        <div class="category"><h2 class="category-title">📚 基础入门</h2><div class="chapter-grid">
+            <div class="chapter-card"><div class="chapter-name">基础语法入门 (2 课)</div><a href="基础语法入门/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">变量与数据类型 (2 课)</div><a href="variables/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">运算符与表达式 (2 课)</div><a href="operators/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">控制流语句 (3 课)</div><a href="control/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">函数 (2 课)</div><a href="functions/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">数组 (2 课)</div><a href="arrays/" class="chapter-link">查看 →</a></div>
+        </div></div>
+        <div class="category"><h2 class="category-title">🎯 Level 真题训练</h2><div class="chapter-grid">
+            <div class="chapter-card"><div class="chapter-name">Level 1 (7 课·64 题)</div><a href="Level1/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">Level 2 (12 课)</div><a href="Level2/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">Level 3 (10 课)</div><a href="Level3/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">Level 4 (10 课)</div><a href="Level4/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">Level 5 (10 课)</div><a href="Level5/" class="chapter-link">查看 →</a></div>
+        </div></div>
+        <div class="category"><h2 class="category-title">💡 核心知识点</h2><div class="chapter-grid">
+            <div class="chapter-card"><div class="chapter-name">指针 (15 课)</div><a href="指针/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">内存管理 (5 课)</div><a href="内存管理/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">结构体 (5 课)</div><a href="结构体/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">联合体 (3 课)</div><a href="联合体/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">位运算 (3 课)</div><a href="位运算/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">文件操作 (5 课)</div><a href="文件操作/" class="chapter-link">查看 →</a></div>
+        </div></div>
+        <div class="category"><h2 class="category-title">🐧 Linux 系统编程</h2><div class="chapter-grid">
+            <div class="chapter-card"><div class="chapter-name">Linux 系统编程 (8 课)</div><a href="Linux 系统编程/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">嵌入式 C 语言 (6 课)</div><a href="嵌入式 C 语言/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">嵌入式 Linux 应用 (12 课)</div><a href="嵌入式 Linux 应用/" class="chapter-link">查看 →</a></div>
+        </div></div>
+        <div class="category"><h2 class="category-title">🚀 进阶主题</h2><div class="chapter-grid">
+            <div class="chapter-card"><div class="chapter-name">C++ 基础 (5 课)</div><a href="C++ 基础/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">算法与数据结构 (6 课)</div><a href="算法与数据结构/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">面试专题 (10 课)</div><a href="Interview/" class="chapter-link">查看 →</a></div>
+            <div class="chapter-card"><div class="chapter-name">综合实战 (3 课)</div><a href="综合实战/" class="chapter-link">查看 →</a></div>
+        </div></div>
+        <div class="footer"><p>生成时间：2026 年 03 月 15 日</p></div>
+    </div>
+</body>
+</html>

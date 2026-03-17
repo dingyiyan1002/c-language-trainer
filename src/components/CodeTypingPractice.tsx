@@ -4,6 +4,7 @@ import {
   AlertCircle, CheckCircle2, ChevronDown, Keyboard,
   Target, TrendingUp
 } from 'lucide-react';
+import { IMPORTED_PRESETS } from '../data/importedPresets-full';
 
 const PRESET_CODES = [
   {
@@ -210,6 +211,8 @@ int main() {
     return 0;
 }`,
   },
+  // 从作业目录导入的 170 个题目
+  ...IMPORTED_PRESETS,
 ];
 
 class TypeSoundEngine {
@@ -560,17 +563,13 @@ interface CodeTypingPracticeProps {
   initialCode?: string;
   initialCodeName?: string;
   autoStart?: boolean;
-  memorizeMode?: boolean;
-  memorizeDuration?: number;
 }
 
 const CodeTypingPractice = memo(function CodeTypingPractice({
   onClose,
   initialCode,
   initialCodeName = '章节代码',
-  autoStart = false,
-  memorizeMode = false,
-  memorizeDuration = 10
+  autoStart = false
 }: CodeTypingPracticeProps) {
   const [targetCode, setTargetCode] = useState('');
   const [userInput, setUserInput] = useState('');
@@ -589,10 +588,6 @@ const CodeTypingPractice = memo(function CodeTypingPractice({
   const [typingStats, setTypingStats] = useState<TypingStats>(loadStats());
   const [showHistory, setShowHistory] = useState(false);
   const [selectedPresetName, setSelectedPresetName] = useState('');
-  const [isMemorizeMode, setIsMemorizeMode] = useState(false);
-  const [memorizeTime, setMemorizeTime] = useState(10);
-  const [memorizeCountdown, setMemorizeCountdown] = useState(0);
-  const [memorizeStarted, setMemorizeStarted] = useState(false);
   const [difficultyFilter, setDifficultyFilter] = useState<'all' | '入门' | '基础' | '中级' | '高级'>('all');
   
   const containerRef = useRef<HTMLDivElement>(null);
@@ -611,14 +606,8 @@ const CodeTypingPractice = memo(function CodeTypingPractice({
       if (!autoStart) {
         setShowPresets(false);
       }
-      if (memorizeMode) {
-        setMemorizeTime(memorizeDuration);
-        setMemorizeCountdown(memorizeDuration);
-        setMemorizeStarted(true);
-        setIsMemorizeMode(true);
-      }
     }
-  }, [initialCode, initialCodeName, autoStart, memorizeMode, memorizeDuration]);
+  }, [initialCode, initialCodeName, autoStart]);
 
   useEffect(() => {
     if (cursorRef.current) {
@@ -662,16 +651,7 @@ const CodeTypingPractice = memo(function CodeTypingPractice({
     soundEngine.setVolume(soundVolume);
   }, [soundEnabled, soundType, soundVolume]);
 
-  useEffect(() => {
-    if (memorizeStarted && memorizeCountdown > 0) {
-      const timer = setTimeout(() => setMemorizeCountdown(c => c - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-    if (memorizeStarted && memorizeCountdown === 0 && isMemorizeMode) {
-      setMemorizeStarted(false);
-      setIsMemorizeMode(false);
-    }
-  }, [memorizeStarted, memorizeCountdown, isMemorizeMode]);
+
 
   const stats = useMemo(() => {
     if (!startTime) return { wpm: 0, cpm: 0, accuracy: 100, elapsed: 0 };
@@ -698,7 +678,6 @@ const CodeTypingPractice = memo(function CodeTypingPractice({
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (isFinished || isPaused || isComposing) return;
-    if (isMemorizeMode && memorizeCountdown > 0) return;
 
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Escape',
@@ -759,7 +738,7 @@ const CodeTypingPractice = memo(function CodeTypingPractice({
     }
   }, [isFinished, isPaused, isComposing, startTime, targetCode, currentIndex]);
 
-  const selectPreset = useCallback((code: string, name: string = '自定义代码', startMemorize: boolean = false) => {
+  const selectPreset = useCallback((code: string, name: string = '自定义代码') => {
     const processedCode = code.replace(/\t/g, '    ');
     setTargetCode(processedCode);
     setSelectedPresetName(name);
@@ -769,15 +748,7 @@ const CodeTypingPractice = memo(function CodeTypingPractice({
     setTotalErrors(0);
     setShowPresets(false);
     setIsPaused(false);
-
-    if (startMemorize && !isStarted) {
-      setIsMemorizeMode(true);
-      setMemorizeCountdown(memorizeTime);
-      setMemorizeStarted(true);
-    } else {
-      setIsMemorizeMode(false);
-    }
-  }, [memorizeTime, isStarted]);
+  }, []);
 
   const useCustomCode = useCallback(() => {
     if (!customCode.trim()) return;
@@ -1049,21 +1020,6 @@ const CodeTypingPractice = memo(function CodeTypingPractice({
                   <option value="高级">高级</option>
                 </select>
               </div>
-              <div className="flex-1 min-w-[200px]">
-                <label className="text-xs text-slate-400 block mb-1.5">默写模式</label>
-                <select
-                  value={memorizeTime}
-                  onChange={(e) => setMemorizeTime(Number(e.target.value))}
-                  className="w-full bg-slate-900 text-slate-200 text-sm p-2 rounded-lg border border-slate-600 focus:border-cyan-500 focus:outline-none"
-                >
-                  <option value={0}>关闭</option>
-                  <option value={5}>5秒</option>
-                  <option value={10}>10秒</option>
-                  <option value={15}>15秒</option>
-                  <option value={20}>20秒</option>
-                  <option value={30}>30秒</option>
-                </select>
-              </div>
             </div>
 
             <button
@@ -1098,7 +1054,7 @@ const CodeTypingPractice = memo(function CodeTypingPractice({
                 return (
                 <button
                   key={index}
-                  onClick={() => selectPreset(preset.code, preset.name, memorizeTime > 0)}
+                  onClick={() => selectPreset(preset.code, preset.name)}
                   className="text-left p-4 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-cyan-500/50 rounded-xl transition-all group"
                 >
                   <div className="flex items-center justify-between mb-2">
@@ -1171,13 +1127,7 @@ const CodeTypingPractice = memo(function CodeTypingPractice({
             className="h-full overflow-auto p-6 focus:outline-none cursor-text"
             style={{ caretColor: 'transparent' }}
           >
-            {isMemorizeMode && memorizeCountdown > 0 ? (
-              <div className="flex flex-col items-center justify-center h-full">
-                <div className="text-8xl font-bold text-cyan-400 mb-4">{memorizeCountdown}</div>
-                <div className="text-xl text-slate-300 mb-2">默写模式</div>
-                <div className="text-sm text-slate-500">记住代码后开始默写</div>
-              </div>
-            ) : !isStarted ? (
+            {!isStarted ? (
               <div className="text-center text-slate-500 text-sm mb-4 py-2 bg-slate-800/50 rounded-lg">
                 Lightbulb 点击此区域，然后开始打字（请切换到英文输入法）
               </div>

@@ -1,0 +1,23 @@
+1、模板函数的定义如下：
+	template <typename T>
+	Max(T a, T b, T &c) {c = a + b;}
+	下列选项正确的是（）
+	A int x, y; char z;  Max(x, y, z);   B double x, y, z; Max(x, y, z);
+	C int x, y; float z; Max(x, y, z);   D float x; double y, z; Max(x, y, z);
+
+2、以下类模板定义正确的是（）
+	A template <class T, int i = 0>    B template <class T, class int i>
+	C template <class T, typename T>   D template <class T1, T2>
+
+3、类模板的实例化（）
+	A 在编译时进行   B 属于动态联编
+	C 在运行时进行   D 在连接是进行
+	
+4、类模板的模板参数（）
+	A 只能作为数据成员的类型        B 只可作为成员函数的返回类型
+	C 只可作为成员函数的参数类型    D 以上三种均可
+
+5、设计一个类模板，其中包括数据成员T a[n]、对其排序的成员函数sort()、在其中进行查找数据元
+素的函数int search(T)，模板参数T可以实例化成字符串；
+
+6、自定义数组类，实现对半查找以及插值查找的模板函数。

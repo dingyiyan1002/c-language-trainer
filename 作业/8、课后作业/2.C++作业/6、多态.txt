@@ -1,0 +1,217 @@
+一、选择题
+1、关于虚函数的描述中，正确的是（）
+A、虚函数是一个静态成员函数     
+B、虚函数是一个非成员函数
+C、虚函数既可以在函数说明是定义，也可以在函数实现是定义
+D、派生类的虚函数与基类中对应的虚函数具有相同的参数个数和类型。
+
+2、关于动态联编的描述中，错误的是（）
+A、动态联编是以虚函数为基础       
+B、动态联编是运行时确定所调用的函数代码的
+C、动态联编调用函数操作是指向对象的指针或对象引用  
+D、动态联编在编译时确定操作的函数
+
+3、编译时的多态性可以通过使用()获得？
+A、虚函数和指针       B、重载函数和析构函数    C、虚函数和对象    D、虚函数和引用
+
+4、关于纯虚函数和抽象类的描述中，错误的是（）
+A、纯虚函数是一种特殊的虚函数，它没有具体的实现
+B、抽象类是指具体纯虚函数的类
+C、一个基类中说明有纯虚函数，该基类派生类一定不再是抽象类
+D、抽象类只能作为基类来使用，其纯虚函数的实现由派生类给出
+
+5、下列描述中，（）是抽象类的特征
+A、可以说明虚函数    B、可以进行构造函数重载   C、可以定义友元函数   D、不能说明其对象
+
+6、以下（）成员函数表示虚函数
+A、virtual int vf(int);       B、void vf(int) = 0;
+C、virtual void vf() = 0;     D、virtual void vf(){}
+
+7、如果一个类至少有一个纯虚函数，那么就称该类为（）
+A、抽象类       B、虚函数       C、派生类        D、以上都不对
+
+8、要实现动态联编，必须通过（）调用虚函数
+A、对象指针     B、成员名限定   C、对象名        D、派生类名
+
+9、下面描述中，正确的是（）
+A、virtual可以用来声明虚函数
+B、含有纯虚函数的类是不可以用来创建对象的，因为它是虚基类
+C、即使基类的构造函数没有参数，派生类也必须建立构造函数
+D、静态数据成员不是所有对象所共有的
+
+10、下列函数中，可以作为虚函数的是（）
+A、普通函数    B、非静态成员函数    C、构造函数      D、析构函数
+
+二、简单题
+1、什么叫做多态？在C++中如何实现多态？
+
+
+
+
+
+
+2、虚函数与一般重载函数有什么区别？（至少4点）
+
+
+
+
+
+3、什么叫抽象类？抽象类有什么作用？抽象类的派生类是否一定要给出纯虚函数的实现？
+
+
+
+
+
+4、能否声明虚析构函数？有什么作用？
+
+
+
+
+
+三、写出下列程序的运行结果。
+1
+using namespace std;
+ 
+class A
+{
+public:
+	void foo()
+	{
+		printf("A::foo()\n");
+	}
+	virtual void fun()
+	{
+		printf("A::fun()\n");
+	}
+};
+class B : public A
+{
+public:
+	void foo()
+	{
+		printf("B::foo()\n");
+	}
+	void fun()
+	{
+		printf("B::fun()\n");
+	}
+};
+int main(void)
+{
+	A a;
+	B b;
+	A *p = &a;
+	p->foo();
+	p->fun();
+	p = &b;
+	p->foo();
+	p->fun();
+	return 0;
+}
+
+
+
+
+2
+using namespace std;
+ 
+class A
+{
+public:
+	void foo()
+	{
+		printf("A::foo()\n");
+	}
+	virtual void fun()
+	{
+		printf("A::fun()\n");
+	}
+};
+class B : public A
+{
+public:
+	void foo()
+	{
+		printf("B::foo()\n");
+	}
+	void fun()
+	{
+		printf("B::fun()\n");
+	}
+};
+int main(void)
+{
+	A a;
+	B *pb = (B*)&a;
+	pb->foo();
+	pb->fun();
+	return 0;
+}
+
+
+
+
+
+3
+#include<iostream>
+using namespace std;
+ 
+class A
+{
+public:
+	virtual void ff()
+	{
+		cout<<"A::ff()"<<endl;
+	}
+	void gg()
+	{
+		cout<<"A::gg()"<<endl;
+	}
+	void hh(int x)
+	{
+		cout<<"A::hh()"<<endl;
+	}
+};
+class B :public A
+{
+public:
+	virtual void ff()
+	{
+		cout<<"B::ff()"<<endl;
+	}
+	void gg()
+	{
+		cout<<"B::gg()"<<endl;
+	}
+	void hh(float x)
+	{
+		cout<<"B::hh()"<<endl;
+	}
+};
+int main()
+{
+	B b;
+	A* pa = &b;
+	B* pb = &b;
+	pa->ff(); //多态，即就是重写或者叫覆盖
+	pb->ff();
+	printf("------------\n");
+	pa->gg();//非多态，是隐藏
+	pb->gg();
+	printf("------------\n");
+	pa->hh(3); //非多态，是隐藏
+	pb->A::hh(3);
+	
+	return 0;
+}
+
+
+
+
+
+四、编程题
+1、使用虚函数编写程序求球体和圆柱体的体积及表面积。由于球体和圆柱体都可以看作由圆继承而来，
+所以可以定义圆类Circle作为基类。在Circle类中定义一个数据成员radius和两个虚函数area()
+和volume（）。由Circle类派生Sphere类和Column类。在派生类中对虚函数area（）和volume（）重新
+定义，分别求球体和圆柱体的体积和表面积。
+

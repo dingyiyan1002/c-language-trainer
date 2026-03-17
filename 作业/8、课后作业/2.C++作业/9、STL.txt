@@ -1,0 +1,135 @@
+1、用list构造一个文件夹结构，并递归显示文件夹里面的内容，完成下面代码的show函数。
+class BaseFile
+{
+public:
+	virtual string GetName() = 0;
+	virtual int Add(BaseFile *file) = 0;
+	virtual int Remove(BaseFile *file) = 0;
+	virtual list<BaseFile *> *GetChild() = 0;
+};
+
+class IFile : public BaseFile
+{
+private:
+	string name;
+public:
+	IFile(string n)
+	{
+		name = n;
+	}
+	string GetName()
+	{
+		return name;
+	}
+	int Add(BaseFile *file)
+	{
+		return -1;
+	}
+
+	int Remove(BaseFile *file)
+	{
+		return -1;
+	}
+	list<BaseFile *> *GetChild()
+	{
+		return NULL;
+	}
+};
+
+class Dir : public BaseFile
+{
+private:
+	string name;
+	list<BaseFile *> *l;
+public:
+	Dir(string n)
+	{
+		name = n;
+		l = new list<BaseFile *>;
+	}
+	string GetName()
+	{
+		return name;
+	}
+	int Add(BaseFile *file)
+	{
+		l->push_back(file);
+		return 1;
+	}
+	int Remove(BaseFile *file)
+	{
+		l->remove(file);
+		return 1;
+	}
+	list<BaseFile *> *GetChild()
+	{
+		return l;
+	}
+};
+
+void show(BaseFile *root, int gap)
+{
+
+}
+
+int main()
+{	
+	BaseFile *root = new Dir("root");
+	BaseFile *dir1 = new Dir("home");
+	BaseFile *file1 = new IFile("1.c");
+	BaseFile *file2 = new IFile("2.c");
+	BaseFile *file3 = new IFile("3.c");
+	BaseFile *file4 = new IFile("4.c");
+	BaseFile *file5 = new IFile("5.c");
+	BaseFile *dir2 = new Dir("hello");
+
+	dir1->Add(file1);
+	dir1->Add(file2);
+	dir1->Add(file3);
+	dir1->Add(file4);
+	dir1->Add(file5);
+
+	dir2->Add(file1);
+	dir2->Add(file2);
+	dir2->Add(file3);
+	dir2->Add(file4);
+	dir2->Add(file5);
+
+	root->Add(dir1);
+	root->Add(dir2);
+
+	show(root, 0);
+
+	return 0;
+}
+
+运行结果如下：
+[root@turbo DesignPattern]# ./2-2组合模式 
+root
+---home
+------1.c
+------2.c
+------3.c
+------4.c
+------5.c
+---hello
+------1.c
+------2.c
+------3.c
+------4.c
+------5.c
+
+
+2、设计一个工厂类，该工厂可以通过multimap保存学生数据。在插入学生数据的时候，能自动根据学
+号判断该学生是否已经存在，如果存在则打印学生信息，如果不存在则提示输入学会其他信息并插入。
+class FWFactory
+{
+private:
+    multimap<int, Student *> *m; 
+public:
+    FWFactory()； 
+    ~FWFactory()；
+	void insertStudent(int id);
+};
+   
+3、（选做）实现设计模式里面的简单工厂模式、工厂模式、抽象工厂模式。（设计模式有23种，比较重要的有工厂模式、单例模式...）

@@ -1,0 +1,39 @@
+VIM命令考查
+1、打开一个文件hello.c                  _______________________
+2、怎么对文件进行编辑                   _______________________
+3、怎么查找hello这个单词                _______________________
+4、怎么删除第4行                        _______________________
+5、怎么复制第5行                        _______________________
+6、怎么粘贴刚才复制的第5行              _______________________
+7、如何跳到文件末尾                     _______________________
+8、怎么样让文档显示行号                 _______________________
+9、怎么不保存文件而退出                 _______________________
+10、怎么保存文件并退出                  _______________________
+
+注意：以下为Shell脚本编程，Shell可以不作为重点掌握。
+
+1、编写一个名为iffile程序，它执行时判断/bin目录下date文件是否存在？
+ 
+2、编写一个名为greet的问候程序，执行时能根据系统当前的时间向用户输出问候信息。设从半夜到中午为早晨，中午到下午六点为下午，下午六点到半夜为晚上。
+ 
+3、编写一个名为ifuser的程序，它执行时带用户名作为命令行参数，判断该用户是否已经在系统中登录，并给出相关信息。
+ 
+4、编写一个名为menu的程序，实现简单的弹出式菜单功能，用户能根据显示的菜单项从键盘选择执行对应的命令。
+ 
+5、编写一个名为chname的程序，将当前目录下所有的.txt文件更名为.doc文件。
+ 
+6、编写一个名为chuser的程序，执行中每隔5分钟检查指定的用户是否登录系统，用户名从命令行输入；如果指定的用户已经登录，则显示相关信息。 
+
+7、使用for循环在/oldboy目录下通过随机小写10个字母加固定字符串oldboy批量创建10个html文件，名称例如为：
+	[root@oldboy oldboy]# sh /server/scripts/oldboy.sh  
+	[root@oldboy oldboy]# ls  
+	coaolvajcq_oldboy.html  qnvuxvicni_oldboy.html  vioesjmcbu_oldboy.html  
+	gmkhrancxh_oldboy.html  tmdjormaxr_oldboy.html  wzewnojiwe_oldboy.html  
+	jdxexendbe_oldboy.html  ugaywanjlm_oldboy.html  xzzruhdzda_oldboy.html  
+	qcawgsrtkp_oldboy.html  vfrphtqjpc_oldboy.html 
+	
+8、将以上文件名中的oldboy全部改成oldgirl(用for循环实现),并且html改成大写。
+
+9、批量创建10个系统帐号oldboy01-oldboy10并设置密码（密码为随机8位字符串）。
+
+10、求1到100的和

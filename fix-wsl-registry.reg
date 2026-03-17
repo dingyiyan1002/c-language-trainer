@@ -1,0 +1,14 @@
+Windows Registry Editor Version 5.00
+
+; 激活 WSL 功能
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\LxssManager]
+"Start"=dword:00000003
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\LxssCoreApi]
+"Start"=dword:00000003
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Drvxfs]
+"Start"=dword:00000003
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Drvfs]
+"Start"=dword:00000003
