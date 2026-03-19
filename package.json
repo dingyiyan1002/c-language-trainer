@@ -1,5 +1,6 @@
 {
-  "name": "react-vite-tailwind",
+  "name": "embedded-learning",
+  "description": "嵌入式学习平台 - C 语言/数据结构/单片机/嵌入式系统",
   "private": true,
   "version": "0.0.0",
   "type": "module",

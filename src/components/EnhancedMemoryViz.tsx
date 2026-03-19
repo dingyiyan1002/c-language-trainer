@@ -204,4 +204,7 @@ export const EnhancedMemoryViz = memo(function EnhancedMemoryViz({ steps, isDark
   );
 });
 
+// 默认导出，用于 React.lazy()
+export default EnhancedMemoryViz;
+
 // generateStepsFromCode 函数已移动到：src/utils/generateStepsFromCode.ts

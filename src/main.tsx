@@ -6,7 +6,7 @@ import "./index.css";
 
 // 性能监控 - 仅在开发环境启用
 if (import.meta.env.DEV) {
-  import('web-vitals').then(({ getCLS, getFID, getFCP, getLCP, getTTFB, INP }) => {
+  import('web-vitals').then(({ onCLS, onFCP, onLCP, onTTFB, onINP }) => {
     const reportMetric = (metric: any) => {
       console.log(`[Web Vitals] ${metric.name}:`, {
         value: metric.value,
@@ -16,12 +16,13 @@ if (import.meta.env.DEV) {
       });
     };
 
-    getCLS(reportMetric);
-    getFID(reportMetric);
-    getFCP(reportMetric);
-    getLCP(reportMetric);
-    getTTFB(reportMetric);
-    INP?.(reportMetric);
+    onCLS(reportMetric);
+    onFCP(reportMetric);
+    onLCP(reportMetric);
+    onTTFB(reportMetric);
+    onINP?.(reportMetric);
+  }).catch((err) => {
+    console.error('[Web Vitals] 加载失败:', err);
   });
 }
 

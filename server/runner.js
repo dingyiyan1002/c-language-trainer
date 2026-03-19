@@ -112,14 +112,14 @@ const SMART_ERROR_ANALYZER = {
     },
     {
       // 括号不匹配
-      regex: /expected '}'|expected ')'|expected ']'|unmatched '|mismatched/,
+      regex: new RegExp("expected '\\}'|expected '\\)'|expected '\\]'|unmatched '|mismatched"),
       type: 'syntax',
       severity: 'error',
       title: '括号不匹配',
       explanation: '代码中的括号（圆括号、方括号、花括号）没有正确配对。',
       suggestion: '检查每个左括号是否有对应的右括号。建议使用编辑器的括号匹配功能。',
-      correctExample: 'int main() {\n    if (x > 0) {\n        printf("positive");\n    }\n}',
-      wrongExample: 'int main() {\n    if (x > 0 {\n        printf("positive");\n    }\n}',
+      correctExample: 'int main() {\\n    if (x > 0) {\\n        printf("positive");\\n    }\\n}',
+      wrongExample: 'int main() {\\n    if (x > 0 {\\n        printf("positive");\\n    }\\n}',
       knowledgePoint: '括号匹配',
       tips: ['使用编辑器的括号高亮功能', '保持代码缩进', '写左括号后立即写右括号']
     },

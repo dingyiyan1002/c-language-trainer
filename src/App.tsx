@@ -315,7 +315,7 @@ const Header = memo(function Header({
           </div>
           <div className="hidden sm:block">
             <h1 className={`text-lg font-bold ${isDarkMode ? 'text-white group-hover:text-emerald-400' : 'text-slate-800 group-hover:text-emerald-600'} transition-colors`}>
-              C语言思维训练器
+              嵌入式学习平台
             </h1>
             <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>硬核代码训练</p>
           </div>
@@ -1771,10 +1771,10 @@ const HomeView = memo(function HomeView({
           <span className={`text-sm ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>输入式答题 · 拒绝无脑选择</span>
         </div>
         <h1 className={`text-3xl sm:text-4xl font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-          C语言<span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">代码思维</span>训练
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">嵌入式</span>学习平台
         </h1>
         <p className={`text-lg max-w-xl mx-auto ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-          亲手敲代码，像编译器一样思考
+          C 语言核心 · 数据结构 · 单片机 · 嵌入式系统
         </p>
       </div>
 
@@ -2880,7 +2880,7 @@ export function App() {
 
       {view !== 'project' && (
         <footer className={`text-center py-8 text-sm ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
-          <p>用 <Heart className="w-4 h-4 inline" /> 打造 · C语言代码思维训练器</p>
+          <p>用 <Heart className="w-4 h-4 inline" /> 打造 · 嵌入式学习平台</p>
         </footer>
       )}
     </div>
