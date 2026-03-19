@@ -2879,9 +2879,7 @@ export function App() {
       </main>
 
       {view !== 'project' && (
-        <footer className={`text-center py-8 text-sm ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
-          <p>用 <Heart className="w-4 h-4 inline" /> 打造 · 嵌入式学习平台</p>
-        </footer>
+        <footer className={`text-center py-8 text-sm ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`} />
       )}
     </div>
   );
