@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>三元运算符 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#059669 0%,#047857 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#064e3b;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#7c3aed;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:500px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#ecfdf5,#d1fae5);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#6ee7b7;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#059669;box-shadow:0 0 20px rgba(5,150,105,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#064e3b;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .comparison-container{display:flex;gap:16px;justify-content:center;margin:16px 0}
+    .compare-box{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;border-radius:12px;min-width:140px;transition:all 0.4s ease;border:3px solid transparent}
+    .compare-box.adc{background:linear-gradient(135deg,#f97316,#ea580c);color:white}
+    .compare-box.threshold{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .compare-box.active{transform:scale(1.05);box-shadow:0 0 20px rgba(5,150,105,0.6)}
+    .compare-label{font-size:12px;font-weight:600;text-transform:uppercase}
+    .compare-value{font-size:28px;font-weight:700;font-family:'Consolas',monospace}
+    .compare-hex{font-size:11px;opacity:0.8}
+    .operator-symbol{font-size:48px;color:#059669;font-weight:700;display:flex;align-items:center;animation:pulse 1.5s ease infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+    .ternary-container{background:white;border-radius:12px;padding:16px;margin:16px 0}
+    .ternary-expression{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+    .ternary-part{padding:10px 14px;border-radius:8px;font-weight:700;font-size:13px;font-family:'Consolas',monospace}
+    .ternary-condition{background:#fef3c7;color:#92400e}
+    .ternary-question{background:#059669;color:white}
+    .ternary-colon{font-size:24px;color:#64748b;font-weight:700}
+    .ternary-true{background:#22c55e;color:white}
+    .ternary-false{background:#ef4444;color:white}
+    .ternary-result{background:linear-gradient(135deg:#059669,#047857);color:white;font-size:16px}
+    .result-box{display:flex;flex-direction:column;gap:12px;margin-top:16px}
+    .result-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#ecfdf5;border-radius:8px;border:2px solid#6ee7b7}
+    .result-label{font-size:13px;color:#064e3b;font-weight:600}
+    .result-value{font-size:18px;font-weight:700;font-family:'Consolas',monospace;color:#059669}
+    .result-value.selected{background:#059669;color:white;padding:6px 12px;border-radius:6px}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:13px;color:#22d3ee;min-height:100px}
+    .terminal-line{margin-bottom:6px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+    .flow-diagram{display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0}
+    .flow-node{padding:10px 16px;border-radius:8px;font-weight:700;font-size:12px;text-align:center;transition:all 0.3s ease}
+    .flow-condition{background:#fef3c7;color:#92400e;border:2px solid#f59e0b}
+    .flow-true{background:#22c55e;color:white}
+    .flow-false{background:#ef4444;color:white}
+    .flow-result{background:#059669;color:white}
+    .flow-arrow{font-size:20px;color:#64748b}
+    .flow-branch{display:flex;gap:24px;align-items:center}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 5;
+    const PROG_NAME = "ternary_operator";
+    const FILE_NAME = "ternary_operator.c";
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',cyan:'#059669'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'#include <stdint.h>',color:'#7c3aed'},
+      3:{step:1,text:'',color:'#94a3b8'},
+      4:{step:1,text:'int main(void) {',color:'#3b82f6'},
+      5:{step:2,text:'    uint16_t adc_value = 2048;',color:'#3b82f6'},
+      6:{step:2,text:'    uint16_t threshold = 2000;',color:'#3b82f6'},
+      7:{step:2,text:'    printf("ADC: %d, Threshold: %d\\n", adc_value, threshold);',color:'#eab308'},
+      8:{step:3,text:'    const char *status = (adc_value > threshold) ? "HIGH" : "LOW";',color:'#3b82f6'},
+      9:{step:4,text:'    printf("Status: %s\\n", status);',color:'#eab308'},
+      10:{step:4,text:'    uint8_t led = (adc_value > threshold) ? 1 : 0;',color:'#3b82f6'},
+      11:{step:5,text:'    printf("LED: %s\\n", led ? "ON" : "OFF");',color:'#eab308'},
+      12:{step:5,text:'    return 0;',color:'#3b82f6'},
+      13:{step:5,text:'}',color:'#94a3b8'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，包含标准输入输出头文件和标准整数头文件',
+      2:'定义 adc_value 等于 2048，threshold 等于 2000，打印 ADC 值和阈值',
+      3:'三元运算符判断：adc_value 大于 threshold 吗？2048 大于 2000，条件为真，status 等于 HIGH',
+      4:'打印状态 Status: HIGH，然后用三元运算符设置 led 等于 1',
+      5:'打印 LED 状态 LED: ON，三元运算符语法简洁，适合简单条件赋值，程序执行完毕'
+    };
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',chip:'M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [adcValue,setAdcValue] = useState(2048);
+      const [threshold,setThreshold] = useState(2000);
+      const [status,setStatus] = useState('');
+      const [led,setLed] = useState(null);
+      const [isEvaluating,setIsEvaluating] = useState(false);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const toBinary = (num) => {
+        const bin = num.toString(2).padStart(11,'0');
+        return bin.split('').map(b => b === '1');
+      };
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 13; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setAdcValue(2048);
+          setThreshold(2000);
+          setStatus('');
+          setLed(null);
+        } else if(step === 2) {
+          setAdcValue(2048);
+          setThreshold(2000);
+          setTerminalLines(['ADC: 2048, Threshold: 2000']);
+        } else if(step === 3) {
+          setIsEvaluating(true);
+          setTimeout(() => {
+            setIsEvaluating(false);
+            setStatus('HIGH');
+          }, 600);
+        } else if(step === 4) {
+          setTerminalLines(['ADC: 2048, Threshold: 2000','Status: HIGH']);
+        } else if(step === 5) {
+          setLed(1);
+          setTerminalLines(['ADC: 2048, Threshold: 2000','Status: HIGH','LED: ON']);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setAdcValue(2048);
+        setThreshold(2000);
+        setStatus('');
+        setLed(null);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      const conditionMet = adcValue > threshold;
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>三元运算符 - C 语言可视化</h1>
+            <p>条件表达式 | 简洁语法 | 条件赋值</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.cyan,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                {FILE_NAME}
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8,9,10,11,12,13].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.chip} size={22} />
+                三元运算符可视化
+              </div>
+              <div className={`var-card ${step >= 2 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">比较值</span>
+                  <span className="var-type">uint16_t</span>
+                </div>
+                <div className="comparison-container">
+                  <div className={`compare-box adc ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">ADC Value</div>
+                    <div className="compare-value">{adcValue}</div>
+                    <div className="compare-hex">0x{adcValue.toString(16).toUpperCase()}</div>
+                  </div>
+                  <div className="operator-symbol">{step >= 2 ? '>' : ''}</div>
+                  <div className={`compare-box threshold ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">Threshold</div>
+                    <div className="compare-value">{threshold}</div>
+                    <div className="compare-hex">0x{threshold.toString(16).toUpperCase()}</div>
+                  </div>
+                </div>
+                {step >= 2 && (
+                  <div style={{textAlign:'center',margin:'12px 0'}}>
+                    <span className={`status-badge ${conditionMet ? 'true' : 'false'}`} style={{background:conditionMet ? '#22c55e' : '#ef4444',color:'white',padding:'8px 16px',borderRadius:20,fontWeight:700,fontSize:14}}>
+                      {conditionMet ? '✓ 条件为真' : '✗ 条件为假'}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {step >= 3 && (
+                <div className="ternary-container">
+                  <div style={{fontSize:13,color:'#475569',fontWeight:700,marginBottom:12,textAlign:'center'}}>
+                    {step === 3 ? 'status = (adc_value > threshold) ? "HIGH" : "LOW"' : 'led = (adc_value > threshold) ? 1 : 0'}
+                  </div>
+                  <div className="ternary-expression">
+                    <span className="ternary-condition">{conditionMet ? '2048 > 2000' : '条件'}</span>
+                    <span className="ternary-question">?</span>
+                    <span className={`ternary-true ${step >= 3 ? 'selected' : ''}`}>{step === 3 ? '"HIGH"' : '1'}</span>
+                    <span className="ternary-colon">:</span>
+                    <span className={`ternary-false ${step >= 3 && !conditionMet ? 'selected' : ''}`}>{step === 3 ? '"LOW"' : '0'}</span>
+                    <span className="ternary-result">→ {step === 3 ? '"HIGH"' : '1'}</span>
+                  </div>
+                  {step >= 4 && (
+                    <div className="result-box">
+                      <div className="result-row">
+                        <span className="result-label">status:</span>
+                        <span className="result-value selected">{status}</span>
+                      </div>
+                      {step >= 5 && (
+                        <div className="result-row">
+                          <span className="result-label">led:</span>
+                          <span className="result-value selected">{led === 1 ? '1 (ON)' : '0 (OFF)'}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              {step >= 3 && (
+                <div style={{marginTop:20}} className="flow-diagram">
+                  <div className="flow-node flow-condition">{adcValue} > {threshold}?</div>
+                  <div className="flow-arrow">↓</div>
+                  <div className="flow-branch">
+                    <div className={`flow-true ${conditionMet ? 'active' : ''}`} style={{border:conditionMet ? '3px solid #059669' : 'none'}}>
+                      TRUE<br/>{step === 3 ? '"HIGH"' : '1'}
+                    </div>
+                    <div className={`flow-false ${!conditionMet ? 'active' : ''}`} style={{opacity:conditionMet ? 0.3 : 1}}>
+                      FALSE<br/>{step === 3 ? '"LOW"' : '0'}
+                    </div>
+                  </div>
+                  <div className="flow-arrow">↓</div>
+                  <div className="flow-node flow-result">{step === 3 ? 'status = "HIGH"' : 'led = 1'}</div>
+                </div>
+              )}
+              {step >= 2 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.cyan}}>三元运算符</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>条件 ? 真值 : 假值</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>简洁语法</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>一行代码完成 if-else 赋值</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>适用场景</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>简单条件赋值，代码更简洁</p>
+              </div>
+              <div className={`explanation-card ${step >= 5 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.orange}}>注意事项</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>复杂逻辑还是用 if-else 更清晰</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1170 - restrict 限定符与内存性能</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(16, 185, 129, 0.2); } 50% { background-color: rgba(16, 185, 129, 0.5); } }
+        @keyframes noAlias { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .animate-blink { animation: blink 1s steps(2) infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+        .animate-noAlias { animation: noAlias 0.5s ease-in-out; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#10b981',
+            secondary: '#059669',
+            accent: '#34d399',
+            highlight: '#6ee7b7',
+            bg: '#064e3b',
+            text: '#d1fae5'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const steps = [
+                { title: 'restrict 限定符概述', voice: 'restrict 限定符概述。restrict 是 C99 引入的类型限定符，仅用于指针。restrict 告诉编译器，在指针生命周期内，该指针是访问其所指对象的唯一途径。这使编译器能够进行更激进的优化，提高代码性能。' },
+                { title: '指针混叠问题', voice: '指针混叠问题。当两个指针可能指向同一内存区域时，称为指针混叠。编译器必须保守处理，假设每次内存访问都可能影响其他指针的值。这阻止了许多优化，如指令重排序、向量化、循环展开等。' },
+                { title: 'restrict 工作原理', voice: 'restrict 工作原理。使用 restrict 修饰指针，程序员向编译器承诺：该指针是访问所指对象的唯一途径，没有其他指针同时访问这块内存。如果违反承诺，行为未定义。作为回报，编译器可以进行激进优化。' },
+                { title: 'restrict 应用场景', voice: 'restrict 应用场景。一，函数参数中多个指针参数互不重叠。二，数组拷贝函数如 memcpy。三，数字信号处理中的滤波器实现。四，图像处理中的像素操作。五，科学计算中的矩阵运算。' },
+                { title: 'restrict 优化效果', voice: 'restrict 优化效果。使用 restrict 后，编译器可以：向量化的 SIMD 指令，循环展开，指令重排序，寄存器分配优化，消除冗余内存访问。在 DSP 和图像处理中，性能提升可达 2 到 4 倍。' },
+                { title: 'restrict 正确使用', voice: 'restrict 正确使用。一，仅在确定无混叠时使用。二，restrict 是单指针属性，不影响所指数据。三，restrict 指针可以被赋值给非 restrict 指针。四，restrict 在函数原型中声明即可。' },
+                { title: 'restrict 常见误区', voice: 'restrict 常见误区。误区一，restrict 保证运行时检查，实际上只是编译器提示。误区二，restrict 可以用于任何指针，实际上仅用于限制访问途径。误区三，restrict 总是提高性能，错误使用可能导致未定义行为。' },
+                { title: 'restrict 与 const volatile 对比', voice: 'restrict 与 const、volatile 对比。const 表示只读，volatile 表示值可能意外变化，restrict 表示无指针混叠。三者可以组合使用，如 const restrict 指针表示只读且无混叠。' }
+            ];
+
+            useEffect(() => {
+                if (!isPlaying) return;
+                const speak = () => {
+                    if (isMuted || !steps[currentStep]) return;
+                    const utterance = new SpeechSynthesisUtterance(steps[currentStep].voice);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak();
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    window.speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, isMuted]);
+
+            const AliasProblem = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>指针混叠问题演示</h4>
+                        <div className="space-y-4">
+                            <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-red-400 font-bold mb-2">❌ 存在混叠 (编译器必须保守)</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`void add_arrays(int *a, int *b, int *c, int n) {
+    // a, b, c 可能指向同一区域!
+    for (int i = 0; i < n; i++) {
+        c[i] = a[i] + b[i];
+        // 编译器不能优化:
+        // 1. 不能确定 c[i] 是否影响 a[j] 或 b[j]
+        // 2. 每次循环必须重新加载 a[i] 和 b[i]
+        // 3. 不能向量化或使用 SIMD
+    }
+}`}
+                                </pre>
+                                <div className="mt-2 text-xs text-red-400">
+                                    ⚠️ 编译器必须假设最坏情况，生成保守代码
+                                </div>
+                            </div>
+                            <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">✓ 使用 restrict (编译器可以优化)</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`void add_arrays(int * restrict a,
+                 int * restrict b,
+                 int * restrict c,
+                 int n) {
+    // 程序员承诺：a, b, c 互不重叠
+    for (int i = 0; i < n; i++) {
+        c[i] = a[i] + b[i];
+        // 编译器可以:
+        // 1. 缓存 a[i] 和 b[i] 到寄存器
+        // 2. 向量化为 SIMD 指令
+        // 3. 循环展开
+    }
+}`}
+                                </pre>
+                                <div className="mt-2 text-xs text-emerald-400">
+                                    ✓ 编译器知道无混叠，可以进行激进优化
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const MemoryLayout = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>内存布局可视化</h4>
+                        <div className="space-y-4">
+                            <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-red-400 font-bold mb-2">❌ 有混叠 (不能优化)</div>
+                                <div className="flex items-center gap-4 my-3">
+                                    <div className="flex-1 bg-red-900/30 p-3 rounded border border-red-600">
+                                        <div className="text-xs text-gray-400 mb-2">指针 a</div>
+                                        <div className="h-8 bg-red-600 rounded flex items-center justify-center text-xs">数组 A[0-3]</div>
+                                    </div>
+                                    <div className="text-gray-500">↗</div>
+                                    <div className="flex-1 bg-purple-900/30 p-3 rounded border border-purple-600">
+                                        <div className="text-xs text-gray-400 mb-2">重叠区域</div>
+                                        <div className="h-8 bg-purple-600 rounded flex items-center justify-center text-xs">数组 B[2-5]</div>
+                                    </div>
+                                    <div className="text-gray-500">↘</div>
+                                    <div className="flex-1 bg-blue-900/30 p-3 rounded border border-blue-600">
+                                        <div className="text-xs text-gray-400 mb-2">指针 c</div>
+                                        <div className="h-8 bg-blue-600 rounded flex items-center justify-center text-xs">数组 C[0-3]</div>
+                                    </div>
+                                </div>
+                                <div className="text-xs text-red-300">
+                                    ⚠️ a 和 b 指向重叠区域，修改 c[i] 可能影响 a[j] 或 b[j]
+                                </div>
+                            </div>
+                            <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">✓ 无混叠 (可以优化)</div>
+                                <div className="flex items-center gap-2 my-3">
+                                    <div className="flex-1 bg-emerald-900/30 p-3 rounded border border-emerald-600">
+                                        <div className="text-xs text-gray-400 mb-2">指针 a (restrict)</div>
+                                        <div className="h-8 bg-emerald-600 rounded flex items-center justify-center text-xs">数组 A[0-3]</div>
+                                    </div>
+                                    <div className="flex-1 bg-cyan-900/30 p-3 rounded border border-cyan-600">
+                                        <div className="text-xs text-gray-400 mb-2">指针 b (restrict)</div>
+                                        <div className="h-8 bg-cyan-600 rounded flex items-center justify-center text-xs">数组 B[0-3]</div>
+                                    </div>
+                                    <div className="flex-1 bg-blue-900/30 p-3 rounded border border-blue-600">
+                                        <div className="text-xs text-gray-400 mb-2">指针 c (restrict)</div>
+                                        <div className="h-8 bg-blue-600 rounded flex items-center justify-center text-xs">数组 C[0-3]</div>
+                                    </div>
+                                </div>
+                                <div className="text-xs text-emerald-300">
+                                    ✓ 三个指针指向完全独立的内存区域，编译器可以放心优化
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const OptimizationExamples = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>restrict 优化效果</h4>
+                        <div className="space-y-3">
+                            <div className={`${currentStep >= 4 ? 'animate-scaleIn' : ''} p-3 bg-blue-900/30 rounded border border-blue-600`}>
+                                <div className="text-blue-300 font-bold mb-1">1. 向量化 (SIMD)</div>
+                                <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-2 rounded">
+{`// 无 restrict: 标量指令
+c[i] = a[i] + b[i];  // 每次处理 1 个元素
+
+// 有 restrict: SIMD 向量指令
+// 一次处理 4 个 float (128 位)
+vaddps xmm0, xmm1, xmm2  // 向量加法`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 4 ? 'animate-scaleIn' : ''} p-3 bg-purple-900/30 rounded border border-purple-600`}>
+                                <div className="text-purple-300 font-bold mb-1">2. 循环展开</div>
+                                <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-2 rounded">
+{`// 展开 4 次迭代
+c[i]   = a[i]   + b[i];
+c[i+1] = a[i+1] + b[i+1];
+c[i+2] = a[i+2] + b[i+2];
+c[i+3] = a[i+3] + b[i+3];`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 4 ? 'animate-scaleIn' : ''} p-3 bg-emerald-900/30 rounded border border-emerald-600`}>
+                                <div className="text-emerald-300 font-bold mb-1">3. 寄存器缓存</div>
+                                <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-2 rounded">
+{`// 缓存到寄存器，避免重复内存访问
+reg_a = a[i];  // 只加载一次
+reg_b = b[i];
+c[i] = reg_a + reg_b;`}
+                                </pre>
+                            </div>
+                        </div>
+                        <div className="mt-4 p-3 bg-amber-900/30 rounded border border-amber-600">
+                            <p className="text-amber-300 text-sm">
+                                📈 性能提升：DSP/图像处理 2-4 倍，矩阵运算 3-8 倍，通用代码 10-30%
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const UseCases = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>restrict 应用场景</h4>
+                        <div className="space-y-3">
+                            <div className={`${currentStep >= 3 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">数组拷贝 (memcpy)</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`void *memcpy(void * restrict dest,
+             const void * restrict src,
+             size_t n) {
+    // dest 和 src 保证不重叠
+    // 可以按最大宽度拷贝，无需逐字节检查
+    char *d = dest;
+    const char *s = src;
+    while (n--) *d++ = *s++;
+    return dest;
+}`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 3 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-cyan-400 font-bold mb-2">FIR 滤波器</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`void fir_filter(const float * restrict input,
+                const float * restrict coeffs,
+                float * restrict output,
+                int n, int m) {
+    for (int i = 0; i < n; i++) {
+        output[i] = 0.0f;
+        for (int j = 0; j < m; j++) {
+            output[i] += input[i+j] * coeffs[j];
+        }
+    }
+}`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 3 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-purple-400 font-bold mb-2">矩阵乘法</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`void matmul(const float * restrict A,
+            const float * restrict B,
+            float * restrict C,
+            int n) {
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++) {
+            C[i*n+j] = 0.0f;
+            for (int k = 0; k < n; k++)
+                C[i*n+j] += A[i*n+k] * B[k*n+j];
+        }
+}`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const Comparison = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>类型限定符对比</h4>
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-gray-600">
+                                    <th className="text-left py-2" style={{ color: COLOR_MAP.text }}>限定符</th>
+                                    <th className="text-center" style={{ color: COLOR_MAP.text }}>语义</th>
+                                    <th className="text-center" style={{ color: COLOR_MAP.text }}>优化</th>
+                                    <th className="text-center" style={{ color: COLOR_MAP.text }}>场景</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr className="border-b border-gray-700">
+                                    <td className="py-2 font-mono text-blue-300">const</td>
+                                    <td className="text-center text-gray-300">只读</td>
+                                    <td className="text-center text-gray-400">常量传播</td>
+                                    <td className="text-center text-gray-300">配置数据</td>
+                                </tr>
+                                <tr className="border-b border-gray-700">
+                                    <td className="py-2 font-mono text-red-300">volatile</td>
+                                    <td className="text-center text-gray-300">禁止优化</td>
+                                    <td className="text-center text-gray-400">无</td>
+                                    <td className="text-center text-gray-300">硬件寄存器</td>
+                                </tr>
+                                <tr className="border-b border-gray-700">
+                                    <td className="py-2 font-mono text-emerald-300">restrict</td>
+                                    <td className="text-center text-gray-300">无混叠</td>
+                                    <td className="text-center text-emerald-400">激进优化</td>
+                                    <td className="text-center text-gray-300">数组运算</td>
+                                </tr>
+                                <tr>
+                                    <td className="py-2 font-mono text-purple-300">const restrict</td>
+                                    <td className="text-center text-gray-300">只读 + 无混叠</td>
+                                    <td className="text-center text-emerald-400">最佳优化</td>
+                                    <td className="text-center text-gray-300">查找表</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+
+            const BestPractices = () => (
+                <div className="space-y-4">
+                    <div className="bg-gradient-to-r from-emerald-900/50 to-teal-900/50 rounded-lg p-6">
+                        <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>restrict 最佳实践</h3>
+                        <ul className="space-y-3 text-gray-300">
+                            <li className="flex items-start">
+                                <span className="text-emerald-400 mr-2">✓</span>
+                                <span><strong>确定无混叠时使用：</strong>仅在确定指针不重叠时使用 restrict</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-emerald-400 mr-2">✓</span>
+                                <span><strong>函数参数声明：</strong>在函数原型中声明 restrict 即可</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-emerald-400 mr-2">✓</span>
+                                <span><strong>数组运算：</strong>DSP、图像处理、矩阵运算优先使用</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-emerald-400 mr-2">✓</span>
+                                <span><strong>组合使用：</strong>const restrict 组合获得最佳优化效果</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-yellow-400 mr-2">⚠️</span>
+                                <span><strong>违反承诺后果：</strong>违反 restrict 承诺导致未定义行为</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>常见误区</h4>
+                        <ul className="space-y-2 text-sm text-gray-300">
+                            <li className="flex items-start">
+                                <span className="text-yellow-400 mr-2">⚠️</span>
+                                <span>restrict <strong>不保证运行时检查</strong>，只是给编译器的提示</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-yellow-400 mr-2">⚠️</span>
+                                <span>restrict <strong>不是总能提高性能</strong>，取决于编译器优化能力</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-yellow-400 mr-2">⚠️</span>
+                                <span>restrict 指针可以赋值给非 restrict 指针，<strong>承诺只对原指针有效</strong></span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-yellow-400 mr-2">⚠️</span>
+                                <span>错误使用 restrict 可能导致<strong>难以调试的错误</strong>，结果不正确但无编译错误</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch(currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-6">
+                                <div className="bg-gradient-to-r from-emerald-900/50 to-teal-900/50 rounded-lg p-6">
+                                    <h3 className="text-2xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>restrict 限定符概述</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">▸</span>
+                                            <span>C99 引入的类型限定符，仅用于指针</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">▸</span>
+                                            <span>指针是访问所指对象的唯一途径</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">▸</span>
+                                            <span>使编译器能够进行激进优化</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">▸</span>
+                                            <span>程序员承诺无混叠，违反则未定义行为</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300">
+{`// restrict 基本语法
+int * restrict p1;      // p1 是 restrict 指针
+const float * restrict p2;  // const + restrict
+
+// 函数参数中使用
+void process(int * restrict out,
+             const int * restrict in,
+             int n);`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return <AliasProblem />;
+                    case 2:
+                        return <MemoryLayout />;
+                    case 3:
+                        return <UseCases />;
+                    case 4:
+                        return <OptimizationExamples />;
+                    case 5:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>restrict 正确使用</h4>
+                                    <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// ✓ 正确：确定无混叠
+void copy_array(const int * restrict src,
+                int * restrict dest,
+                int n) {
+    for (int i = 0; i < n; i++) {
+        dest[i] = src[i];
+    }
+}
+
+// ✓ restrict 在原型中声明即可
+// file.h
+void process(int * restrict p);
+// file.c
+void process(int *p) { }  // 实现中可省略
+
+// ✓ restrict 指针可赋值给普通指针
+int * restrict rp = malloc(100);
+int *p = rp;  // 合法，但 p 没有 restrict 保证`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 6:
+                        return <BestPractices />;
+                    case 7:
+                        return <Comparison />;
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-6 flex items-center justify-between">
+                            <div>
+                                <h1 className="text-3xl font-bold" style={{ color: COLOR_MAP.primary }}>
+                                    1170 - restrict 限定符与内存性能
+                                </h1>
+                                <p className="text-gray-400 mt-1">C 语言核心 · 步骤 {currentStep + 1} / {steps.length}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setIsMuted(!isMuted)}
+                                    className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-emerald-600'} hover:opacity-80`}>
+                                    {isMuted ? '🔇 静音' : '🔊 语音'}
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className={`px-4 py-2 rounded ${isPlaying ? 'bg-emerald-600' : 'bg-gray-600'} hover:opacity-80`}>
+                                    {isPlaying ? '⏸ 暂停' : '▶ 继续'}
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-3 gap-6">
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>代码示例</h3>
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`// restrict 基本用法
+void add(int * restrict a,
+         int * restrict b,
+         int * restrict c,
+         int n);
+
+// 调用 (确保无混叠)
+int x[100], y[100], z[100];
+add(x, y, z, 100);  // ✓ 正确
+add(x, x, y, 100);  // ✗ 未定义行为`}
+                                    </pre>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>关键点</h3>
+                                    <ul className="space-y-2 text-sm text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">•</span>
+                                            <span>仅用于指针，表示无混叠</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">•</span>
+                                            <span>程序员承诺，违反则未定义</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">•</span>
+                                            <span>使编译器能够激进优化</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">•</span>
+                                            <span>DSP/图像处理性能提升 2-4 倍</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div className="col-span-1">
+                                <div className="bg-gray-800 rounded-lg p-6 h-full">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>
+                                        {steps[currentStep].title}
+                                    </h3>
+                                    {renderContent()}
+                                </div>
+                            </div>
+
+                            <div className="col-span-1 space-y-4">
+                                <AliasProblem />
+                                <MemoryLayout />
+                            </div>
+                        </div>
+
+                        <footer className="mt-8 flex justify-center gap-2">
+                            {steps.map((_, idx) => (
+                                <button key={idx} onClick={() => setCurrentStep(idx)}
+                                    className={`w-3 h-3 rounded-full transition-all ${idx === currentStep ? 'w-8' : ''}`}
+                                    style={{ backgroundColor: idx <= currentStep ? COLOR_MAP.primary : '#374151' }} />
+                            ))}
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

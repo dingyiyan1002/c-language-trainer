@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 独立按键检测完整指南</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes press { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.9); } }
+        @keyframes release { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        @keyframes jitter { 0% { transform: translateX(0); } 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } 100% { transform: translateX(0); } }
+        @keyframes debounce { 0% { width: 0%; } 100% { width: 100%; } }
+        @keyframes longpress { 0% { transform: scaleX(0); } 100% { transform: scaleX(1); } }
+        .pulse { animation: pulse 1s infinite; }
+        .blink { animation: blink 0.5s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .press { animation: press 0.3s ease-in-out; }
+        .release { animation: release 0.3s ease-in-out; }
+        .bounce { animation: bounce 0.5s infinite; }
+        .jitter { animation: jitter 0.1s infinite; }
+        .debounce { animation: debounce 20ms linear; }
+        .longpress { animation: longpress 1.5s linear; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ========== 可配置参数 ==========
+        const STEPS = [
+            { title: "按键基础概念", code: `// 独立按键：每个按键占用一个 GPIO
+// 特点：硬件简单、软件易实现
+// 应用：功能按键、菜单导航、参数调整
+
+// 按键电路原理:
+// 1. 低电平有效 (推荐)
+//    - 按键一端接地
+//    - GPIO 配置为上拉输入
+//    - 按下=低电平，释放=高电平
+
+// 2. 高电平有效
+//    - 按键一端接 VCC
+//    - GPIO 配置为下拉输入
+//    - 按下=高电平，释放=低电平` },
+            { title: "按键抖动问题", code: `// 机械按键抖动：5ms~20ms
+// 原因：金属弹片机械接触不稳定
+// 后果：一次按下被误判为多次
+
+// 去抖方法:
+// 1. 硬件去抖 - 并联电容 (0.1uF)
+//    优点：简单可靠
+//    缺点：增加元件成本
+
+// 2. 软件去抖 - 延时检测 (推荐)
+//    优点：零成本
+//    缺点：占用 CPU 时间
+
+// 3. 定时器扫描 - 10ms 周期
+//    优点：非阻塞、多按键
+//    缺点：需要定时器资源` },
+            { title: "GPIO 配置", code: `// 低电平有效按键配置
+void KEY_GPIO_Init(void) {
+    // 使能 GPIO 时钟
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+
+    // 配置 PA0 为输入模式
+    GPIOA->MODER &= ~(0x3 << 0);  // 00 = 输入
+
+    // 配置上拉电阻
+    GPIOA->PUPDR |= (0x1 << 0);   // 01 = 上拉
+    GPIOA->PUPDR &= ~(0x1 << 1);
+
+    // 输入速度 (低速即可)
+    GPIOA->OSPEEDR &= ~(0x3 << 0); // 00 = 低速
+}
+
+// 读取按键状态
+uint8_t KEY_Read(void) {
+    return (GPIOA->IDR & GPIO_IDR_ID0) ? 1 : 0;
+    // 返回 1 = 释放，0 = 按下
+}` },
+            { title: "软件去抖算法", code: `// 经典软件去抖
+uint8_t KEY_Scan(void) {
+    if (KEY_Read() == 0) {        // 检测到按下
+        Delay_ms(20);             // 延时 20ms
+        if (KEY_Read() == 0) {    // 再次检测
+            while (KEY_Read() == 0); // 等待释放
+            return 1;             // 返回有效按键
+        }
+    }
+    return 0;  // 无效或抖动
+}
+
+// 状态机去抖 (非阻塞)
+typedef enum {
+    KEY_STATE_RELEASE,
+    KEY_STATE_DEBOUNCE,
+    KEY_STATE_PRESS,
+    KEY_STATE_WAIT_RELEASE
+} KEY_State;
+
+KEY_State key_state = KEY_STATE_RELEASE;` },
+            { title: "长按短按检测", code: `// 长按/短按检测
+typedef struct {
+    uint16_t press_time;     // 按下时间计数
+    uint8_t  is_pressed;     // 当前状态
+    uint8_t  long_pressed;   // 长按标志
+} KEY_Status;
+
+#define SHORT_PRESS_THRESHOLD  50   // 500ms
+#define LONG_PRESS_THRESHOLD  150   // 1500ms
+
+void KEY_Process(KEY_Status* key) {
+    if (KEY_Read() == 0) {  // 按下
+        key->press_time++;
+        if (key->press_time > LONG_PRESS_THRESHOLD) {
+            key->long_pressed = 1;
+            OnLongPress();
+        }
+    } else {  // 释放
+        if (key->press_time > 0) {
+            if (!key->long_pressed &&
+                key->press_time > SHORT_PRESS_THRESHOLD) {
+                OnShortPress();
+            }
+        }
+        key->press_time = 0;
+        key->long_pressed = 0;
+    }
+}` },
+            { title: "多按键扫描", code: `// 多按键扫描 (非阻塞)
+#define KEY_NUM  4
+
+typedef struct {
+    GPIO_TypeDef* port;
+    uint16_t pin;
+    uint8_t state;
+    uint16_t timer;
+    uint8_t event;
+} KEY_TypeDef;
+
+KEY_TypeDef keys[KEY_NUM] = {
+    {GPIOA, GPIO_PIN_0, 0, 0, 0},  // KEY1
+    {GPIOA, GPIO_PIN_1, 0, 0, 0},  // KEY2
+    {GPIOA, GPIO_PIN_2, 0, 0, 0},  // KEY3
+    {GPIOA, GPIO_PIN_3, 0, 0, 0},  // KEY4
+};
+
+// 10ms 定时器中断调用
+void KEY_Scan_ISR(void) {
+    for (int i = 0; i < KEY_NUM; i++) {
+        uint8_t level = (keys[i].port->IDR & keys[i].pin) ? 1 : 0;
+        // 状态机处理...
+    }
+}` },
+            { title: "按键事件系统", code: `// 按键事件定义
+typedef enum {
+    KEY_EVENT_NONE = 0,
+    KEY_EVENT_SHORT_PRESS,
+    KEY_EVENT_LONG_PRESS,
+    KEY_EVENT_DOUBLE_CLICK,
+    KEY_EVENT_HOLD_RELEASE
+} KEY_Event;
+
+// 回调函数类型
+typedef void (*KEY_Callback)(KEY_Event event);
+
+// 事件处理框架
+void KEY_DispatchEvent(KEY_Event event) {
+    switch (event) {
+        case KEY_EVENT_SHORT_PRESS:
+            OnShortPress();
+            break;
+        case KEY_EVENT_LONG_PRESS:
+            OnLongPress();
+            break;
+        case KEY_EVENT_DOUBLE_CLICK:
+            OnDoubleClick();
+            break;
+        default:
+            break;
+    }
+}` },
+            { title: "应用实例", code: `// 完整应用：菜单导航系统
+
+// 按键定义
+#define KEY_UP      0
+#define KEY_DOWN    1
+#define KEY_LEFT    2
+#define KEY_RIGHT   3
+#define KEY_ENTER   4
+
+// 按键扫描任务 (10ms 周期)
+void KEY_Task(void) {
+    static uint16_t counters[5] = {0};
+
+    for (int i = 0; i < 5; i++) {
+        if (KEY_Read(i) == 0) {
+            counters[i]++;
+            if (counters[i] == 2) {      // 20ms 去抖
+                key_pressed[i] = 1;
+            }
+            if (counters[i] > 150) {     // 1.5s 长按
+                key_long[i] = 1;
+            }
+        } else {
+            if (counters[i] > 0 && counters[i] < 50) {
+                key_short[i] = 1;        // 短按
+            }
+            counters[i] = 0;
+        }
+    }
+}
+
+// 菜单处理
+void MENU_Process(void) {
+    if (key_short[KEY_UP])    menu_pos--;
+    if (key_short[KEY_DOWN])  menu_pos++;
+    if (key_short[KEY_ENTER]) menu_select();
+}` }
+        ];
+
+        // ========== 6 种颜色配置 ==========
+        const COLOR_MAP = {
+            primary: "#14b8a6",     // teal-500 - 主色
+            secondary: "#0d9488",   // teal-600 - 次要色
+            accent: "#2dd4bf",      // teal-400 - 强调色
+            bgStart: "#f0fdfa",     // teal-50 - 背景渐变起始
+            bgEnd: "#ccfbf1",       // teal-100 - 背景渐变结束
+            code: "#134e4a"         // teal-900 - 代码高亮
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [isComplete, setIsComplete] = useState(false);
+            const [keyPressed, setKeyPressed] = useState(false);
+            const [debounceProgress, setDebounceProgress] = useState(0);
+            const voiceEndTimerRef = useRef(null);
+
+            // 按键模拟
+            useEffect(() => {
+                if (keyPressed) {
+                    const timer = setTimeout(() => {
+                        setDebounceProgress(prev => {
+                            if (prev >= 100) {
+                                return 0;
+                            }
+                            return prev + 10;
+                        });
+                    }, 2);
+                    return () => clearTimeout(timer);
+                } else {
+                    setDebounceProgress(0);
+                }
+            }, [keyPressed]);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = speechSynthesis.getVoices();
+                    const preferredVoice = voices.find(voice =>
+                        voice.name.includes('Xiaoxiao') ||
+                        voice.name.includes('Chinese') ||
+                        voice.lang === 'zh-CN'
+                    );
+                    if (preferredVoice) utterance.voice = preferredVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (currentStep < STEPS.length - 1 && isPlaying) {
+                                setCurrentStep(prev => prev + 1);
+                            } else if (currentStep >= STEPS.length - 1) {
+                                setIsComplete(true);
+                                setIsPlaying(false);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (currentStep < STEPS.length - 1 && isPlaying) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            // 步骤变化时触发语音
+            useEffect(() => {
+                if (isPlaying || currentStep === 0) {
+                    speak(STEPS[currentStep].title);
+                }
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep, isPlaying]);
+
+            // 初始化语音
+            useEffect(() => {
+                if ('speechSynthesis' in window) {
+                    speechSynthesis.getVoices();
+                }
+            }, []);
+
+            const handleStart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+                setIsComplete(false);
+                speak(STEPS[0].title);
+            };
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const handleReset = () => {
+                setIsPlaying(false);
+                setCurrentStep(0);
+                setIsComplete(false);
+                window.speechSynthesis.cancel();
+            };
+
+            // 按键动画组件
+            const KeyAnimation = () => {
+                const step = currentStep;
+
+                // 步骤 1: 按键基础概念
+                if (step === 0) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-teal-50 to-teal-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-teal-700 mb-4">独立按键基础</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* 低电平有效 */}
+                                <div className="bg-white rounded-lg p-4 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">低电平有效 (推荐)</h5>
+                                    <div className="relative h-32 flex items-center justify-center">
+                                        {/* 按键 */}
+                                        <div className="relative">
+                                            <div className={`w-16 h-16 bg-gray-300 rounded-lg border-4 border-gray-400 cursor-pointer transition-all ${keyPressed ? 'press bg-teal-400' : 'release'}`}
+                                                onClick={() => setKeyPressed(!keyPressed)}>
+                                                <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-gray-600">
+                                                    KEY
+                                                </div>
+                                            </div>
+                                            {/* GPIO 状态 */}
+                                            <div className="absolute -right-16 top-1/2 transform -translate-y-1/2">
+                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${keyPressed ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+                                                    {keyPressed ? 'L' : 'H'}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="text-xs text-gray-600 text-center">
+                                        点击按键测试
+                                    </div>
+                                </div>
+
+                                {/* 高电平有效 */}
+                                <div className="bg-white rounded-lg p-4 shadow opacity-50">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">高电平有效</h5>
+                                    <div className="relative h-32 flex items-center justify-center">
+                                        <div className="w-16 h-16 bg-gray-200 rounded-lg border-4 border-gray-300">
+                                            <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-gray-500">
+                                                KEY
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="text-xs text-gray-400 text-center">
+                                        较少使用
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 电路示意 */}
+                            <div className="mt-4 bg-white rounded-lg p-3 shadow">
+                                <h5 className="text-xs font-bold text-teal-700 mb-2">电路连接</h5>
+                                <div className="flex items-center justify-between text-xs">
+                                    <div className="text-center">
+                                        <div className="w-8 h-8 bg-yellow-500 rounded-full flex items-center justify-center text-white font-bold">V</div>
+                                        <div>3.3V</div>
+                                    </div>
+                                    <div className="flex-1 mx-2">
+                                        <div className="h-0.5 bg-gray-400"></div>
+                                        <div className="text-center text-gray-500">上拉电阻<br/>(内部 40kΩ)</div>
+                                    </div>
+                                    <div className="text-center">
+                                        <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold">I</div>
+                                        <div>GPIO</div>
+                                    </div>
+                                    <div className="flex-1 mx-2">
+                                        <div className={`h-0.5 ${keyPressed ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                                    </div>
+                                    <div className="text-center">
+                                        <div className="w-8 h-8 bg-gray-500 rounded flex items-center justify-center text-white font-bold">K</div>
+                                        <div>按键</div>
+                                    </div>
+                                    <div className="flex-1 mx-2">
+                                        <div className="h-0.5 bg-gray-400"></div>
+                                    </div>
+                                    <div className="text-center">
+                                        <div className="w-8 h-8 bg-black rounded flex items-center justify-center text-white font-bold">G</div>
+                                        <div>GND</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 2: 抖动问题
+                if (step === 1) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-teal-50 to-teal-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-teal-700 mb-4">按键抖动问题</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 抖动波形 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">按下时抖动波形</h5>
+                                    <div className="relative h-24 bg-gray-100 rounded">
+                                        <svg className="w-full h-full" viewBox="0 0 200 100">
+                                            {/* 理想波形 */}
+                                            <line x1="0" y1="20" x2="80" y2="20" stroke="#9ca3af" strokeWidth="2"/>
+                                            <line x1="80" y1="20" x2="80" y2="80" stroke="#9ca3af" strokeWidth="2"/>
+                                            <line x1="80" y1="80" x2="200" y2="80" stroke="#9ca3af" strokeWidth="2"/>
+
+                                            {/* 实际抖动波形 */}
+                                            <path d="M 0 20 L 75 20 L 78 60 L 80 40 L 82 70 L 84 50 L 86 75 L 88 55 L 90 80 L 200 80"
+                                                  fill="none" stroke="#0d9488" strokeWidth="2" className="jitter"/>
+
+                                            {/* 标注 */}
+                                            <text x="100" y="95" className="text-xs fill-teal-600">抖动 5-20ms</text>
+                                        </svg>
+                                    </div>
+                                </div>
+
+                                {/* 去抖方法 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <h5 className="text-xs font-bold text-teal-700 mb-2">硬件去抖</h5>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 bg-blue-100 rounded flex items-center justify-center text-blue-600">C</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold">并联电容</div>
+                                                <div className="text-gray-500">0.1uF ~ 1uF</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-lg p-3 shadow border-2 border-teal-500">
+                                        <h5 className="text-xs font-bold text-teal-700 mb-2">软件去抖 (推荐)</h5>
+                                        <div className="text-xs text-gray-600">
+                                            延时 20ms 后再次检测
+                                        </div>
+                                        <div className="mt-1 text-xs font-bold text-teal-600">
+                                            零成本、易实现
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <h5 className="text-xs font-bold text-teal-700 mb-2">定时器扫描</h5>
+                                        <div className="text-xs text-gray-600">
+                                            10ms 周期扫描
+                                        </div>
+                                        <div className="mt-1 text-xs font-bold text-teal-600">
+                                            非阻塞、多按键
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 3: GPIO 配置
+                if (step === 2) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-teal-50 to-teal-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-teal-700 mb-4">GPIO 配置要点</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 配置流程 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-teal-500 rounded-full flex items-center justify-center text-white text-xs font-bold">1</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-teal-700">使能时钟</div>
+                                                <div className="text-gray-500">RCC->AHB1ENR</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-teal-500 rounded-full flex items-center justify-center text-white text-xs font-bold">2</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-teal-700">输入模式</div>
+                                                <div className="text-gray-500">MODER = 00</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-teal-500 rounded-full flex items-center justify-center text-white text-xs font-bold">3</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-teal-700">上拉电阻</div>
+                                                <div className="text-gray-500">PUPDR = 01</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-teal-500 rounded-full flex items-center justify-center text-white text-xs font-bold">4</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-teal-700">低速模式</div>
+                                                <div className="text-gray-500">OSPEEDR = 00</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* IDR 读取 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">读取输入数据 (IDR)</h5>
+                                    <div className="bg-teal-100 p-3 rounded-lg mb-3">
+                                        <div className="text-xs font-mono text-teal-700 mb-2">
+                                            GPIOx->IDR & GPIO_PIN_x
+                                        </div>
+                                        <div className="flex items-center justify-center gap-4">
+                                            <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold transition-all ${keyPressed ? 'bg-red-500' : 'bg-green-500'}`}>
+                                                {keyPressed ? '0' : '1'}
+                                            </div>
+                                            <div className="text-xs">
+                                                <div>按下 = 低电平</div>
+                                                <div>释放 = 高电平</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={() => setKeyPressed(!keyPressed)}
+                                        className={`w-full py-2 rounded-lg font-bold transition-all ${
+                                            keyPressed
+                                                ? 'bg-teal-600 text-white'
+                                                : 'bg-teal-100 text-teal-700'
+                                        }`}
+                                    >
+                                        {keyPressed ? '已按下' : '点击测试'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 4: 软件去抖
+                if (step === 3) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-teal-50 to-teal-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-teal-700 mb-4">软件去抖算法</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 经典去抖 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <h5 className="text-xs font-bold text-teal-700 mb-2">经典阻塞式</h5>
+                                        <div className="text-xs text-gray-600 space-y-1">
+                                            <div>1. 检测到低电平</div>
+                                            <div>2. 延时 20ms</div>
+                                            <div>3. 再次检测</div>
+                                            <div>4. 等待释放</div>
+                                        </div>
+                                        <div className="mt-2 text-xs text-red-600">
+                                            ⚠️ 阻塞 CPU
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-teal-600 rounded-lg p-3 shadow text-white">
+                                        <h5 className="text-xs font-bold mb-2">状态机非阻塞</h5>
+                                        <div className="text-xs space-y-1">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 bg-white rounded-full"></div>
+                                                <span>RELEASE (释放)</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 bg-yellow-300 rounded-full"></div>
+                                                <span>DEBOUNCE (去抖)</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                                                <span>PRESS (按下)</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                                                <span>WAIT_RELEASE (等待释放)</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 去抖时序 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">去抖时序图</h5>
+                                    <div className="space-y-3">
+                                        {/* 原始信号 */}
+                                        <div>
+                                            <div className="text-xs text-gray-500 mb-1">原始信号</div>
+                                            <div className="h-8 bg-gray-100 rounded relative overflow-hidden">
+                                                <svg className="w-full h-full" viewBox="0 0 200 30">
+                                                    <line x1="0" y1="5" x2="60" y2="5" stroke="#9ca3af" strokeWidth="2"/>
+                                                    <path d="M 60 5 L 65 25 L 70 10 L 75 20 L 80 25 L 100 25" fill="none" stroke="#ef4444" strokeWidth="2"/>
+                                                    <line x1="100" y1="25" x2="200" y2="25" stroke="#9ca3af" strokeWidth="2"/>
+                                                </svg>
+                                            </div>
+                                        </div>
+
+                                        {/* 去抖后 */}
+                                        <div>
+                                            <div className="text-xs text-gray-500 mb-1">去抖后</div>
+                                            <div className="h-8 bg-teal-100 rounded relative overflow-hidden">
+                                                <svg className="w-full h-full" viewBox="0 0 200 30">
+                                                    <line x1="0" y1="5" x2="80" y2="5" stroke="#0d9488" strokeWidth="2"/>
+                                                    <line x1="80" y1="5" x2="80" y2="25" stroke="#0d9488" strokeWidth="2"/>
+                                                    <line x1="80" y1="25" x2="200" y2="25" stroke="#0d9488" strokeWidth="2"/>
+                                                </svg>
+                                            </div>
+                                        </div>
+
+                                        {/* 去抖窗口 */}
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex-1 bg-yellow-100 p-2 rounded text-center text-xs">
+                                                <div className="font-bold text-yellow-700">20ms</div>
+                                                <div className="text-yellow-600">去抖延时</div>
+                                            </div>
+                                            <div className="flex-1 bg-green-100 p-2 rounded text-center text-xs">
+                                                <div className="font-bold text-green-700">稳定</div>
+                                                <div className="text-green-600">有效按键</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 5: 长按短按
+                if (step === 4) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-teal-50 to-teal-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-teal-700 mb-4">长按/短按检测</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 时间阈值 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <h5 className="text-xs font-bold text-teal-700 mb-2">时间阈值定义</h5>
+                                        <div className="space-y-2">
+                                            <div className="bg-green-100 p-2 rounded">
+                                                <div className="text-xs font-bold text-green-700">短按</div>
+                                                <div className="text-green-600">500ms ~ 1500ms</div>
+                                            </div>
+                                            <div className="bg-red-100 p-2 rounded">
+                                                <div className="text-xs font-bold text-red-700">长按</div>
+                                                <div className="text-red-600">&gt; 1500ms</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <h5 className="text-xs font-bold text-teal-700 mb-2">状态结构体</h5>
+                                        <div className="text-xs font-mono text-teal-700 bg-teal-50 p-2 rounded">
+                                            press_time<br/>
+                                            is_pressed<br/>
+                                            long_pressed
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 长按演示 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">长按检测演示</h5>
+                                    <div className="flex flex-col items-center">
+                                        <button
+                                            onMouseDown={() => setKeyPressed(true)}
+                                            onMouseUp={() => setKeyPressed(false)}
+                                            onTouchStart={() => setKeyPressed(true)}
+                                            onTouchEnd={() => setKeyPressed(false)}
+                                            className={`w-20 h-20 rounded-full font-bold transition-all ${
+                                                keyPressed
+                                                    ? 'bg-teal-600 text-white scale-95'
+                                                    : 'bg-teal-100 text-teal-700'
+                                            }`}
+                                        >
+                                            {keyPressed ? '按下' : '长按'}
+                                        </button>
+
+                                        {/* 进度条 */}
+                                        <div className="w-full mt-4">
+                                            <div className="h-4 bg-gray-200 rounded-full overflow-hidden">
+                                                <div
+                                                    className={`h-full transition-all duration-100 ${
+                                                        debounceProgress >= 150 ? 'bg-red-500' : 'bg-teal-500'
+                                                    }`}
+                                                    style={{ width: `${Math.min(debounceProgress / 150 * 100, 100)}%` }}
+                                                ></div>
+                                            </div>
+                                            <div className="flex justify-between text-xs text-gray-500 mt-1">
+                                                <span>0ms</span>
+                                                <span>{(debounceProgress * 10).toFixed(0)}ms</span>
+                                                <span>1500ms (长按)</span>
+                                            </div>
+                                        </div>
+
+                                        {debounceProgress >= 150 && (
+                                            <div className="mt-2 text-red-600 font-bold text-xs animate-pulse">
+                                                长按触发!
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 6: 多按键扫描
+                if (step === 5) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-teal-50 to-teal-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-teal-700 mb-4">多按键扫描矩阵</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 4 按键布局 */}
+                                <div className="bg-white rounded-lg p-4 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">4 独立按键</h5>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {[
+                                            { name: 'KEY1', pin: 'PA0', color: 'bg-teal-500' },
+                                            { name: 'KEY2', pin: 'PA1', color: 'bg-blue-500' },
+                                            { name: 'KEY3', pin: 'PA2', color: 'bg-green-500' },
+                                            { name: 'KEY4', pin: 'PA3', color: 'bg-purple-500' }
+                                        ].map((key, i) => (
+                                            <div key={i} className={`${key.color} p-3 rounded-lg text-white text-center`}>
+                                                <div className="font-bold text-sm">{key.name}</div>
+                                                <div className="text-xs opacity-80">{key.pin}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* 扫描时序 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">定时器扫描 (10ms)</h5>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-16 h-8 bg-teal-500 rounded flex items-center justify-center text-white text-xs font-bold">
+                                                KEY1
+                                            </div>
+                                            <div className="flex-1 h-2 bg-gray-200 rounded">
+                                                <div className="w-1/4 h-full bg-teal-400 rounded"></div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-16 h-8 bg-blue-500 rounded flex items-center justify-center text-white text-xs font-bold">
+                                                KEY2
+                                            </div>
+                                            <div className="flex-1 h-2 bg-gray-200 rounded">
+                                                <div className="w-1/4 h-full bg-blue-400 rounded"></div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-16 h-8 bg-green-500 rounded flex items-center justify-center text-white text-xs font-bold">
+                                                KEY3
+                                            </div>
+                                            <div className="flex-1 h-2 bg-gray-200 rounded">
+                                                <div className="w-1/4 h-full bg-green-400 rounded"></div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-16 h-8 bg-purple-500 rounded flex items-center justify-center text-white text-xs font-bold">
+                                                KEY4
+                                            </div>
+                                            <div className="flex-1 h-2 bg-gray-200 rounded">
+                                                <div className="w-1/4 h-full bg-purple-400 rounded"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="mt-3 text-xs text-gray-500 text-center">
+                                        每个按键分配时隙，轮询扫描
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 7: 按键事件
+                if (step === 6) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-teal-50 to-teal-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-teal-700 mb-4">按键事件系统</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 事件类型 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">事件类型</h5>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2 p-2 bg-gray-100 rounded">
+                                            <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
+                                            <span className="text-xs">KEY_EVENT_NONE</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 p-2 bg-green-100 rounded">
+                                            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                                            <span className="text-xs">KEY_EVENT_SHORT_PRESS</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 p-2 bg-red-100 rounded">
+                                            <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                                            <span className="text-xs">KEY_EVENT_LONG_PRESS</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 p-2 bg-blue-100 rounded">
+                                            <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                                            <span className="text-xs">KEY_EVENT_DOUBLE_CLICK</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 p-2 bg-purple-100 rounded">
+                                            <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
+                                            <span className="text-xs">KEY_EVENT_HOLD_RELEASE</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 事件分发 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">事件分发器</h5>
+                                    <div className="bg-teal-50 p-3 rounded text-xs font-mono text-teal-700">
+                                        <div>KEY_DispatchEvent()</div>
+                                        <div className="ml-4 mt-2">├─ OnShortPress()</div>
+                                        <div className="ml-4">├─ OnLongPress()</div>
+                                        <div className="ml-4">├─ OnDoubleClick()</div>
+                                        <div className="ml-4">└─ OnHoldRelease()</div>
+                                    </div>
+                                    <div className="mt-3 text-xs text-gray-500">
+                                        回调函数模式，解耦按键检测与业务逻辑
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 8: 应用实例
+                if (step === 7) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-teal-50 to-teal-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-teal-700 mb-4">应用实例 - 菜单导航系统</h4>
+
+                            <div className="grid grid-cols-3 gap-4 h-full">
+                                {/* 按键布局 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">5 键导航</h5>
+                                    <div className="grid grid-cols-3 gap-1">
+                                        <div></div>
+                                        <div className="bg-teal-500 p-2 rounded text-white text-xs text-center">UP</div>
+                                        <div></div>
+                                        <div className="bg-teal-500 p-2 rounded text-white text-xs text-center">LEFT</div>
+                                        <div className="bg-red-500 p-2 rounded text-white text-xs text-center">ENTER</div>
+                                        <div className="bg-teal-500 p-2 rounded text-white text-xs text-center">RIGHT</div>
+                                        <div></div>
+                                        <div className="bg-teal-500 p-2 rounded text-white text-xs text-center">DOWN</div>
+                                        <div></div>
+                                    </div>
+                                </div>
+
+                                {/* 菜单状态 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">菜单状态机</h5>
+                                    <div className="space-y-1 text-xs">
+                                        <div className="flex justify-between p-1 bg-teal-100 rounded">
+                                            <span>菜单项 1</span>
+                                            <span>← 当前</span>
+                                        </div>
+                                        <div className="flex justify-between p-1 bg-gray-100 rounded">
+                                            <span>菜单项 2</span>
+                                        </div>
+                                        <div className="flex justify-between p-1 bg-gray-100 rounded">
+                                            <span>菜单项 3</span>
+                                        </div>
+                                        <div className="flex justify-between p-1 bg-gray-100 rounded">
+                                            <span>菜单项 4</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 任务调度 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-teal-700 mb-2">KEY_Task (10ms)</h5>
+                                    <div className="space-y-1 text-xs">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                                            <span>扫描所有按键</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                                            <span>20ms 去抖</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                                            <span>检测长按</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
+                                            <span>触发事件</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                return null;
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        {/* 标题 */}
+                        <h1 className="text-3xl font-bold text-center mb-4 text-teal-700">
+                            STM32 独立按键检测完整指南
+                        </h1>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full font-bold transition-all ${
+                                            index === currentStep
+                                                ? 'bg-teal-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-teal-200 text-teal-700'
+                                                : 'bg-gray-200 text-gray-500'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 主内容区 */}
+                        <div className="grid grid-cols-2 gap-6 mb-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900 rounded-lg p-4 shadow-lg">
+                                <div className="text-teal-400 font-bold mb-2">
+                                    步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                                </div>
+                                <pre className="text-green-400 text-xs overflow-auto h-64 font-mono">
+                                    <code>{STEPS[currentStep].code}</code>
+                                </pre>
+                            </div>
+
+                            {/* 动画区 */}
+                            <div className="scaleIn">
+                                <KeyAnimation />
+                            </div>
+                        </div>
+
+                        {/* 讲解区 */}
+                        <div className="bg-white rounded-lg p-6 shadow-lg mb-6">
+                            <h3 className="text-xl font-bold text-teal-700 mb-4">核心知识点</h3>
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="border-l-4 border-teal-500 pl-4">
+                                    <h4 className="font-bold text-teal-700 mb-2">硬件配置</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 上拉输入模式</li>
+                                        <li>• 低电平有效</li>
+                                        <li>• 无需外部元件</li>
+                                    </ul>
+                                </div>
+                                <div className="border-l-4 border-teal-500 pl-4">
+                                    <h4 className="font-bold text-teal-700 mb-2">软件去抖</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 20ms 延时检测</li>
+                                        <li>• 状态机非阻塞</li>
+                                        <li>• 定时器扫描</li>
+                                    </ul>
+                                </div>
+                                <div className="border-l-4 border-teal-500 pl-4">
+                                    <h4 className="font-bold text-teal-700 mb-2">事件检测</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 短按/长按</li>
+                                        <li>• 双击</li>
+                                        <li>• 组合键</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 控制按钮 */}
+                        <div className="flex justify-center gap-4">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-bold ${
+                                    currentStep === 0
+                                        ? 'bg-gray-200 text-gray-400'
+                                        : 'bg-teal-500 text-white hover:bg-teal-600'
+                                }`}
+                            >
+                                上一步
+                            </button>
+
+                            {!isPlaying && !isComplete && (
+                                <button
+                                    onClick={handleStart}
+                                    className="px-6 py-3 bg-teal-500 text-white rounded-lg font-bold hover:bg-teal-600"
+                                >
+                                    开始讲解
+                                </button>
+                            )}
+
+                            {isPlaying && (
+                                <button
+                                    onClick={handleNext}
+                                    className="px-6 py-3 bg-teal-500 text-white rounded-lg font-bold hover:bg-teal-600"
+                                >
+                                    下一步
+                                </button>
+                            )}
+
+                            {isComplete && (
+                                <button
+                                    onClick={handleReset}
+                                    className="px-6 py-3 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600"
+                                >
+                                    重新学习
+                                </button>
+                            )}
+
+                            <button
+                                onClick={handleReset}
+                                className="px-6 py-3 bg-gray-500 text-white rounded-lg font-bold hover:bg-gray-600"
+                            >
+                                重置
+                            </button>
+                        </div>
+
+                        {/* 完成提示 */}
+                        {isComplete && (
+                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                                <div className="bg-white rounded-lg p-8 max-w-md text-center scaleIn">
+                                    <div className="text-6xl mb-4">🎉</div>
+                                    <h2 className="text-2xl font-bold text-teal-700 mb-4">学习完成!</h2>
+                                    <p className="text-gray-600 mb-6">
+                                        已掌握 STM32 独立按键检测的核心知识
+                                    </p>
+                                    <button
+                                        onClick={handleReset}
+                                        className="px-6 py-3 bg-teal-500 text-white rounded-lg font-bold hover:bg-teal-600"
+                                    >
+                                        重新学习
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

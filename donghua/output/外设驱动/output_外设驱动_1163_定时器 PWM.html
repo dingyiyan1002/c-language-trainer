@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1163 - 定时器 PWM 输出 - 嵌入式 C 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes pwmWave { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.3); } }
+    @keyframes countUp { 0% { transform: translateY(0); } 100% { transform: translateY(-100%); } }
+    .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+    .animate-blink { animation: blink 0.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out forwards; }
+    .animate-scaleIn { animation: scaleIn 0.5s ease-out forwards; }
+    .animate-pwmWave { animation: pwmWave 2s ease-in-out infinite; }
+    .animate-countUp { animation: countUp 1s linear infinite; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#f97316',
+      secondary: '#fb923c',
+      accent: '#fdba74',
+      bg: '#7c2d12',
+      text: '#ffedd5',
+      border: '#ea580c'
+    };
+
+    const STEPS = [
+      { title: '定时器概述', voice: '定时器是 MCU 中用于定时计数的外设。STM32 的定时器功能强大，可用于定时中断、PWM 输出、输入捕获、编码器接口等。本次重点讲解 PWM 输出功能。' },
+      { title: '定时器结构', voice: '定时器核心是计数器 CNT，从 0 计数到自动重装载值 ARR。预分频器 PSC 对时钟分频决定计数速度。比较寄存器 CCR 用于产生 PWM 波形或触发中断。' },
+      { title: 'PWM 原理', voice: 'PWM 是 Pulse Width Modulation 的缩写，中文名为脉冲宽度调制。通过调整高电平占整个周期的比例来控制平均电压，占空比越大平均电压越高。' },
+      { title: 'PWM 模式', voice: 'STM32 支持两种 PWM 模式：PWM 模式 1 计数值小于 CCR 时输出有效电平。PWM 模式 2 计数值小于 CCR 时输出无效电平。两种模式相位相反。' },
+      { title: '频率计算', voice: 'PWM 频率由定时器时钟、预分频器和自动重装载值决定。公式为：F_pwm = 定时器时钟频率 除以 (PSC+1) 再除以 (ARR+1)。调整这些参数可改变 PWM 频率。' },
+      { title: '占空比控制', voice: '占空比由比较寄存器 CCR 的值决定。公式为：占空比 = CCR 除以 (ARR+1)。调整 CCR 的值即可改变占空比，CCR 越大占空比越高。' },
+      { title: '通道配置', voice: 'STM32 高级定时器有 4 个通道，可同时输出 4 路 PWM。每个通道可独立配置极性和死区时间。互补通道可输出互补 PWM 用于电机驱动。' },
+      { title: 'HAL 库使用', voice: 'STM32 HAL 库提供 HAL_TIM_PWM_Start 启动 PWM、HAL_TIM_PWM_Stop 停止 PWM、__HAL_TIM_SET_COMPARE 设置占空比、HAL_TIM_PWM_ConfigChannel 配置通道等函数。' }
+    ];
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [voiceStatus, setVoiceStatus] = useState('就绪');
+      const voiceEndTimerRef = useRef(null);
+
+      useEffect(() => {
+        if (!isPlaying) return;
+        const step = STEPS[currentStep];
+        setVoiceStatus('播放中...');
+
+        const utterance = new SpeechSynthesisUtterance(step.voice);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+
+        const voices = speechSynthesis.getVoices();
+        const xiaoxiao = voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('zh-CN'));
+        if (xiaoxiao) utterance.voice = xiaoxiao;
+
+        utterance.onend = () => {
+          setVoiceStatus('已完成');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            } else {
+              setIsPlaying(false);
+            }
+          }, 800);
+        };
+
+        utterance.onerror = () => {
+          setVoiceStatus('播放失败');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            }
+          }, 800);
+        };
+
+        speechSynthesis.speak(utterance);
+        return () => clearTimeout(voiceEndTimerRef.current);
+      }, [currentStep, isPlaying]);
+
+      const handlePlay = () => {
+        setCurrentStep(0);
+        setIsPlaying(true);
+        speechSynthesis.cancel();
+      };
+
+      const handlePause = () => {
+        setIsPlaying(false);
+        speechSynthesis.cancel();
+      };
+
+      const handleNext = () => {
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => prev + 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const handlePrev = () => {
+        if (currentStep > 0) {
+          setCurrentStep(prev => prev - 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const renderStepContent = () => {
+        switch(currentStep) {
+          case 0: return <Step0Overview />;
+          case 1: return <Step1Structure />;
+          case 2: return <Step2PWMPrinciple />;
+          case 3: return <Step3PWMMode />;
+          case 4: return <Step4FreqCalc />;
+          case 5: return <Step5DutyControl />;
+          case 6: return <Step6Channel />;
+          case 7: return <Step7HALUsage />;
+          default: return <Step0Overview />;
+        }
+      };
+
+      return (
+        <div className="min-h-screen p-4" style={{ background: `linear-gradient(135deg, ${COLOR_MAP.bg} 0%, #0f172a 100%)` }}>
+          <div className="mb-4 flex items-center justify-between" style={{ backgroundColor: 'rgba(30, 41, 59, 0.8)', borderRadius: '12px', padding: '16px' }}>
+            <div>
+              <h1 className="text-2xl font-bold" style={{ color: COLOR_MAP.text }}>1163 - 定时器 PWM 输出</h1>
+              <p className="text-sm" style={{ color: COLOR_MAP.accent }}>Embedded C - Timer PWM Output</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-sm" style={{ color: COLOR_MAP.accent }}>
+                {voiceStatus} | 步骤 {currentStep + 1}/{STEPS.length}
+              </div>
+              <button onClick={handlePrev} disabled={currentStep === 0} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>上一个</button>
+              {!isPlaying ? (
+                <button onClick={handlePlay} className="px-4 py-2 rounded" style={{ backgroundColor: '#10b981', color: 'white' }}>播放</button>
+              ) : (
+                <button onClick={handlePause} className="px-4 py-2 rounded" style={{ backgroundColor: '#f59e0b', color: 'white' }}>暂停</button>
+              )}
+              <button onClick={handleNext} disabled={currentStep === STEPS.length - 1} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>下一个</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 h-[calc(100vh-150px)]">
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>代码示例</div>
+              <pre className="p-4 text-sm overflow-auto h-full text-gray-100 font-mono">
+                <code>{renderStepContent()}</code>
+              </pre>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>可视化动画</div>
+              <div className="p-4 h-full overflow-auto">
+                {renderVisualization()}
+              </div>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>解释说明</div>
+              <div className="p-4 space-y-3 h-full overflow-auto">
+                <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20` }}>
+                  <div className="font-bold mb-2" style={{ color: COLOR_MAP.text }}>{STEPS[currentStep].title}</div>
+                  <p style={{ color: COLOR_MAP.accent }}>{STEPS[currentStep].voice}</p>
+                </div>
+                {renderExplanation()}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function renderVisualization() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewViz />;
+        case 1: return <Step1StructureViz />;
+        case 2: return <Step2PWMPrincipleViz />;
+        case 3: return <Step3PWMModeViz />;
+        case 4: return <Step4FreqCalcViz />;
+        case 5: return <Step5DutyControlViz />;
+        case 6: return <Step6ChannelViz />;
+        case 7: return <Step7HALUsageViz />;
+        default: return <Step0OverviewViz />;
+      }
+    }
+
+    function renderExplanation() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewExp />;
+        case 1: return <Step1StructureExp />;
+        case 2: return <Step2PWMPrincipleExp />;
+        case 3: return <Step3PWMModeExp />;
+        case 4: return <Step4FreqCalcExp />;
+        case 5: return <Step5DutyControlExp />;
+        case 6: return <Step6ChannelExp />;
+        case 7: return <Step7HALUsageExp />;
+        default: return null;
+      }
+    }
+
+    function Step0Overview() {
+      return `/**
+ * 定时器 PWM 输出 - 概述
+ * Timer PWM Output
+ *
+ * PWM 应用:
+ * - 电机调速
+ * - LED 调光
+ * - 开关电源
+ * - DAC 模拟输出
+ */
+
+// 常见应用
+#define MOTOR_SPEED     // 直流电机/步进电机调速
+#define LED_DIMMER      // LED 亮度调节
+#define BEEP_CONTROL    // 蜂鸣器音调控制
+#define SERVO_CONTROL   // 舵机角度控制
+#define POWER_SUPPLY    // 开关电源控制
+#define AUDIO_DAC       // 简易音频 DAC
+
+// STM32 定时器分类
+// 高级定时器：TIM1, TIM8 (4 通道 + 互补输出)
+// 通用定时器：TIM2-TIM5 (4 通道)
+// 基本定时器：TIM6, TIM7 (无 PWM 输出)
+
+// PWM 优势
+// 1. 数字控制模拟
+// 2. 效率高 (开关损耗小)
+// 3. 精度高 (12 位分辨率)
+// 4. 响应快`;
+    }
+
+    function Step0OverviewViz() {
+      return (
+        <div className="space-y-4">
+          <div className="text-center mb-4">
+            <div className="text-lg font-bold" style={{ color: COLOR_MAP.text }}>PWM 应用场景</div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-sm" style={{ color: COLOR_MAP.text }}>电机调速</div>
+              <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>占空比→速度</div>
+            </div>
+            <div className="p-3 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-sm" style={{ color: COLOR_MAP.text }}>LED 调光</div>
+              <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>占空比→亮度</div>
+            </div>
+            <div className="p-3 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.accent}30`, border: `1px solid ${COLOR_MAP.accent}` }}>
+              <div className="font-bold text-sm" style={{ color: COLOR_MAP.text }}>舵机控制</div>
+              <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>脉冲宽度→角度</div>
+            </div>
+            <div className="p-3 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}` }}>
+              <div className="font-bold text-sm" style={{ color: COLOR_MAP.text }}>蜂鸣器</div>
+              <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>频率→音调</div>
+            </div>
+          </div>
+          <div className="p-3 rounded text-center animate-pwmWave" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.primary}` }}>
+            <div className="font-bold" style={{ color: COLOR_MAP.text }}>PWM 波形</div>
+            <div className="flex items-end justify-center gap-1 h-16 mt-2">
+              {Array.from({ length: 20 }).map((_, i) => {
+                const isHigh = i % 10 < 5;
+                return (
+                  <div key={i} className="w-2 transition-all" style={{ height: isHigh ? '100%' : '10%', backgroundColor: isHigh ? COLOR_MAP.primary : COLOR_MAP.bg }}></div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step0OverviewExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>PWM 应用：</strong> 电机调速 (占空比控制速度)、LED 调光 (占空比控制亮度)、舵机控制 (脉冲宽度控制角度)、蜂鸣器 (频率控制音调)。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>定时器分类：</strong> 高级定时器 TIM1/TIM8 功能最强，支持 4 通道 PWM 加互补输出。通用定时器 TIM2-TIM5 有 4 通道 PWM。基本定时器 TIM6/TIM7 无 PWM 功能。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>PWM 优势：</strong> 用数字信号控制模拟量，效率高 (开关管损耗小)，精度高 (12 位分辨率可达 0.024% 精度)，响应快。</p>
+        </div>
+      );
+    }
+
+    function Step1Structure() {
+      return `/**
+ * 定时器基本结构
+ */
+
+// 定时器框图
+// ┌─────────────────────────────────────┐
+// │  时钟源 (72MHz)                     │
+// └──────────────┬──────────────────────┘
+//                │
+// ┌──────────────▼──────────────────────┐
+// │  预分频器 (PSC)                     │
+// │  72MHz ÷ (PSC+1) = 1MHz             │
+// └──────────────┬──────────────────────┘
+//                │
+// ┌──────────────▼──────────────────────┐
+// │  计数器 (CNT)                       │
+// │  0 → 1 → 2 → ... → ARR → 0          │
+// └──────────────┬──────────────────────┘
+//                │
+// ┌──────────────▼──────────────────────┐
+// │  比较寄存器 (CCR)                   │
+// │  CNT < CCR : 输出高电平             │
+// │  CNT ≥ CCR : 输出低电平             │
+// └──────────────┬──────────────────────┘
+//                │
+// ┌──────────────▼──────────────────────┐
+// │  自动重装载 (ARR)                   │
+// │  决定 PWM 周期                       │
+// └─────────────────────────────────────┘
+
+// 关键寄存器
+// PSC (Prescaler): 预分频值
+// CNT (Counter): 当前计数值
+// CCR (Capture/Compare Register): 比较值
+// ARR (Auto-Reload Register): 重装载值`;
+    }
+
+    function Step1StructureViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>定时器结构</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-2 text-xs">
+              <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+                <div className="font-bold" style={{ color: COLOR_MAP.text }}>时钟源</div>
+                <div style={{ color: COLOR_MAP.accent }}>72 MHz</div>
+              </div>
+              <div className="flex justify-center" style={{ color: COLOR_MAP.accent }}>÷ (PSC+1)</div>
+              <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                <div className="font-bold" style={{ color: COLOR_MAP.text }}>预分频器 (PSC)</div>
+                <div style={{ color: COLOR_MAP.accent }}>72MHz ÷ 72 = 1MHz</div>
+              </div>
+              <div className="flex justify-center" style={{ color: COLOR_MAP.accent }}>计数</div>
+              <div className="p-2 rounded animate-pulse" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                <div className="font-bold">计数器 (CNT)</div>
+                <div>0 → 1 → 2 → ... → ARR</div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.accent}30`, border: `1px solid ${COLOR_MAP.accent}` }}>
+                  <div className="font-bold" style={{ color: COLOR_MAP.text }}>CCR (比较值)</div>
+                  <div style={{ color: COLOR_MAP.accent }}>决定占空比</div>
+                </div>
+                <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}` }}>
+                  <div className="font-bold" style={{ color: COLOR_MAP.text }}>ARR (重装载)</div>
+                  <div style={{ color: COLOR_MAP.accent }}>决定周期</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step1StructureExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>时钟路径：</strong> 72MHz 时钟 → 预分频器 PSC → 计数器 CNT。PSC 决定计数速度，CNT 向上计数到 ARR 后重置为 0。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>预分频器：</strong> PSC 是 16 位寄存器，可将 72MHz 分频为任意频率。例如 PSC=71 时，计数频率 = 72M/(71+1) = 1MHz。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>比较输出：</strong> CNT 与 CCR 比较产生 PWM。CNT&lt;CCR 时输出高电平，CNT≥CCR 时输出低电平。</p>
+        </div>
+      );
+    }
+
+    function Step2PWMPrinciple() {
+      return `/**
+ * PWM 工作原理
+ * Pulse Width Modulation
+ */
+
+// PWM 波形示意
+// ┌───┐   ┌───┐   ┌───┐
+// │   │   │   │   │   │
+// │   │   │   │   │   │
+// └   └───┘   └───┘   └───
+// ↑               ↑
+// 周期 T = 1/F    周期 T
+
+// 占空比定义
+// Duty = 高电平时间 / 周期 × 100%
+// 例如：高电平 3ms, 周期 10ms → 占空比 30%
+
+// 平均电压计算
+// Vavg = Vcc × 占空比
+// 例如：Vcc=3.3V, 占空比=50% → Vavg=1.65V
+
+// 定时器实现 PWM
+// 1. CNT 从 0 开始计数
+// 2. CNT < CCR 时输出高
+// 3. CNT ≥ CCR 时输出低
+// 4. CNT = ARR 时重置为 0
+// 5. 重复 2-4 步
+
+// CCR 越大，高电平时间越长，占空比越大`;
+    }
+
+    function Step2PWMPrincipleViz() {
+      const [duty, setDuty] = useState(50);
+
+      useEffect(() => {
+        const interval = setInterval(() => {
+          setDuty(prev => (prev >= 100 ? 0 : prev + 10));
+        }, 800);
+        return () => clearInterval(interval);
+      }, []);
+
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>PWM 占空比演示</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.primary}` }}>
+            <div className="flex items-end gap-1 h-24">
+              {Array.from({ length: 20 }).map((_, i) => {
+                const isHigh = i % 10 < (duty / 10);
+                return (
+                  <div key={i} className="flex-1 transition-all duration-300"
+                    style={{
+                      height: isHigh ? '100%' : '15%',
+                      backgroundColor: isHigh ? COLOR_MAP.primary : COLOR_MAP.bg,
+                      border: `1px solid ${COLOR_MAP.border}`
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <div className="text-center mt-2">
+              <div className="text-sm font-bold" style={{ color: COLOR_MAP.text }}>占空比：{duty}%</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>平均电压：{(3.3 * duty / 100).toFixed(2)}V</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-xs text-center">
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div style={{ color: COLOR_MAP.text }}>0%</div>
+              <div style={{ color: COLOR_MAP.accent }}>0V</div>
+            </div>
+            <div className="p-2 rounded animate-pulse" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+              <div>50%</div>
+              <div>1.65V</div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div style={{ color: COLOR_MAP.text }}>100%</div>
+              <div style={{ color: COLOR_MAP.accent }}>3.3V</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step2PWMPrincipleExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>占空比定义：</strong> 一个周期内高电平时间所占比例。占空比 50% 表示高电平和低电平时间各占一半。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>平均电压：</strong> PWM 经过低通滤波后得到平均电压，Vavg = Vcc × 占空比。可用此原理实现 DAC 功能。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>定时器实现：</strong> CNT 从 0 计数到 ARR，与 CCR 比较决定输出电平。CCR 越大，高电平时间越长，占空比越大。</p>
+        </div>
+      );
+    }
+
+    function Step3PWMMode() {
+      return `/**
+ * PWM 模式
+ */
+
+// PWM 模式 1 (PWM Mode 1)
+// CNT < CCR  : 输出有效电平 (通常为高)
+// CNT ≥ CCR  : 输出无效电平 (通常为低)
+//
+// 波形示意 (CCR = 30%, 有效电平=高)
+// ┌─────┐   ┌─────┐
+// │     │   │     │
+// │ 30% │   │ 30% │
+// └     └───┘     └───
+
+// PWM 模式 2 (PWM Mode 2)
+// CNT < CCR  : 输出无效电平 (通常为低)
+// CNT ≥ CCR  : 输出有效电平 (通常为高)
+//
+// 波形示意 (CCR = 30%, 有效电平=高)
+// ─────┐   ─────┐
+//      │   │
+//  70% │   │ 70%
+//      └───┘     └───
+
+// 配置示例
+TIM_OCInitTypeDef.OCMode = TIM_OCMODE_PWM1;  // PWM 模式 1
+TIM_OCInitTypeDef.OCMode = TIM_OCMODE_PWM2;  // PWM 模式 2
+
+// 极性能取反
+TIM_OCInitTypeDef.OCPolarity = TIM_OCPOLARITY_HIGH;  // 高电平有效
+TIM_OCInitTypeDef.OCPolarity = TIM_OCPOLARITY_LOW;   // 低电平有效`;
+    }
+
+    function Step3PWMModeViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>PWM 模式对比</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>PWM 模式 1</div>
+              <div className="flex items-end gap-0.5 h-20">
+                {Array.from({ length: 10 }).map((_, i) => {
+                  const isHigh = i % 10 < 4;
+                  return (
+                    <div key={i} className="flex-1" style={{ height: isHigh ? '100%' : '15%', backgroundColor: isHigh ? COLOR_MAP.primary : COLOR_MAP.bg }}></div>
+                  );
+                })}
+              </div>
+              <div className="text-xs text-center mt-2" style={{ color: COLOR_MAP.accent }}>CNT&lt;CCR 输出高</div>
+            </div>
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `2px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>PWM 模式 2</div>
+              <div className="flex items-end gap-0.5 h-20">
+                {Array.from({ length: 10 }).map((_, i) => {
+                  const isHigh = i % 10 >= 4;
+                  return (
+                    <div key={i} className="flex-1" style={{ height: isHigh ? '100%' : '15%', backgroundColor: isHigh ? COLOR_MAP.secondary : COLOR_MAP.bg }}></div>
+                  );
+                })}
+              </div>
+              <div className="text-xs text-center mt-2" style={{ color: COLOR_MAP.accent }}>CNT≥CCR 输出高</div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            模式 1 和模式 2 相位相反，根据应用需求选择
+          </div>
+        </div>
+      );
+    }
+
+    function Step3PWMModeExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>PWM 模式 1：</strong> CNT 小于 CCR 时输出有效电平 (通常高电平)，CNT 大于等于 CCR 时输出无效电平。这是最常用的模式。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>PWM 模式 2：</strong> 与模式 1 相反，CNT 小于 CCR 时输出无效电平，CNT 大于等于 CCR 时输出有效电平。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>极性配置：</strong> 可配置高电平有效或低电平有效，用于匹配外部电路需求。例如驱动 N-MOSFET 通常用高电平有效。</p>
+        </div>
+      );
+    }
+
+    function Step4FreqCalc() {
+      return `/**
+ * PWM 频率计算
+ */
+
+// 频率计算公式
+// F_pwm = F_clk / ((PSC + 1) × (ARR + 1))
+//
+// 其中:
+// F_clk : 定时器时钟频率 (通常 72MHz)
+// PSC   : 预分频值 (0-65535)
+// ARR   : 自动重装载值 (0-65535)
+
+// 示例计算 (72MHz 时钟)
+// 目标：产生 1kHz PWM
+// 1. 设置 PSC = 71, 计数频率 = 72M/72 = 1MHz
+// 2. 设置 ARR = 999, PWM 频率 = 1M/1000 = 1kHz
+// 验证：F_pwm = 72M / (72 × 1000) = 1kHz ✓
+
+// 常用配置表
+// ┌────────┬──────┬───────┬──────────┐
+// │ 频率   │ PSC  │ ARR   │ 分辨率   │
+// ├────────┼──────┼───────┼──────────┤
+// │ 1kHz   │ 71   │ 999   │ 10 位     │
+// │ 10kHz  │ 7    │ 999   │ 10 位     │
+// │ 20kHz  │ 7    │ 499   │ 9 位      │
+// │ 100kHz │ 7    │ 99    │ 7 位      │
+// └────────┴──────┴───────┴──────────┘
+
+// 注意：频率越高分辨率越低，需权衡`;
+    }
+
+    function Step4FreqCalcViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>PWM 频率计算</div>
+          <div className="p-3 rounded font-mono text-xs" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}`, color: COLOR_MAP.text }}>
+            <div>F_pwm = F_clk / ((PSC+1) × (ARR+1))</div>
+          </div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `1px solid ${COLOR_MAP.border}` }}>
+            <div className="font-bold text-xs mb-2" style={{ color: COLOR_MAP.text }}>计算示例 (F_clk=72MHz)</div>
+            <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+              <div className="flex justify-between">
+                <span>目标：1kHz PWM</span>
+              </div>
+              <div>步骤 1: PSC = 71 → 计数频率 = 72M/72 = 1MHz</div>
+              <div>步骤 2: ARR = 999 → F_pwm = 1M/1000 = 1kHz</div>
+              <div className="flex justify-between items-center mt-2 p-1 rounded" style={{ backgroundColor: '#22c55e30', border: '1px solid #22c55e' }}>
+                <span style={{ color: '#22c55e' }}>验证：72M / (72 × 1000) = 1kHz ✓</span>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}`, color: COLOR_MAP.text }}>
+              <div>PSC 决定计数频率</div>
+            </div>
+            <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}`, color: COLOR_MAP.text }}>
+              <div>ARR 决定 PWM 周期</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step4FreqCalcExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>频率公式：</strong> F_pwm = F_clk / ((PSC+1) × (ARR+1))。F_clk 通常是 72MHz，PSC 和 ARR 都是 16 位寄存器，最大 65535。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>设计步骤：</strong> 先根据所需频率确定 PSC 和 ARR 的组合。一般先选 PSC 得到合适的计数频率，再用 ARR 精确调整 PWM 频率。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>频率与分辨率权衡：</strong> 频率越高分辨率越低。1kHz 时 ARR=999 有 10 位分辨率 (1024 级)，100kHz 时 ARR=99 只有 7 位 (128 级)。</p>
+        </div>
+      );
+    }
+
+    function Step5DutyControl() {
+      return `/**
+ * 占空比控制
+ */
+
+// 占空比计算公式
+// Duty = CCR / (ARR + 1) × 100%
+//
+// 反推 CCR 值
+// CCR = Duty × (ARR + 1) / 100
+
+// 示例 (ARR = 999, 10 位分辨率)
+// 占空比 0%   → CCR = 0
+// 占空比 25%  → CCR = 250
+// 占空比 50%  → CCR = 500
+// 占空比 75%  → CCR = 750
+// 占空比 100% → CCR = 1000
+
+// 设置占空比 (使用宏)
+#define SET_PWM_DUTY(duty) \\
+    __HAL_TIM_SET_COMPARE(&htim, TIM_CHANNEL_1, (duty) * (ARR+1) / 100)
+
+// 设置占空比 (直接写寄存器)
+TIM_SetCompare1(TIM1, ccr_value);
+
+// HAL 库方式
+// 需要先配置 OC 结构体
+sConfigOC.Pulse = ccr_value;
+HAL_TIM_PWM_ConfigChannel(&htim, &sConfigOC, TIM_CHANNEL_1);
+
+// 动态调整占空比
+void PWM_SetDuty(uint8_t duty_percent) {
+    uint32_t ccr = duty_percent * (ARR + 1) / 100;
+    __HAL_TIM_SET_COMPARE(&htim, TIM_CHANNEL_1, ccr);
+}`;
+    }
+
+    function Step5DutyControlViz() {
+      const [duty, setDuty] = useState(50);
+
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>占空比控制</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold" style={{ color: COLOR_MAP.text }}>占空比调节</span>
+              <span className="text-xs font-mono" style={{ color: COLOR_MAP.text }}>{duty}%</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={duty}
+              onChange={(e) => setDuty(parseInt(e.target.value))}
+              className="w-full"
+              style={{ accentColor: COLOR_MAP.primary }}
+            />
+            <div className="flex justify-between text-xs mt-1" style={{ color: COLOR_MAP.accent }}>
+              <span>0%</span>
+              <span>100%</span>
+            </div>
+          </div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}` }}>
+            <div className="text-xs font-bold mb-2" style={{ color: COLOR_MAP.text }}>CCR 值计算 (ARR=999)</div>
+            <div className="font-mono text-sm text-center" style={{ color: COLOR_MAP.text }}>
+              CCR = {duty} × 1000 / 100 = <span style={{ color: COLOR_MAP.primary, fontWeight: 'bold' }}>{duty * 10}</span>
+            </div>
+          </div>
+          <div className="flex items-end gap-1 h-16">
+            {Array.from({ length: 20 }).map((_, i) => {
+              const isHigh = i % 10 < (duty / 10);
+              return (
+                <div key={i} className="flex-1 transition-all" style={{ height: isHigh ? '100%' : '15%', backgroundColor: isHigh ? COLOR_MAP.primary : COLOR_MAP.bg }}></div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    function Step5DutyControlExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>占空比公式：</strong> Duty = CCR / (ARR+1) × 100%。已知占空比求 CCR：CCR = Duty × (ARR+1) / 100。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>动态调整：</strong> 运行中修改 CCR 寄存器可实时改变占空比。使用 __HAL_TIM_SET_COMPARE 宏最方便。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>分辨率：</strong> ARR 越大分辨率越高。ARR=999 时最小调节步长是 0.1%，ARR=99 时最小步长是 1%。</p>
+        </div>
+      );
+    }
+
+    function Step6Channel() {
+      return `/**
+ * PWM 通道配置
+ */
+
+// STM32 定时器通道
+// 高级定时器 (TIM1/TIM8): 4 通道 + 互补输出
+// 通用定时器 (TIM2-TIM5): 4 通道
+//
+// 通道引脚映射 (以 TIM3 为例)
+// TIM3_CH1 → PA6 / PB4 / PC6
+// TIM3_CH2 → PA7 / PB5 / PC7
+// TIM3_CH3 → PB0 / PC8
+// TIM3_CH4 → PB1 / PC9
+
+// 多通道 PWM 配置
+TIM_OC_InitTypeDef sConfigOC = {0};
+
+// 配置通道 1
+sConfigOC.OCMode = TIM_OCMODE_PWM1;
+sConfigOC.Pulse = 500;  // 50% 占空比
+sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1);
+
+// 配置通道 2 (独立占空比)
+sConfigOC.Pulse = 250;  // 25% 占空比
+HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2);
+
+// 启动多通道 PWM
+HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+
+// 互补输出 (高级定时器)
+// 用于电机 H 桥驱动，带死区时间`;
+    }
+
+    function Step6ChannelViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>多通道 PWM</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>CH1</div>
+                <div className="flex-1 flex gap-0.5">
+                  {Array.from({ length: 20 }).map((_, i) => (
+                    <div key={i} className="flex-1 h-4 rounded" style={{ backgroundColor: i % 10 < 5 ? COLOR_MAP.primary : COLOR_MAP.bg }}></div>
+                  ))}
+                </div>
+                <div className="w-12 text-right" style={{ color: COLOR_MAP.accent }}>50%</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>CH2</div>
+                <div className="flex-1 flex gap-0.5">
+                  {Array.from({ length: 20 }).map((_, i) => (
+                    <div key={i} className="flex-1 h-4 rounded" style={{ backgroundColor: i % 10 < 3 ? COLOR_MAP.secondary : COLOR_MAP.bg }}></div>
+                  ))}
+                </div>
+                <div className="w-12 text-right" style={{ color: COLOR_MAP.accent }}>30%</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>CH3</div>
+                <div className="flex-1 flex gap-0.5">
+                  {Array.from({ length: 20 }).map((_, i) => (
+                    <div key={i} className="flex-1 h-4 rounded" style={{ backgroundColor: i % 10 < 7 ? COLOR_MAP.accent : COLOR_MAP.bg }}></div>
+                  ))}
+                </div>
+                <div className="w-12 text-right" style={{ color: COLOR_MAP.accent }}>70%</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>CH4</div>
+                <div className="flex-1 flex gap-0.5">
+                  {Array.from({ length: 20 }).map((_, i) => (
+                    <div key={i} className="flex-1 h-4 rounded" style={{ backgroundColor: i % 10 < 2 ? COLOR_MAP.text : COLOR_MAP.bg }}></div>
+                  ))}
+                </div>
+                <div className="w-12 text-right" style={{ color: COLOR_MAP.accent }}>20%</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            4 个通道可独立配置占空比，同时输出不同 PWM 波形
+          </div>
+        </div>
+      );
+    }
+
+    function Step6ChannelExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>通道引脚：</strong> 每个定时器通道可映射到多个 GPIO 引脚。例如 TIM3_CH1 可用 PA6、PB4 或 PC6。需查阅数据手册确认引脚映射。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>独立配置：</strong> 4 个通道可独立配置占空比和极性，同时输出不同的 PWM 波形。适合多路 LED 调光、多电机控制等场景。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>互补输出：</strong> 高级定时器 (TIM1/TIM8) 支持互补输出，可同时输出 PWM 和它的反相信号，带死区时间控制，用于 H 桥电机驱动。</p>
+        </div>
+      );
+    }
+
+    function Step7HALUsage() {
+      return `/**
+ * HAL 库 PWM 使用
+ */
+
+// 初始化 (由 CubeMX 生成)
+TIM_HandleTypeDef htim3;
+TIM_OC_InitTypeDef sConfigOC = {0};
+
+void MX_TIM3_Init(void) {
+    htim3.Instance = TIM3;
+    htim3.Init.Prescaler = 71;              // 72MHz/72 = 1MHz
+    htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim3.Init.Period = 999;                // 1MHz/1000 = 1kHz
+    htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    if (HAL_TIM_PWM_Init(&htim3) != HAL_OK) {
+        Error_Handler();
+    }
+
+    // 配置 PWM 通道
+    sConfigOC.OCMode = TIM_OCMODE_PWM1;
+    sConfigOC.Pulse = 500;                  // 50% 占空比
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+    sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+    if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+// 启动 PWM
+HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+
+// 动态调整占空比
+__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, new_ccr);
+
+// 停止 PWM
+HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);`;
+    }
+
+    function Step7HALUsageViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>HAL PWM API</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-xs mb-1" style={{ color: COLOR_MAP.text }}>初始化</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>HAL_TIM_PWM_Init</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>PWM_ConfigChannel</div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-xs mb-1" style={{ color: COLOR_MAP.text }}>控制</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>PWM_Start</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>PWM_Stop</div>
+            </div>
+          </div>
+          <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}` }}>
+            <div className="font-bold text-xs mb-1" style={{ color: COLOR_MAP.text }}>设置占空比</div>
+            <div className="font-mono text-xs" style={{ color: COLOR_MAP.text }}>__HAL_TIM_SET_COMPARE</div>
+          </div>
+          <div className="p-3 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}` }}>
+            <div className="font-bold text-xs mb-2" style={{ color: COLOR_MAP.text }}>配置流程</div>
+            <div className="text-xs space-y-1" style={{ color: COLOR_MAP.accent }}>
+              <div>1. CubeMX 配置定时器参数</div>
+              <div>2. HAL_TIM_PWM_Init() 初始化</div>
+              <div>3. PWM_ConfigChannel() 配置通道</div>
+              <div>4. PWM_Start() 启动输出</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step7HALUsageExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>初始化流程：</strong> 使用 CubeMX 配置预分频、重装载值、PWM 模式等参数，生成初始化代码。然后调用 HAL_TIM_PWM_Init() 和 PWM_ConfigChannel() 完成配置。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>启动/停止：</strong> HAL_TIM_PWM_Start() 启动 PWM 输出，HAL_TIM_PWM_Stop() 停止输出。可在运行时动态控制。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>调整占空比：</strong> 使用 __HAL_TIM_SET_COMPARE(htim, channel, ccr) 宏快速设置比较值，改变占空比。</p>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

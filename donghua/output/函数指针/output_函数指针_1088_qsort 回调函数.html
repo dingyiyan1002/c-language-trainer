@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>qsort 回调函数应用 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#14b8a6 0%,#0d9488 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#134e4a;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#115e59;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#ccfbf1,#99f6e4);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#5eead4;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#14b8a6;box-shadow:0 0 20px rgba(20,184,166,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#134e4a;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .array-container{display:flex;flex-direction:column;gap:12px;margin:16px 0}
+    .array-box{border-radius:12px;padding:16px;transition:all 0.4s ease;border:3px solid transparent}
+    .array-box.definition{background:linear-gradient(135deg:#ccfbf1,#99f6e4);border-color:#14b8a6}
+    .array-box.active{transform:scale(1.02);box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+    .element-row{display:flex;align-items:center;margin-bottom:8px;gap:8px}
+    .element-label{width:80px;font-size:11px;color:#115e59;font-weight:600;font-family:'Consolas',monospace}
+    .array-box-inner{flex:1;background:white;border-radius:8px;padding:12px;border:2px solid#e5e7eb;transition:all 0.3s ease;display:flex;gap:4px}
+    .array-box-inner.active{border-color:#14b8a6;background:linear-gradient(135deg:#ccfbf1,#99f6e4)}
+    .array-element{flex:1;aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:4px;font-weight:700;font-size:14px;font-family:'Consolas',monospace;transition:all 0.3s ease}
+    .array-element.unsorted{background:#f3f4f6;color:#6b7280}
+    .array-element.sorted{background:linear-gradient(135deg:#14b8a6,#0d9488);color:white}
+    .array-element.comparing{background:linear-gradient(135deg:#f59e0b,#d97706);color:white;transform:scale(1.1)}
+    .array-element.swapping{background:linear-gradient(135deg:#ef4444,#dc2626);color:white}
+    .sort-display{background:#1e293b;border-radius:12px;padding:16px;margin:16px 0}
+    .sort-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#0f172a;border-radius:8px;margin-bottom:8px;transition:all 0.4s ease}
+    .sort-row.pending{opacity:0.5}
+    .sort-row.active{background:linear-gradient(135deg,#14b8a6,#0d9488);border:2px solid#5eead4}
+    .sort-name{font-size:12px;color:#94a3b8;font-family:'Consolas',monospace}
+    .sort-value{font-size:14px;font-weight:700;color:#5eead4;font-family:'Consolas',monospace}
+    .comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+    .compare-card{background:white;border-radius:8px;padding:12px;text-align:center;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .compare-card.active{border-color:#14b8a6;background:linear-gradient(135deg:#ccfbf1,#99f6e4)}
+    .compare-label{font-size:10px;color:#64748b;margin-bottom:4px}
+    .compare-code{font-size:11px;color:#115e59;font-family:'Consolas',monospace}
+    .compare-desc{font-size:9px;color:#64748b;margin-top:4px}
+    .use-case-list{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+    .use-item{background:#ccfbf1;border-radius:8px;padding:12px;border-left:4px solid#14b8a6;transition:all 0.3s ease}
+    .use-item.active{border-left-color:#22c55e;background:linear-gradient(135deg:#ccfbf1,#99f6e4)}
+    .use-title{font-size:11px;color:#134e4a;font-weight:700;margin-bottom:4px}
+    .use-example{font-size:10px;color:#115e59;font-family:'Consolas',monospace}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#5eead4;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#5eead4;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',teal:'#14b8a6'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdlib.h>',color:'#7c3aed'},
+      2:{step:2,text:'int compare(const void *a, const void *b) {',color:'#14b8a6'},
+      3:{step:3,text:'  return (*(int*)a - *(int*)b);',color:'#0d9488'},
+      4:{step:4,text:'}',color:'#14b8a6'},
+      5:{step:5,text:'int arr[] = {5,2,8,1,9};',color:'#5eead4'},
+      6:{step:6,text:'qsort(arr, 5, sizeof(int), compare);',color:'#2dd4bf'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，qsort 是 C 标准库的快速排序函数，使用回调函数比较元素',
+      2:'定义 compare 回调函数，接受两个 const void 指针参数',
+      3:'将 void 指针转换为 int 指针并解引用，返回差值实现升序',
+      4:'compare 函数定义结束，返回值小于 0 表示 a 小于 b',
+      5:'定义待排序数组 arr，初始值为 5,2,8,1,9 无序状态',
+      6:'调用 qsort 排序，传入数组、元素个数、元素大小和比较函数'
+    };
+    const arrays = [
+      {step:'初始',values:[5,2,8,1,9],state:'未排序'},
+      {step:'排序中',values:[2,5,1,8,9],state:'部分有序'},
+      {step:'完成',values:[1,2,5,8,9],state:'升序排列'}
+    ];
+    const sortOps = [
+      {op:'比较函数',addr:'compare(a,b)',state:'回调接口'},
+      {op:'qsort 调用',addr:'qsort(arr,5,4,compare)',state:'快速排序'},
+      {op:'排序完成',addr:'arr[5]={1,2,5,8,9}',state:'升序'}
+    ];
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',sort:'M3 4h18M3 12h18M3 20h18M3 4l3 3-3 3M3 12l3 3-3 3M3 20l3 3-3 3'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [activeArray,setActiveArray] = useState(-1);
+      const [sortIdx,setSortIdx] = useState(-1);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 6; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setActiveArray(-1);
+          setSortIdx(-1);
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setActiveArray(0);
+          setSortIdx(0);
+        } else if(step === 3) {
+          setActiveArray(0);
+        } else if(step === 4) {
+          setSortIdx(1);
+        } else if(step === 5) {
+          setActiveArray(1);
+        } else if(step === 6) {
+          setActiveArray(2);
+          setSortIdx(2);
+          setTerminalLines(['arr = {1, 2, 5, 8, 9}']);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setActiveArray(-1);
+        setSortIdx(-1);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      const renderArray = (arrState, isActive) => {
+        return (
+          <div className={`array-box-inner ${isActive ? 'active' : ''}`}>
+            {arrState.values.map((v, i) => (
+              <div key={i} className={`array-element ${arrState.step === '完成' ? 'sorted' : arrState.step === '排序中' ? 'comparing' : 'unsorted'}`}>
+                {v}
+              </div>
+            ))}
+          </div>
+        );
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>qsort 回调函数应用 - C 语言可视化</h1>
+            <p>qsort | 回调函数 | 快速排序</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.teal,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                qsort_callback.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.sort} size={22} />
+                qsort 可视化
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">qsort</span>
+                  <span className="var-type">Quick Sort with Callback</span>
+                </div>
+                <div className="array-container">
+                  <div className={`array-box definition ${step >= 2 ? 'active' : ''}`}>
+                    <div style={{fontSize:13,fontWeight:700,color:'#134e4a',marginBottom:12}}>数组排序过程</div>
+                    {arrays.map((arr, idx) => (
+                      <div key={arr.step} className="element-row">
+                        <span className="element-label">{arr.step}</span>
+                        {renderArray(arr, step >= 2 + idx && activeArray === idx)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="sort-display">
+                  <div style={{color:'#94a3b8',fontSize:12,marginBottom:12}}>排序操作追踪</div>
+                  {sortOps.map((s, idx) => (
+                    <div key={idx} className={`sort-row ${step >= 2 + idx && sortIdx >= idx ? 'active' : 'pending'}`}>
+                      <span className="sort-name">{s.op}</span>
+                      <span className="sort-value">{s.addr} → {s.state}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="comparison-grid">
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">回调函数</div>
+                    <div className="compare-code">int (*)(const void*, const void*)</div>
+                    <div className="compare-desc">比较接口</div>
+                  </div>
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">qsort 参数</div>
+                    <div className="compare-code">base, nmemb, size, compar</div>
+                    <div className="compare-desc">标准接口</div>
+                  </div>
+                  <div className={`compare-card ${step >= 3 ? 'active' : ''}`}>
+                    <div className="compare-label">返回值</div>
+                    <div className="compare-code">&lt;0: a&lt;b, 0: a==b, &gt;0: a&gt;b</div>
+                    <div className="compare-desc">比较规则</div>
+                  </div>
+                  <div className={`compare-card ${step >= 3 ? 'active' : ''}`}>
+                    <div className="compare-label">类型转换</div>
+                    <div className="compare-code">(int*)a - 解引用</div>
+                    <div className="compare-desc">void 转 int</div>
+                  </div>
+                </div>
+                <div className="use-case-list">
+                  <div className={`use-item ${step >= 2 ? 'active' : ''}`}>
+                    <div className="use-title">升序排序</div>
+                    <div className="use-example">int cmp(const void *a, const void *b) { return *(int*)a - *(int*)b; }</div>
+                  </div>
+                  <div className={`use-item ${step >= 3 ? 'active' : ''}`}>
+                    <div className="use-title">降序排序</div>
+                    <div className="use-example">int cmp_desc(const void *a, const void *b) { return *(int*)b - *(int*)a; }</div>
+                  </div>
+                  <div className={`use-item ${step >= 4 ? 'active' : ''}`}>
+                    <div className="use-title">结构体排序</div>
+                    <div className="use-example">return ((Person*)a)->age - ((Person*)b)->age; 按年龄排序</div>
+                  </div>
+                  <div className={`use-item ${step >= 5 ? 'active' : ''}`}>
+                    <div className="use-title">字符串排序</div>
+                    <div className="use-example">return strcmp(*(char**)a, *(char**)b); 字典序</div>
+                  </div>
+                </div>
+              </div>
+              {step >= 6 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.teal}}>qsort 函数</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>C 标准库快速排序</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>回调函数</strong>
+                <p style={{marginTop:8,color:'#78350f'>用户自定义比较逻辑</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>void 指针</strong>
+                <p style={{marginTop:8,color:'#78350f'>泛型接口，需类型转换</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>应用场景</strong>
+                <p style={{marginTop:8,color:'#78350f'>数组排序、结构体排序、自定义比较</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>结构体定义 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#ec4899 0%,#db2777 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#831843;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#7c3aed;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#fce7f3,#fbcfe8);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#f472b6;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#ec4899;box-shadow:0 0 20px rgba(236,72,153,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#831843;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .struct-container{display:flex;flex-direction:column;gap:16px;margin:16px 0}
+    .struct-box{border-radius:12px;padding:16px;transition:all 0.4s ease;border:3px solid transparent}
+    .struct-box.definition{background:linear-gradient(135deg:#fce7f3,#fbcfe8);border-color:#ec4899}
+    .struct-box.instance{background:linear-gradient(135deg:#e0e7ff,#c7d2fe);border-color:#6366f1}
+    .struct-box.active{transform:scale(1.02);box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+    .field-row{display:flex;justify-content:space-between;align-items:center;padding:10px;margin-bottom:8px;background:white;border-radius:8px;border:2px solid#e5e7eb;transition:all 0.4s ease}
+    .field-row.pending{opacity:0.5}
+    .field-row.active{background:linear-gradient(135deg:#ec4899,#db2777);border-color:#be185d;color:white}
+    .field-name{font-size:12px;font-family:'Consolas',monospace;font-weight:600}
+    .field-type{font-size:10px;color:#64748b}
+    .field-row.active .field-type{color:#fbcfe8}
+    .field-value{font-size:14px;font-weight:700;font-family:'Consolas',monospace}
+    .memory-layout{background:#1e293b;border-radius:12px;padding:16px;margin:16px 0}
+    .memory-row{display:flex;align-items:center;margin-bottom:8px}
+    .memory-offset{width:60px;font-size:10px;color:#94a3b8;font-family:'Consolas',monospace}
+    .memory-block{flex:1;height:36px;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:all 0.4s ease;border:2px solid#475569}
+    .memory-block.pending{background:#0f172a}
+    .memory-block.active{background:linear-gradient(135deg,#ec4899,#db2777);border-color:#f472b6;color:white}
+    .memory-label{font-size:11px;font-family:'Consolas',monospace}
+    .memory-value{font-size:13px;font-weight:700;margin-left:12px;font-family:'Consolas',monospace;color:#22d3ee}
+    .size-badge{display:inline-block;padding:4px 12px;background:#1e293b;color:#ec4899;border-radius:20px;font-size:11px;font-weight:700;font-family:'Consolas',monospace}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#22d3ee;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',pink:'#ec4899'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'#include <string.h>',color:'#7c3aed'},
+      3:{step:1,text:'',color:'#94a3b8'},
+      4:{step:2,text:'struct Student {',color:'#ec4899'},
+      5:{step:2,text:'    char name[50];',color:'#3b82f6'},
+      6:{step:2,text:'    int age;',color:'#3b82f6'},
+      7:{step:2,text:'    float gpa;',color:'#3b82f6'},
+      8:{step:3,text:'};',color:'#ec4899'},
+      9:{step:4,text:'struct Student s1;',color:'#7c3aed'},
+      10:{step:5,text:'strcpy(s1.name, "Alice");',color:'#22c55e'},
+      11:{step:5,text:'s1.age = 20;',color:'#22c55e'},
+      12:{step:5,text:'s1.gpa = 3.8;',color:'#22c55e'},
+      13:{step:6,text:'printf("Name: %s\\n", s1.name);',color:'#eab308'},
+      14:{step:6,text:'return 0;',color:'#3b82f6'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，结构体是自定义数据类型，用于组织相关数据',
+      2:'定义 Student 结构体，包含 name 字符数组、age 整数、gpa 浮点数三个成员',
+      3:'结构体定义结束，分号不可省略，这是类型定义而非变量声明',
+      4:'声明 s1 变量，类型为 struct Student，分配 58 字节内存空间',
+      5:'初始化成员：name 为 Alice，age 为 20，gpa 为 3.8，使用点运算符访问',
+      6:'输出结果：Name: Alice，结构体总大小为各成员大小之和加上对齐填充'
+    };
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',chip:'M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z',struct:'M4 4h16v16H4V4zm2 2v12h12V6H6zm3 2h2v2H9V8zm0 4h2v2H9v-2zm0 4h2v2H9v-2z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [activeMember,setActiveMember] = useState(null);
+      const [memberValues,setMemberValues] = useState({name:'',age:null,gpa:null});
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 14; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setActiveMember(null);
+          setMemberValues({name:'',age:null,gpa:null});
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setActiveMember('definition');
+        } else if(step === 3) {
+          setActiveMember('definition-end');
+        } else if(step === 4) {
+          setActiveMember('declaration');
+        } else if(step === 5) {
+          setActiveMember('initialization');
+          setMemberValues({name:'Alice',age:20,gpa:3.8});
+        } else if(step === 6) {
+          setTerminalLines(['Name: Alice','Age: 20','GPA: 3.8']);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setActiveMember(null);
+        setMemberValues({name:'',age:null,gpa:null});
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>结构体定义 - C 语言可视化</h1>
+            <p>struct 定义 | 成员变量 | 内存布局</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.pink,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                student_struct.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8,9,10,11,12,13,14].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.struct} size={22} />
+                结构体可视化
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">结构体类型</span>
+                  <span className="var-type">struct Student</span>
+                </div>
+                <div className="struct-container">
+                  <div className={`struct-box definition ${step >= 2 ? 'active' : ''}`}>
+                    <div style={{fontSize:13,fontWeight:700,color:'#831843',marginBottom:12}}>struct Student 定义</div>
+                    <div className={`field-row ${step >= 2 && activeMember === 'initialization' ? 'active' : 'pending'}`}>
+                      <div>
+                        <div className="field-name">name</div>
+                        <div className="field-type">char[50]</div>
+                      </div>
+                      <div className="field-value">{memberValues.name || '""'}</div>
+                    </div>
+                    <div className={`field-row ${step >= 5 && activeMember === 'initialization' ? 'active' : 'pending'}`}>
+                      <div>
+                        <div className="field-name">age</div>
+                        <div className="field-type">int</div>
+                      </div>
+                      <div className="field-value">{memberValues.age !== null ? memberValues.age : '0'}</div>
+                    </div>
+                    <div className={`field-row ${step >= 5 && activeMember === 'initialization' ? 'active' : 'pending'}`}>
+                      <div>
+                        <div className="field-name">gpa</div>
+                        <div className="field-type">float</div>
+                      </div>
+                      <div className="field-value">{memberValues.gpa !== null ? memberValues.gpa : '0.0'}</div>
+                    </div>
+                  </div>
+                  <div className={`struct-box instance ${step >= 4 ? 'active' : ''}`} style={{opacity:step >= 4 ? 1 : 0.4}}>
+                    <div style={{fontSize:13,fontWeight:700,color:'#3730a3',marginBottom:8}}>变量实例：s1</div>
+                    <div className="size-badge">sizeof(struct Student) = 58 bytes</div>
+                  </div>
+                </div>
+                <div className="memory-layout">
+                  <div style={{color:'#94a3b8',fontSize:12,marginBottom:12}}>内存布局 (含对齐填充)</div>
+                  <div className="memory-row">
+                    <span className="memory-offset">+0</span>
+                    <div className={`memory-block ${step >= 5 ? 'active' : 'pending'}`} style={{flex:'0 0 200px'}}>
+                      <span className="memory-label">name[50]</span>
+                    </div>
+                    <span className="memory-value">"Alice"</span>
+                  </div>
+                  <div className="memory-row">
+                    <span className="memory-offset">+50</span>
+                    <div className={`memory-block ${step >= 5 ? 'active' : 'pending'}`} style={{flex:'0 0 60px'}}>
+                      <span className="memory-label">age</span>
+                    </div>
+                    <span className="memory-value">{memberValues.age !== null ? memberValues.age : '0'}</span>
+                  </div>
+                  <div className="memory-row">
+                    <span className="memory-offset">+54</span>
+                    <div className={`memory-block ${step >= 5 ? 'active' : 'pending'}`} style={{flex:'0 0 60px'}}>
+                      <span className="memory-label">gpa</span>
+                    </div>
+                    <span className="memory-value">{memberValues.gpa !== null ? memberValues.gpa : '0.0'}</span>
+                  </div>
+                </div>
+              </div>
+              {step >= 6 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.pink}}>struct 关键字</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>定义自定义复合类型</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>成员变量</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>不同类型的数据组合</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>点运算符</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>s1.name 访问成员</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>内存对齐</strong>
+                <p style={{marginTop:8,color:#78350f'}}>总大小包含填充字节</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

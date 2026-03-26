@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1213 - FreeRTOS 队列与消息传递完整指南 - 嵌入式 C 语言可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(245, 158, 11, 0.2); } 50% { background-color: rgba(245, 158, 11, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes danger { 0%, 100% { background-color: rgba(239, 68, 68, 0.3); } 50% { background-color: rgba(239, 68, 68, 0.6); } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes enqueue { 0% { transform: translateX(-30px); opacity: 0; } 100% { transform: translateX(0); opacity: 1; } }
+        @keyframes dequeue { 0% { transform: translateX(0); opacity: 1; } 100% { transform: translateX(30px); opacity: 0; } }
+        @keyframes moveData { 0% { transform: translateX(0); } 100% { transform: translateX(40px); } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .flow { animation: flow 2s infinite; }
+        .highlight { animation: highlight 2s infinite; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .countdown { animation: countdown 0.3s ease-out; }
+        .danger { animation: danger 1s infinite; }
+        .reset { animation: reset 1s linear; }
+        .enqueue { animation: enqueue 0.5s ease-out; }
+        .dequeue { animation: dequeue 0.5s ease-out; }
+        .moveData { animation: moveData 1s infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#f59e0b',
+            secondary: '#d97706',
+            accent: '#fbbf24',
+            highlight: '#fcd34d',
+            danger: '#ef4444',
+            success: '#10b981'
+        };
+
+        const STEPS = [
+            {
+                title: "队列基础概念",
+                code: `// FreeRTOS 队列概述
+// 队列是 FreeRTOS 最重要的 IPC 机制
+
+// 队列特性:
+// - 线程安全 (自动关中断)
+// - 按值拷贝 (非指针传递)
+// - FIFO (先进先出)
+// - 可阻塞读写
+
+// 队列创建
+QueueHandle_t xQueue;
+xQueue = xQueueCreate(
+    10,         // 队列长度 (消息条数)
+    sizeof(int) // 消息大小 (字节)
+);
+
+// 队列发送 (阻塞)
+xQueueSend(xQueue, &data, tickstoWait);
+
+// 队列接收 (阻塞)
+xQueueReceive(xQueue, &data, tickstoWait);
+
+// 队列发送 (中断)
+xQueueSendFromISR(xQueue, &data, &xHigherPriorityTaskWoken);
+
+// 队列接收 (中断)
+xQueueReceiveFromISR(xQueue, &data, &xHigherPriorityTaskWoken);`,
+                description: "队列是 FreeRTOS 的核心 IPC 机制，用于任务间和中断与任务间的消息传递。队列按值拷贝数据，不是传递指针，因此更安全但效率略低。队列是线程安全的，内部自动关中断保护。支持阻塞读写，当队列空时读操作阻塞，队列满时写操作阻塞。",
+                highlight: "队列按值拷贝数据，不是指针传递，避免野指针问题"
+            },
+            {
+                title: "队列创建与配置",
+                code: `// 创建队列
+// 参数 1: 队列长度 (最多存储的消息数)
+// 参数 2: 每条消息的大小 (字节)
+QueueHandle_t xQueue_Create(void) {
+    // 创建长度为 10，消息大小为 32 字节的队列
+    return xQueueCreate(10, 32);
+}
+
+// 静态创建 (不动态分配内存)
+StaticQueue_t xQueueBuffer;
+uint8_t ucQueueStorage[10][32];
+QueueHandle_t xQueue = xQueueCreateStatic(10, 32, ucQueueStorage, &xQueueBuffer);
+
+// 队列类型定义 (推荐)
+typedef struct {
+    uint8_t type;
+    uint8_t data[28];
+    uint32_t timestamp;
+} Message_t;
+
+QueueHandle_t xMessageQueue;
+xMessageQueue = xQueueCreate(20, sizeof(Message_t));
+
+// 删除队列 (谨慎使用)
+vQueueDelete(xQueue);
+// 注意：不能有任务还在等待该队列`,
+                description: "xQueueCreate 动态分配内存，xQueueCreateStatic 使用静态缓冲区。队列长度决定能缓存多少消息，消息大小决定每条消息的最大字节数。推荐使用结构体定义消息格式，包含类型、数据和时间戳字段。删除队列前必须确保没有任务在等待该队列。",
+                highlight: "静态创建不依赖堆，适合内存受限或高可靠性应用"
+            },
+            {
+                title: "队列发送与接收",
+                code: `// 任务 A: 发送数据到队列
+void vTaskSender(void *pvParameters) {
+    Message_t msg;
+    for(;;) {
+        msg.type = SENSOR_DATA;
+        msg.timestamp = xTaskGetTickCount();
+        msg.data[0] = Read_Sensor();
+
+        // 发送到队列 (阻塞 100ms)
+        if(xQueueSend(xQueue, &msg, pdMS_TO_TICKS(100)) == pdPASS) {
+            // 发送成功
+        } else {
+            // 队列满，发送失败
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+// 任务 B: 从队列接收数据
+void vTaskReceiver(void *pvParameters) {
+    Message_t msg;
+    for(;;) {
+        // 阻塞等待数据 (portMAX_DELAY = 永久等待)
+        if(xQueueReceive(xQueue, &msg, portMAX_DELAY) == pdPASS) {
+            // 接收成功，处理消息
+            Process_Message(msg.type, msg.data);
+        }
+    }
+}
+
+// 返回值:pdPASS=成功，errQUEUE_FULL=队列满，errQUEUE_EMPTY=队列空`,
+                description: "xQueueSend 发送数据到队列尾，如果队列满则阻塞等待。xQueueReceive 从队列头读取数据，如果队列空则阻塞等待。阻塞时间用 Tick 表示，portMAX_DELAY 表示永久等待。发送/接收成功返回 pdPASS。队列满/空时返回相应错误码。",
+                highlight: "接收任务通常永久阻塞等待，发送任务应设置超时防止死锁"
+            },
+            {
+                title: "中断中使用队列",
+                code: `// 中断中发送数据到队列
+QueueHandle_t xISRQueue;
+
+void UART_IRQHandler(void) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    uint8_t data = UART1->DR;
+
+    // 从中断发送数据到队列
+    xQueueSendFromISR(xISRQueue, &data, &xHigherPriorityTaskWoken);
+
+    // 如果接收任务优先级更高，立即切换
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+// 任务接收中断数据
+void vTaskProcessISR(void *pvParameters) {
+    uint8_t data;
+    for(;;) {
+        // 阻塞等待中断数据
+        xQueueReceive(xISRQueue, &data, portMAX_DELAY);
+
+        // 处理数据
+        Process_UART_Data(data);
+    }
+}
+
+// 注意:
+// 1. 中断中必须用 FromISR 版本 API
+// 2. xHigherPriorityTaskWoken 用于判断是否需要上下文切换
+// 3. 中断中不能使用普通 xQueueSend`,
+                description: "中断中必须使用 FromISR 结尾的 API 函数。xQueueSendFromISR 从中断发送数据到队列，xQueueReceiveFromISR 从中断接收数据。xHigherPriorityTaskWoken 参数由 API 设置，如果接收任务优先级更高且正在阻塞等待，则设置为 pdTRUE。portYIELD_FROM_ISR 根据该标志决定是否立即上下文切换。",
+                highlight: "中断发送 + 任务接收是标准模式，实现高效中断处理"
+            },
+            {
+                title: "队列超时与非阻塞操作",
+                code: `// 非阻塞发送 (立即返回)
+if(xQueueSend(xQueue, &data, 0) == pdPASS) {
+    // 发送成功
+} else {
+    // 队列满，立即失败
+}
+
+// 非阻塞接收 (立即返回)
+if(xQueueReceive(xQueue, &data, 0) == pdPASS) {
+    // 接收成功
+} else {
+    // 队列空，立即失败
+}
+
+// 超时处理 (推荐)
+TickType_t timeout = pdMS_TO_TICKS(100);
+if(xQueueSend(xQueue, &data, timeout) == pdPASS) {
+    // 在超时时间内发送成功
+} else {
+    // 超时，队列一直满
+    Log_Error("Queue full timeout");
+    // 降级处理：丢弃数据或使用备用方案
+}
+
+// 轮询模式 (不推荐，占用 CPU)
+while(xQueueReceive(xQueue, &data, 0) != pdPASS) {
+    // 空转等待，浪费 CPU
+    // 应改用阻塞模式
+}`,
+                description: "超时参数为 0 时实现非阻塞操作，立即返回结果。超时参数大于 0 时在指定时间内等待，超时后返回失败。非阻塞操作会频繁轮询，浪费 CPU 资源。推荐模式：接收任务使用 portMAX_DELAY 永久阻塞，发送任务设置合理超时时间。",
+                highlight: "接收任务应阻塞等待而非轮询，非阻塞模式浪费 CPU"
+            },
+            {
+                title: "队列应用：命令模式",
+                code: `// 命令队列模式
+typedef enum {
+    CMD_LED_ON,
+    CMD_LED_OFF,
+    CMD_MOTOR_SET,
+    CMD_SENSOR_READ
+} CommandType;
+
+typedef struct {
+    CommandType cmd;
+    uint32_t param;
+} Command_t;
+
+QueueHandle_t xCommandQueue;
+
+// 命令发送任务 (如 CLI、网络)
+void vTaskCommandSend(void *pvParameters) {
+    Command_t cmd;
+    for(;;) {
+        // 解析用户输入
+        cmd.cmd = CMD_LED_ON;
+        cmd.param = 1;
+
+        // 发送命令
+        xQueueSend(xCommandQueue, &cmd, portMAX_DELAY);
+    }
+}
+
+// 命令执行任务
+void vTaskCommandExec(void *pvParameters) {
+    Command_t cmd;
+    for(;;) {
+        // 等待命令
+        xQueueReceive(xCommandQueue, &cmd, portMAX_DELAY);
+
+        // 分发执行
+        switch(cmd.cmd) {
+            case CMD_LED_ON: LED_On(cmd.param); break;
+            case CMD_LED_OFF: LED_Off(cmd.param); break;
+            case CMD_MOTOR_SET: Motor_Set(cmd.param); break;
+            case CMD_SENSOR_READ: Sensor_Read(); break;
+        }
+    }
+}`,
+                description: "命令队列模式将命令请求与执行分离。发送任务 (CLI、网络、按键等) 将命令发送到队列，执行任务按顺序处理命令。这种模式实现解耦，多个命令源可以共享同一个执行器。命令结构体包含命令类型和参数，便于扩展。",
+                highlight: "命令队列实现解耦，多个命令源共享一个执行器"
+            },
+            {
+                title: "队列应用：数据缓冲",
+                code: `// 数据缓冲队列 (如串口接收)
+
+#define RX_BUFFER_SIZE  64
+typedef uint8_t RxByte_t;
+
+QueueHandle_t xRxQueue;
+
+// 中断接收串口数据
+void USART1_IRQHandler(void) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    while(USART1->SR & USART_SR_RXNE) {
+        uint8_t data = USART1->DR;
+
+        // 发送到队列 (可能失败，队列满时丢弃)
+        xQueueSendFromISR(xRxQueue, &data, &xHigherPriorityTaskWoken);
+    }
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+// 数据处理任务
+void vTaskProcessRx(void *pvParameters) {
+    uint8_t data;
+    for(;;) {
+        // 阻塞等待数据
+        xQueueReceive(xRxQueue, &data, portMAX_DELAY);
+
+        // 批量处理 (提高效率)
+        uint8_t batch[32];
+        uint8_t count = 0;
+        batch[count++] = data;
+
+        // 读取队列中剩余数据
+        while(count < 32 && xQueueReceive(xRxQueue, &batch[count], 0) == pdPASS) {
+            count++;
+        }
+
+        // 处理批量数据
+        Process_Rx_Batch(batch, count);
+    }
+}`,
+                description: "队列用作数据缓冲区，中断接收数据后发送到队列，处理任务从队列读取并处理。批量处理模式提高 CPU 效率：接收到一个数据后，继续读取队列中所有可用数据，一次性处理。队列满时新数据会被丢弃，适合允许丢包的应用 (如串口流)。",
+                highlight: "批量处理减少上下文切换，提高 CPU 效率"
+            },
+            {
+                title: "队列与信号量对比",
+                code: `// 队列 vs 信号量
+
+// 队列优势:
+// 1. 传递实际数据 (不只是状态)
+// 2. 缓冲多条消息
+// 3. 多生产者 - 多消费者
+// 4. 按值拷贝，安全
+
+// 信号量优势:
+// 1. 更快 (只传递状态)
+// 2. 更省内存
+// 3. 任务通知最快 (无需创建对象)
+
+// 选择指南:
+
+// 需要传递数据 → 队列
+xQueueCreate(10, sizeof(Data_t));
+
+// 只需要同步/计数 → 信号量
+xSemaphoreCreateBinary();
+xSemaphoreCreateCounting(10, 0);
+
+// 中断通知任务 (无数据) → 任务通知 (最快)
+ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+vTaskNotifyGiveFromISR(taskHandle, &xHigherPriorityTaskWoken);
+
+// 保护共享资源 → 互斥量
+xSemaphoreCreateMutex();`,
+                description: "队列适合传递数据，可缓冲多条消息，支持多生产者多消费者。信号量只传递状态，更快更省内存。任务通知 (Task Notification) 最快，无需创建对象，但每个任务只有一个通知值。选择原则：传数据用队列，同步用信号量/任务通知，保护资源用互斥量。",
+                highlight: "任务通知最快最省内存，但功能有限；队列功能最全但开销最大"
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [showCode, setShowCode] = useState(true);
+            const [queueData, setQueueData] = useState([]);
+            const voiceEndTimerRef = useRef(null);
+
+            // 模拟队列数据流动
+            useEffect(() => {
+                if (!isPlaying) return;
+                const interval = setInterval(() => {
+                    setQueueData(prev => {
+                        if (currentStep >= 2 && currentStep <= 6) {
+                            // 入队
+                            if (prev.length < 5) {
+                                const newData = Math.floor(Math.random() * 100);
+                                return [...prev, newData];
+                            }
+                            // 出队
+                            return prev.slice(1);
+                        }
+                        return prev;
+                    });
+                }, 1500);
+                return () => clearInterval(interval);
+            }, [isPlaying, currentStep]);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v =>
+                        v.lang === 'zh-CN' ||
+                        v.lang === 'zh-CN-XiaoxiaoNeural' ||
+                        v.lang.includes('Chinese')
+                    );
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.description + "。" + step.highlight);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep]);
+
+            // 队列可视化
+            const QueueVisual = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-amber-400 mb-3">队列数据流</h3>
+
+                        {/* 发送端 */}
+                        <div className="flex items-center gap-2 mb-4">
+                            <div className="bg-blue-500 px-3 py-1 rounded text-xs font-bold">发送任务</div>
+                            <div className="text-amber-400">→</div>
+
+                            {/* 队列 */}
+                            <div className="flex-1 bg-gray-900 rounded border-2 border-amber-500 p-2 min-h-[60px]">
+                                <div className="text-xs text-gray-400 mb-1">队列 (容量：5)</div>
+                                <div className="flex gap-1 flex-wrap">
+                                    {queueData.map((d, i) => (
+                                        <div key={i} className="w-10 h-8 bg-amber-500 rounded flex items-center justify-center text-xs font-mono enqueue">
+                                            {d}
+                                        </div>
+                                    ))}
+                                    {queueData.length === 0 && (
+                                        <div className="text-xs text-gray-500 italic">空队列</div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="text-amber-400">→</div>
+                            <div className="bg-green-500 px-3 py-1 rounded text-xs font-bold">接收任务</div>
+                        </div>
+
+                        {/* 状态指示 */}
+                        <div className="flex justify-around text-xs">
+                            <div>数据：<span className="text-amber-400">{queueData.length}/5</span></div>
+                            <div>状态：<span className={queueData.length >= 5 ? 'text-red-400' : 'text-green-400'}>
+                                {queueData.length >= 5 ? '满' : queueData.length === 0 ? '空' : '正常'}
+                            </span></div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // 队列操作对比
+            const OperationsVisual = () => {
+                const operations = [
+                    { name: 'xQueueSend', type: '发送', block: '可能阻塞', color: 'bg-blue-500' },
+                    { name: 'xQueueReceive', type: '接收', block: '可能阻塞', color: 'bg-green-500' },
+                    { name: 'xQueueSendFromISR', type: '中断发送', block: '不阻塞', color: 'bg-purple-500' },
+                    { name: 'xQueueReceiveFromISR', type: '中断接收', block: '不阻塞', color: 'bg-pink-500' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-blue-400 mb-3">队列 API</h3>
+                        <div className="space-y-2">
+                            {operations.map((op, i) => (
+                                <div key={i} className={`p-2 rounded ${op.color}`}>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="font-mono">{op.name}</span>
+                                        <span>{op.type}</span>
+                                    </div>
+                                    <div className="text-xs opacity-75">{op.block}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 命令队列可视化
+            const CommandQueueVisual = () => {
+                const commands = ['CMD_LED_ON', 'CMD_MOTOR_SET', 'CMD_SENSOR_READ'];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-3">命令队列模式</h3>
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-xs">
+                                <div className="bg-blue-500 px-2 py-1 rounded">CLI/网络</div>
+                                <div className="text-gray-400">→</div>
+                                <div className="flex-1 bg-gray-900 border border-amber-500 rounded px-2 py-1">
+                                    <div className="text-amber-400">命令队列</div>
+                                </div>
+                                <div className="text-gray-400">→</div>
+                                <div className="bg-green-500 px-2 py-1 rounded">执行任务</div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-1 text-xs">
+                                {commands.map((c, i) => (
+                                    <div key={i} className="bg-gray-700 p-1 rounded text-center">
+                                        {c}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // 选择指南可视化
+            const SelectionGuide = () => {
+                const options = [
+                    { name: '传数据', choice: '队列', color: 'bg-amber-500' },
+                    { name: '同步', choice: '信号量', color: 'bg-green-500' },
+                    { name: '最快', choice: '任务通知', color: 'bg-blue-500' },
+                    { name: '保护资源', choice: '互斥量', color: 'bg-purple-500' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-3">IPC 选择指南</h3>
+                        <div className="grid grid-cols-2 gap-2">
+                            {options.map((o, i) => (
+                                <div key={i} className={`${o.color} p-2 rounded text-center`}>
+                                    <div className="text-xs opacity-75">{o.name}</div>
+                                    <div className="text-sm font-bold">{o.choice}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    {/* 头部 */}
+                    <div className="max-w-7xl mx-auto mb-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-amber-400">
+                                1213 - FreeRTOS 队列与消息传递完整指南
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">
+                                    {isPlaying ? '暂停' : '播放'}
+                                </button>
+                                <button onClick={() => setShowCode(!showCode)} className="px-3 py-1 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                    {showCode ? '隐藏代码' : '显示代码'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div className="flex gap-1 mb-4">
+                            {STEPS.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentStep(i)}
+                                    className={`flex-1 h-2 rounded transition-all ${
+                                        i === currentStep ? 'bg-amber-500 scale-110' :
+                                        i < currentStep ? 'bg-amber-700' : 'bg-gray-600'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 主内容区 - 三列布局 */}
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* 左列：代码 */}
+                        {showCode && (
+                            <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                                <h2 className="text-sm font-bold text-amber-400 mb-2">
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap bg-gray-900 p-3 rounded">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        )}
+
+                        {/* 中列：可视化动画 */}
+                        <div className={`${showCode ? 'col-span-1' : 'col-span-2'} space-y-4`}>
+                            <QueueVisual />
+                            <div className="grid grid-cols-2 gap-4">
+                                {currentStep >= 2 ? <OperationsVisual /> : <CommandQueueVisual />}
+                                {currentStep >= 7 ? <SelectionGuide /> : <div className="bg-gray-800 rounded-lg p-4"><h3 className="text-sm font-bold text-gray-400 mb-2">等待下一步...</h3></div>}
+                            </div>
+                        </div>
+
+                        {/* 右列：说明 */}
+                        <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                            <h3 className="text-sm font-bold text-blue-400 mb-2">说明</h3>
+                            <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                                {STEPS[currentStep].description}
+                            </p>
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2">
+                                <p className="text-xs text-yellow-300">
+                                    <span className="font-bold">💡 重点:</span> {STEPS[currentStep].highlight}
+                                </p>
+                            </div>
+
+                            {/* 导航按钮 */}
+                            <div className="flex gap-2 mt-4">
+                                <button
+                                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                                    disabled={currentStep === 0}
+                                    className="flex-1 py-2 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 text-xs"
+                                >
+                                    ← 上一步
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+                                    disabled={currentStep === STEPS.length - 1}
+                                    className="flex-1 py-2 bg-amber-600 rounded hover:bg-amber-500 disabled:opacity-50 text-xs"
+                                >
+                                    下一步 →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部摘要 */}
+                    <div className="max-w-7xl mx-auto mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-amber-400 mb-2">FreeRTOS 队列核心要点</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-amber-400 font-bold">按值拷贝</span>
+                                <p className="text-gray-400 mt-1">安全传递数据</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-green-400 font-bold">阻塞读写</span>
+                                <p className="text-gray-400 mt-1">高效任务同步</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-blue-400 font-bold">中断安全</span>
+                                <p className="text-gray-400 mt-1">FromISR API</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-purple-400 font-bold">命令模式</span>
+                                <p className="text-gray-400 mt-1">解耦请求执行</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

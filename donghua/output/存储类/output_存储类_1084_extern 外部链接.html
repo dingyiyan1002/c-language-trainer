@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>extern 存储类说明符 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#1e3a8a;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#1e40af;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#dbeafe,#bfdbfe);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#60a5fa;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#2563eb;box-shadow:0 0 20px rgba(37,99,235,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#1e3a8a;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .extern-container{display:flex;flex-direction:column;gap:12px;margin:16px 0}
+    .extern-box{border-radius:12px;padding:16px;transition:all 0.4s ease;border:3px solid transparent}
+    .extern-box.definition{background:linear-gradient(135deg:#dbeafe,#bfdbfe);border-color:#2563eb}
+    .extern-box.active{transform:scale(1.02);box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+    .file-row{display:flex;align-items:center;margin-bottom:8px;gap:8px}
+    .file-label{width:120px;font-size:11px;color:#1e40af;font-weight:600;font-family:'Consolas',monospace}
+    .extern-box-inner{flex:1;background:white;border-radius:8px;padding:12px;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .extern-box-inner.active{border-color:#2563eb;background:linear-gradient(135deg:#dbeafe,#bfdbfe)}
+    .file-type{font-size:10px;color:#64748b}
+    .file-content{font-size:12px;font-weight:700;color:#1e40af;font-family:'Consolas',monospace}
+    .link-display{background:#1e293b;border-radius:12px;padding:16px;margin:16px 0}
+    .link-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#0f172a;border-radius:8px;margin-bottom:8px;transition:all 0.4s ease}
+    .link-row.pending{opacity:0.5}
+    .link-row.active{background:linear-gradient(135deg,#2563eb,#1d4ed8);border:2px solid#60a5fa}
+    .link-name{font-size:12px;color:#94a3b8;font-family:'Consolas',monospace}
+    .link-value{font-size:14px;font-weight:700;color:#93c5fd;font-family:'Consolas',monospace}
+    .comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+    .compare-card{background:white;border-radius:8px;padding:12px;text-align:center;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .compare-card.active{border-color:#2563eb;background:linear-gradient(135deg:#dbeafe,#bfdbfe)}
+    .compare-label{font-size:10px;color:#64748b;margin-bottom:4px}
+    .compare-code{font-size:11px;color:#1e40af;font-family:'Consolas',monospace}
+    .compare-desc{font-size:9px;color:#64748b;margin-top:4px}
+    .use-case-list{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+    .use-item{background:#dbeafe;border-radius:8px;padding:12px;border-left:4px solid#2563eb;transition:all 0.3s ease}
+    .use-item.active{border-left-color:#22c55e;background:linear-gradient(135deg:#dbeafe,#bfdbfe)}
+    .use-title{font-size:11px;color:#1e3a8a;font-weight:700;margin-bottom:4px}
+    .use-example{font-size:10px;color:#1e40af;font-family:'Consolas',monospace}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#93c5fd;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#93c5fd;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',indigo:'#2563eb'};
+    const LINE_MAP = {
+      1:{step:1,text:'// globals.h',color:'#2563eb'},
+      2:{step:2,text:'extern int global_counter;',color:'#2563eb'},
+      3:{step:3,text:'// main.c',color:'#1d4ed8'},
+      4:{step:4,text:'#include "globals.h"',color:'#3b82f6'},
+      5:{step:5,text:'int global_counter = 0; // 定义',color:'#60a5fa'},
+      6:{step:6,text:'// other.c 中可使用 extern int global_counter;',color:'#2563eb'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，extern 用于声明外部变量，告诉编译器该变量在其他文件中定义',
+      2:'在头文件中使用 extern 声明 global_counter，仅声明不分配内存',
+      3:'main.c 文件包含头文件，获得 extern 声明',
+      4:'extern 声明使得 main.c 可以访问外部变量',
+      5:'在全局作用域定义 global_counter，实际分配内存',
+      6:'other.c 中也可使用 extern 访问同一全局变量，多文件共享数据'
+    };
+    const files = [
+      {name:'globals.h',content:'extern int counter;',desc:'头文件声明'},
+      {name:'main.c',content:'#include "globals.h"',desc:'包含头文件'},
+      {name:'main.c',content:'int counter = 0;',desc:'实际定义'}
+    ];
+    const linkOps = [
+      {op:'编译单元 A',addr:'main.c',state:'extern 引用'},
+      {op:'编译单元 B',addr:'other.c',state:'extern 引用'},
+      {op:'链接器',addr:'globals.c',state:'符号解析'}
+    ];
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',extern:'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [activeFile,setActiveFile] = useState(-1);
+      const [linkIdx,setLinkIdx] = useState(-1);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 6; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setActiveFile(-1);
+          setLinkIdx(-1);
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setActiveFile(0);
+          setLinkIdx(0);
+        } else if(step === 3) {
+          setActiveFile(1);
+        } else if(step === 4) {
+          setLinkIdx(1);
+        } else if(step === 5) {
+          setActiveFile(2);
+          setLinkIdx(2);
+        } else if(step === 6) {
+          setTerminalLines(['global_counter = 0 (extern access)']);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setActiveFile(-1);
+        setLinkIdx(-1);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>extern 存储类说明符 - C 语言可视化</h1>
+            <p>extern | 外部链接 | 多文件共享</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.indigo,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                extern_example.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.extern} size={22} />
+                extern 可视化
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">extern</span>
+                  <span className="var-type">External Linkage</span>
+                </div>
+                <div className="extern-container">
+                  <div className={`extern-box definition ${step >= 2 ? 'active' : ''}`}>
+                    <div style={{fontSize:13,fontWeight:700,color:'#1e3a8a',marginBottom:12}}>多文件变量共享</div>
+                    {files.map((f, idx) => (
+                      <div key={f.name} className="file-row">
+                        <span className="file-label">{f.name}</span>
+                        <div className={`extern-box-inner ${step >= 2 + idx && activeFile === idx ? 'active' : ''}`}>
+                          <div className="file-type">{f.desc}</div>
+                          <div className="file-content">{f.content}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="link-display">
+                  <div style={{color:'#94a3b8',fontSize:12,marginBottom:12}}>链接过程</div>
+                  {linkOps.map((l, idx) => (
+                    <div key={idx} className={`link-row ${step >= 2 + idx && linkIdx >= idx ? 'active' : 'pending'}`}>
+                      <span className="link-name">{l.op}</span>
+                      <span className="link-value">{l.addr} - {l.state}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="comparison-grid">
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">extern</div>
+                    <div className="compare-code">声明不定义</div>
+                    <div className="compare-desc">不分配内存</div>
+                  </div>
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">定义</div>
+                    <div className="compare-code">分配内存</div>
+                    <div className="compare-desc">实际存储</div>
+                  </div>
+                  <div className={`compare-card ${step >= 3 ? 'active' : ''}`}>
+                    <div className="compare-label">优点</div>
+                    <div className="compare-code">多文件共享</div>
+                    <div className="compare-desc">全局状态</div>
+                  </div>
+                  <div className={`compare-card ${step >= 3 ? 'active' : ''}`}>
+                    <div className="compare-label">注意</div>
+                    <div className="compare-code">仅一次定义</div>
+                    <div className="compare-desc">多次声明</div>
+                  </div>
+                </div>
+                <div className="use-case-list">
+                  <div className={`use-item ${step >= 2 ? 'active' : ''}`}>
+                    <div className="use-title">全局变量共享</div>
+                    <div className="use-example">extern int global_counter; // 多文件访问</div>
+                  </div>
+                  <div className={`use-item ${step >= 3 ? 'active' : ''}`}>
+                    <div className="use-title">头文件声明</div>
+                    <div className="use-example">// config.h extern Config config; // 全局配置</div>
+                  </div>
+                  <div className={`use-item ${step >= 4 ? 'active' : ''}`}>
+                    <div className="use-title">extern C 链接</div>
+                    <div className="use-example">#ifdef __cplusplus extern "C" { #endif</div>
+                  </div>
+                  <div className={`use-item ${step >= 5 ? 'active' : ''}`}>
+                    <div className="use-title">跨文件函数声明</div>
+                    <div className="use-example">extern void helper_func(int); // 在其他文件定义</div>
+                  </div>
+                </div>
+              </div>
+              {step >= 6 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.indigo}}>extern 含义</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>声明外部变量</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>声明 vs 定义</strong>
+                <p style={{marginTop:8,color:'#78350f'>extern 仅声明</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>链接属性</strong>
+                <p style={{marginTop:8,color:'#78350f'>外部链接可见</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>应用场景</strong>
+                <p style={{marginTop:8,color:'#78350f'>全局变量、多文件、extern C</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

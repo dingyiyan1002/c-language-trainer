@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 USB 设备开发完整指南 - USB 协议与枚举过程可视化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // 8 个步骤 - 语音驱动自动播放
+        const STEPS = [
+            {
+                title: "USB 基础概念",
+                code: `// USB 协议基础
+// - 主从架构：主机 (Host) 控制总线
+// - 差分信号：D+ (PA12), D- (PA11)
+// - 速率模式:
+//   * 低速 (LS): 1.5Mbps (键盘/鼠标)
+//   * 全速 (FS): 12Mbps (STM32 支持)
+//   * 高速 (HS): 480Mbps (需要 PHY)
+
+// STM32 USB 外设特性
+// - USB 2.0 全速设备 (12Mbps)
+// - 8 个双向端点 (EP0-EP7)
+// - 512 字节包内存
+// - 支持控制/中断/批量/等时传输
+
+// 端点类型
+// EP0: 控制端点 (必需，双向)
+// EP1-EP7: 可配置 (输入/输出)`,
+                visualization: "usb-basic",
+                explanation: "USB 是主从架构的串行总线协议。STM32 内置 USB 全速设备控制器，支持 12Mbps 速率。USB 通信通过端点进行，EP0 是必需的控制端点，用于设备枚举和配置。"
+            },
+            {
+                title: "USB 硬件配置",
+                code: `// USB GPIO 和时钟配置
+void USB_Hardware_Init(void) {
+    // 1. 使能时钟
+    RCC->APB1ENR |= RCC_APB1ENR_USBEN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    // 2. USB 时钟配置 (必须 48MHz)
+    // PLL 配置：8MHz HSE × 6 / 1 = 48MHz
+    RCC->CFGR |= RCC_CFGR_PLLMULL6;
+    RCC->CFGR &= ~RCC_CFGR_USBPRE;  // PLLCLK/1
+
+    // 3. USB GPIO 配置
+    // PA11: USB_DM (输入)
+    // PA12: USB_DP (输入)
+    GPIOA->CRL &= ~0xFF000000;  // 清除 PA11/12
+    // 浮空输入 (设备模式)
+
+    // 4. USB 唤醒中断配置
+    EXTI->IMR |= EXTI_IMR_MR18;  // USB 唤醒
+    EXTI->RTSR |= EXTI_RTSR_TR18; // 上升沿
+}`,
+                visualization: "usb-hardware",
+                explanation: "USB 需要精确的 48MHz 时钟。通过 PLL 倍频实现。PA11(USB_DM) 和 PA12(USB_DP) 配置为浮空输入。USB 唤醒通过 EXTI 线 18 处理。"
+            },
+            {
+                title: "USB 描述符定义",
+                code: `// USB 描述符 (设备/配置/字符串)
+
+// 设备描述符 (18 字节)
+const uint8_t USB_DeviceDesc[] = {
+    18,                    // bLength
+    0x01,                  // bDescriptorType (DEVICE)
+    0x00, 0x02,            // bcdUSB (2.00)
+    0x00,                  // bDeviceClass
+    0x00,                  // bDeviceSubClass
+    0x00,                  // bDeviceProtocol
+    0x08,                  // bMaxPacketSize0 (8 字节)
+    0x83, 0x05,            // idVendor (0x0583)
+    0x10, 0x20,            // idProduct (0x2010)
+    0x00, 0x01,            // bcdDevice
+    0x01,                  // iManufacturer
+    0x02,                  // iProduct
+    0x00,                  // iSerialNumber
+    0x01                   // bNumConfigurations
+};
+
+// 配置描述符 (9+9+7=25 字节)
+const uint8_t USB_ConfigDesc[] = {
+    // 配置描述符 (9 字节)
+    0x09, 0x02, 0x19, 0x00, 0x01, 0x01, 0x00, 0x80, 0x32,
+    // 接口描述符 (9 字节)
+    0x09, 0x04, 0x00, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00,
+    // HID 描述符 (9 字节)
+    0x09, 0x21, 0x11, 0x01, 0x00, 0x01, 0x22, 0x20, 0x00,
+    // 端点描述符 (7 字节 ×2)
+    0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x0A,  // EP1 IN
+    0x07, 0x05, 0x01, 0x03, 0x08, 0x00, 0x0A   // EP1 OUT
+};`,
+                visualization: "usb-descriptors",
+                explanation: "USB 描述符是主机了解设备的关键。设备描述符包含 VendorID/ProductID。配置描述符定义接口和端点。字符串描述符提供人类可读的信息。"
+            },
+            {
+                title: "USB 枚举过程",
+                code: `// USB 枚举流程 (主机侧操作)
+
+// 1. 设备连接检测 (D+ 上拉)
+// 2. 主机发送复位 (10ms)
+// 3. 获取设备描述符 (地址 0)
+//    GET_DESCRIPTOR (Device, 64 字节)
+// 4. 复位设备
+// 5. 设置地址
+//    SET_ADDRESS (新地址，如 3)
+// 6. 获取完整设备描述符
+// 7. 获取配置描述符
+// 8. 获取字符串描述符
+// 9. 设置配置
+//    SET_CONFIGURATION (1)
+// 10. 枚举完成，设备就绪
+
+// 设备响应所有标准请求:
+// GET_DESCRIPTOR, SET_ADDRESS,
+// SET_CONFIGURATION, GET_STATUS, etc.`,
+                visualization: "usb-enumeration",
+                explanation: "枚举是主机识别设备的过程。主机先读取 8 字节的设备描述符获取最大包大小，然后完整读取 18 字节。设置地址后，设备使用新地址通信。最后设置配置，设备进入工作状态。"
+            },
+            {
+                title: "USB 端点配置",
+                code: `// USB 端点配置与 FIFO 分配
+void USB_EP_Config(void) {
+    // EP0: 控制端点 (必需)
+    // TX: ADDR0_TX = 0x000 (64 字节)
+    // RX: ADDR0_RX = 0x040 (64 字节)
+
+    // EP1: 中断端点 (HID 报告)
+    _SetEPTxAddr(ENDP1, 0x080);  // TX 地址
+    _SetEPTxCount(ENDP1, 8);     // 8 字节
+    _SetEPTxStat(ENDP1, EP_NAK); // NAK (无数据)
+
+    _SetEPRxAddr(ENDP1, 0x0C0);  // RX 地址
+    _SetEPRxCount(ENDP1, 8);
+    _SetEPRxStat(ENDP1, EP_RX_VALID); // 可接收
+
+    // 配置端点类型
+    _SetEPType(ENDP1, EP_INTERRUPT);
+
+    // 使能端点
+    _SetEPKind(ENDP1, EP_KIND);
+}`,
+                visualization: "usb-endpoints",
+                explanation: "STM32 有 512 字节的包内存。EP0 固定用于控制传输。其他端点可配置为中断、批量或等时传输。每个端点需要分配 TX 和 RX 缓冲区地址。"
+            },
+            {
+                title: "USB 中断处理",
+                code: `// USB 中断服务程序
+void USB_LP_CAN1_RX0_IRQHandler(void) {
+    uint16_t istr = _GetISTR();
+
+    // 复位中断
+    if (istr & ISTR_RESET) {
+        USB_Enumeration_Init();
+        _SetISTR(~ISTR_RESET);
+    }
+
+    // 挂起中断
+    if (istr & ISTR_SUSP) {
+        USB_Enter_LowPower();
+        _SetISTR(~ISTR_SUSP);
+    }
+
+    // 唤醒中断
+    if (istr & ISTR_WKUP) {
+        USB_Leave_LowPower();
+        _SetISTR(~ISTR_WKUP);
+    }
+
+    // 端点中断
+    if (istr & ISTR_CTR) {
+        USB_ISTR_CTR();  // 处理端点传输
+    }
+}
+
+// 控制传输处理
+void USB_ISTR_CTR(void) {
+    uint8_t ep = _GetEPID();
+    if (ep == 0) USB_Control_Transfer();
+}`,
+                visualization: "usb-interrupts",
+                explanation: "USB 中断处理多种事件：复位(USB 插入/复位)、挂起 (3ms 无活动)、唤醒 (总线活动)、端点传输完成。控制传输通过 EP0 处理标准/厂商请求。"
+            },
+            {
+                title: "USB HID 设备",
+                code: `// USB HID 设备实现 (键盘/鼠标)
+
+// HID 报告描述符 (键盘)
+const uint8_t HID_ReportDesc[] = {
+    0x05, 0x01,        // Usage Page (Desktop)
+    0x09, 0x06,        // Usage (Keyboard)
+    0xA1, 0x01,        // Collection (Application)
+    0x05, 0x07,        // Usage Page (Key Codes)
+    0x19, 0xE0,        // Min (224)
+    0x29, 0xE7,        // Max (231)
+    0x15, 0x00,        // Min (0)
+    0x25, 0x01,        // Max (1)
+    0x75, 0x01,        // Report Size (1)
+    0x95, 0x08,        // Report Count (8)
+    0x81, 0x02,        // Input (Data,Var,Abs)
+    0x95, 0x01,        // Report Count (1)
+    0x75, 0x08,        // Report Size (8)
+    0x81, 0x01,        // Input (Const)
+    0x95, 0x06,        // Report Count (6)
+    0x75, 0x08,        // Report Size (8)
+    0x15, 0x00,
+    0x25, 0x65,        // Max (101)
+    0x05, 0x07,
+    0x19, 0x00,
+    0x29, 0x65,
+    0x81, 0x00,        // Input (Data,Ary,Abs)
+    0xC0               // End Collection
+};
+
+// 发送按键报告
+void HID_SendKeys(uint8_t modifier, uint8_t *keys) {
+    USB_EP1_Send(modifier, keys, 8);
+}`,
+                visualization: "usb-hid",
+                explanation: "HID(人机接口设备) 是最常见的 USB 设备类型。报告描述符定义数据格式。键盘报告包含 8 字节：1 字节修饰键 +1 字节保留 +6 字节键值。"
+            },
+            {
+                title: "USB CDC 虚拟串口",
+                code: `// USB CDC (虚拟 COM 端口) 实现
+
+// CDC 需要 2 个接口:
+// 接口 0: 通信类 (管理)
+// 接口 1: 数据类 (发送/接收)
+
+// CDC 发送数据
+void CDC_SendData(uint8_t *data, uint16_t len) {
+    // 检查端点空闲
+    if (GetEPTxStat(ENDP2) != EP_TX_VALID) {
+        // 配置 TX 端点
+        SetEPTxCount(ENDP2, len);
+        UserToPMABufferCopy(data, ENDP2_TXADDR, len);
+        SetEPTxStat(ENDP2, EP_TX_VALID);
+    }
+}
+
+// CDC 接收数据 (中断中处理)
+void CDC_ReceiveData(void) {
+    uint16_t len = GetEPRxCount(ENDP3);
+    uint8_t buf[64];
+    PMAToUserBufferCopy(buf, ENDP3_RXADDR, len);
+    // 处理接收的数据
+    ProcessData(buf, len);
+    // 重新使能接收
+    SetEPRxStat(ENDP3, EP_RX_VALID);
+}
+
+// 串口参数配置回调
+void CDC_LineCodingChanged(void) {
+    // 波特率、停止位、校验位变化
+    uint32_t baudrate = *(uint32_t*)&LineCoding[0];
+}`,
+                visualization: "usb-cdc",
+                explanation: "CDC 类将 USB 设备模拟为串口。需要两个接口：通信接口(管理) 和数据接口(传输)。支持配置波特率、停止位、校验位。广泛用于调试输出和数据传输。"
+            }
+        ];
+
+        // 颜色映射 - 蓝色调
+        const COLOR_MAP = {
+            primary: '#3b82f6',    // blue-500
+            secondary: '#2563eb',  // blue-600
+            accent: '#06b6d4',     // cyan-500
+            success: '#10b981',    // emerald-500
+            warning: '#f59e0b',    // amber-500
+            danger: '#ef4444',     // red-500
+            info: '#8b5cf6',       // violet-500
+            dp: '#10b981',         // D+ 绿色
+            dm: '#ef4444',         // D- 红色
+            gradients: [
+                'from-blue-500 to-cyan-500',
+                'from-violet-500 to-purple-500',
+                'from-emerald-500 to-teal-500'
+            ]
+        };
+
+        // USB 基础可视化
+        const UsbBasic = ({ step }) => {
+            const [dpState, setDpState] = useState(false);
+            const [dmState, setDmState] = useState(true);
+            const [speed, setSpeed] = useState('FS');
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    const data = Math.random() > 0.5;
+                    setDpState(data);
+                    setDmState(!data);
+                }, 500);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        USB 差分信号
+                    </div>
+                    <div className="flex justify-center space-x-4">
+                        <div className={`w-16 h-24 rounded-lg flex flex-col items-center justify-center transition-all ${
+                            dpState ? 'bg-green-500' : 'bg-gray-300'
+                        }`}>
+                            <div className="text-white font-bold">D+</div>
+                            <div className="text-white text-xs">{dpState ? '3.3V' : '0V'}</div>
+                        </div>
+                        <div className={`w-16 h-24 rounded-lg flex flex-col items-center justify-center transition-all ${
+                            dmState ? 'bg-red-500' : 'bg-gray-300'
+                        }`}>
+                            <div className="text-white font-bold">D-</div>
+                            <div className="text-white text-xs">{dmState ? '3.3V' : '0V'}</div>
+                        </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-center text-sm mb-2">速率模式:</div>
+                        <div className="flex justify-center space-x-2">
+                            {['LS', 'FS', 'HS'].map((s) => (
+                                <button
+                                    key={s}
+                                    onClick={() => setSpeed(s)}
+                                    className={`px-3 py-1 rounded text-xs ${
+                                        speed === s ? 'bg-blue-500 text-white' : 'bg-gray-200'
+                                    }`}
+                                >
+                                    {s}: {s === 'LS' ? '1.5M' : s === 'FS' ? '12M' : '480M'}bps
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-blue-50 p-2 rounded">
+                            <div>📌 8 个端点</div>
+                            <div>EP0-EP7</div>
+                        </div>
+                        <div className="bg-cyan-50 p-2 rounded">
+                            <div>💾 512 字节</div>
+                            <div>包内存</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // USB 硬件可视化
+        const UsbHardware = ({ step }) => {
+            const [clockState, setClockState] = useState('configuring');
+            const [usbConnected, setUsbConnected] = useState(false);
+
+            useEffect(() => {
+                setClockState('configuring');
+                setTimeout(() => setClockState('locked'), 1500);
+                setTimeout(() => setUsbConnected(true), 2500);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className={`p-4 rounded-lg text-center transition-all ${
+                        clockState === 'locked' ? 'bg-green-100' : 'bg-yellow-100'
+                    }`}>
+                        <div className="text-2xl mb-2">⏱️</div>
+                        <div className="font-semibold">PLL 时钟</div>
+                        <div className="text-sm">
+                            {clockState === 'locked' ? '48MHz ✅' : '配置中...'}
+                        </div>
+                    </div>
+                    <div className={`p-4 rounded-lg text-center transition-all ${
+                        usbConnected ? 'bg-green-100' : 'bg-gray-100'
+                    }`}>
+                        <div className="text-2xl mb-2">
+                            {usbConnected ? '🟢' : '⚪'}
+                        </div>
+                        <div className="font-semibold">USB 连接</div>
+                        <div className="text-sm">
+                            {usbConnected ? '已连接' : '等待连接'}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-gray-50 p-2 rounded">
+                            <div>PA11: DM</div>
+                            <div className="text-gray-500">浮空输入</div>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded">
+                            <div>PA12: DP</div>
+                            <div className="text-gray-500">浮空输入</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // USB 描述符可视化
+        const UsbDescriptors = ({ step }) => {
+            const [selectedDesc, setSelectedDesc] = useState('device');
+            const descriptors = {
+                device: { name: '设备描述符', length: 18, icon: '🏷️' },
+                config: { name: '配置描述符', length: 25, icon: '⚙️' },
+                string: { name: '字符串描述符', length: '可变', icon: '📝' },
+                report: { name: 'HID 报告描述符', length: 33, icon: '🎮' }
+            };
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-2">
+                        {Object.entries(descriptors).map(([key, desc]) => (
+                            <button
+                                key={key}
+                                onClick={() => setSelectedDesc(key)}
+                                className={`p-2 rounded text-xs transition-all ${
+                                    selectedDesc === key
+                                        ? 'bg-blue-500 text-white'
+                                        : 'bg-gray-100'
+                                }`}
+                            >
+                                <div className="text-lg">{desc.icon}</div>
+                                <div>{desc.name}</div>
+                                <div className="text-xs opacity-80">{desc.length} 字节</div>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs">
+                        <div className="text-sm font-semibold mb-2">
+                            {descriptors[selectedDesc].name}
+                        </div>
+                        <div className="text-gray-600">
+                            {selectedDesc === 'device' && (
+                                <div>
+                                    <div>18: bLength</div>
+                                    <div>0x01: DEVICE</div>
+                                    <div>0x0200: USB 2.0</div>
+                                    <div>0x0583: Vendor ID</div>
+                                    <div>0x2010: Product ID</div>
+                                </div>
+                            )}
+                            {selectedDesc === 'config' && (
+                                <div>
+                                    <div>9+9+7: 配置 + 接口 + 端点</div>
+                                    <div>1 接口</div>
+                                    <div>2 端点 (INT IN/OUT)</div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // USB 枚举可视化
+        const UsbEnumeration = ({ step }) => {
+            const [enumStep, setEnumStep] = useState(0);
+            const steps = [
+                { text: '设备连接', icon: '🔌' },
+                { text: '主机复位', icon: '🔄' },
+                { text: '获取设备描述符', icon: '📋' },
+                { text: '设置地址', icon: '🏠' },
+                { text: '设置配置', icon: '⚙️' },
+                { text: '枚举完成', icon: '✅' }
+            ];
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setEnumStep(prev => (prev + 1) % steps.length);
+                }, 2000);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        USB 枚举过程
+                    </div>
+                    <div className="space-y-2">
+                        {steps.map((s, idx) => (
+                            <div
+                                key={idx}
+                                className={`p-2 rounded-lg flex items-center transition-all ${
+                                    idx === enumStep ? 'bg-blue-100 border-2 border-blue-500' :
+                                    idx < enumStep ? 'bg-green-50' : 'bg-gray-100'
+                                }`}
+                            >
+                                <span className="text-xl mr-3">{s.icon}</span>
+                                <span className={`text-sm ${
+                                    idx === enumStep ? 'font-bold text-blue-600' :
+                                    idx < enumStep ? 'text-green-600' : 'text-gray-400'
+                                }`}>
+                                    {idx + 1}. {s.text}
+                                </span>
+                                {idx < enumStep && <span className="ml-auto text-green-600">✅</span>}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // USB 端点可视化
+        const UsbEndpoints = ({ step }) => {
+            const [endpoints, setEndpoints] = useState([
+                { id: 0, type: 'CTRL', dir: '双向', active: true },
+                { id: 1, type: 'INT', dir: 'IN', active: false },
+                { id: 2, type: 'INT', dir: 'OUT', active: false },
+                { id: 3, type: 'BULK', dir: 'IN', active: false }
+            ]);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setEndpoints(prev => prev.map(ep => ({
+                        ...ep,
+                        active: ep.id !== 0 && Math.random() > 0.5
+                    })));
+                }, 1000);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        端点状态
+                    </div>
+                    {endpoints.map((ep) => (
+                        <div
+                            key={ep.id}
+                            className={`p-3 rounded-lg transition-all ${
+                                ep.active ? 'bg-green-100' : 'bg-gray-100'
+                            }`}
+                        >
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <span className="font-bold">EP{ep.id}</span>
+                                    <span className="text-xs ml-2 bg-gray-200 px-2 py-1 rounded">
+                                        {ep.type}
+                                    </span>
+                                </div>
+                                <div className="flex items-center">
+                                    <span className="text-xs text-gray-500 mr-2">{ep.dir}</span>
+                                    <div className={`w-3 h-3 rounded-full ${
+                                        ep.active ? 'bg-green-500 animate-pulse' : 'bg-gray-300'
+                                    }`} />
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    <div className="bg-blue-50 rounded-lg p-3 text-xs">
+                        <div>包内存：512 字节</div>
+                        <div>EP0: 64 字节 TX + 64 字节 RX</div>
+                        <div>剩余：384 字节分配给其他端点</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // USB 中断可视化
+        const UsbInterrupts = ({ step }) => {
+            const [interrupts, setInterrupts] = useState({
+                reset: false,
+                suspend: false,
+                wakeup: false,
+                ctr: false
+            });
+
+            useEffect(() => {
+                const trigger = (type) => {
+                    setInterrupts(prev => ({ ...prev, [type]: true }));
+                    setTimeout(() => {
+                        setInterrupts(prev => ({ ...prev, [type]: false }));
+                    }, 800);
+                };
+                const intervals = [
+                    setInterval(() => trigger('ctr'), 2000),
+                    setInterval(() => trigger('suspend'), 8000),
+                    setInterval(() => trigger('wakeup'), 10000)
+                ];
+                return () => intervals.forEach(clearInterval);
+            }, []);
+
+            return (
+                <div className="space-y-3">
+                    {Object.entries(interrupts).map(([type, active]) => (
+                        <div
+                            key={type}
+                            className={`p-3 rounded-lg flex items-center justify-between transition-all ${
+                                active ? 'bg-yellow-100 border-2 border-yellow-500' : 'bg-gray-100'
+                            }`}
+                        >
+                            <div>
+                                <div className="font-semibold text-sm capitalize">
+                                    {type === 'ctr' ? '端点传输完成 (CTR)' :
+                                     type === 'suspend' ? '挂起 (SUSPEND)' :
+                                     type === 'wakeup' ? '唤醒 (WAKEUP)' : '复位 (RESET)'}
+                                </div>
+                            </div>
+                            {active && (
+                                <div className="text-yellow-600 font-bold animate-pulse">
+                                    触发!
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        // USB HID 可视化
+        const UsbHid = ({ step }) => {
+            const [keys, setKeys] = useState([]);
+            const [modifier, setModifier] = useState(0);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    const newKeys = [];
+                    if (Math.random() > 0.7) newKeys.push(0x04); // 'a'
+                    if (Math.random() > 0.8) newKeys.push(0x16); // 'g'
+                    setKeys(newKeys);
+                    setModifier(Math.random() > 0.5 ? 0x02 : 0); // Shift
+                }, 1500);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        HID 键盘报告
+                    </div>
+                    <div className="grid grid-cols-8 gap-1">
+                        {Array(8).fill(0).map((_, idx) => (
+                            <div
+                                key={idx}
+                                className={`h-12 rounded flex items-center justify-center text-xs font-mono ${
+                                    idx === 0 ? 'bg-purple-100' :
+                                    keys.includes(idx - 1) ? 'bg-green-100' : 'bg-gray-100'
+                                }`}
+                            >
+                                {idx === 0 ? 'MOD' : idx === 1 ? '0' : `K${idx-1}`}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs font-mono">
+                            <div>修饰键：0x{modifier.toString(16).padStart(2, '0')}</div>
+                            <div>按键：{keys.length > 0 ? keys.map(k => k.toString(16)).join(', ') : '无'}</div>
+                        </div>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        <div>• 字节 0: 修饰键 (Ctrl/Shift/Alt)</div>
+                        <div>• 字节 1: 保留</div>
+                        <div>• 字节 2-7: 6 个按键码</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // USB CDC 可视化
+        const UsbCdc = ({ step }) => {
+            const [txData, setTxData] = useState([]);
+            const [rxData, setRxData] = useState([]);
+            const [baudrate, setBaudrate] = useState(115200);
+
+            useEffect(() => {
+                const txInterval = setInterval(() => {
+                    const char = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+                    setTxData(prev => [...prev.slice(-19), { char, time: Date.now() }]);
+                }, 500);
+
+                const rxInterval = setInterval(() => {
+                    if (Math.random() > 0.5) {
+                        const char = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+                        setRxData(prev => [...prev.slice(-19), { char, time: Date.now() }]);
+                    }
+                }, 700);
+
+                return () => {
+                    clearInterval(txInterval);
+                    clearInterval(rxInterval);
+                };
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        CDC 虚拟串口
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs mb-2">串口配置:</div>
+                        <div className="font-mono text-xs">
+                            <div>波特率：<select
+                                value={baudrate}
+                                onChange={(e) => setBaudrate(Number(e.target.value))}
+                                className="border rounded px-2 py-1"
+                            >
+                                <option value="9600">9600</option>
+                                <option value="19200">19200</option>
+                                <option value="115200">115200</option>
+                            </select></div>
+                            <div>数据位：8</div>
+                            <div>停止位：1</div>
+                            <div>校验位：无</div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-green-50 rounded-lg p-3">
+                            <div className="text-xs font-semibold mb-2">📤 TX</div>
+                            <div className="font-mono text-xs h-20 overflow-auto">
+                                {txData.map((d, i) => (
+                                    <div key={i}>{d.char}</div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="bg-blue-50 rounded-lg p-3">
+                            <div className="text-xs font-semibold mb-2">📥 RX</div>
+                            <div className="font-mono text-xs h-20 overflow-auto">
+                                {rxData.map((d, i) => (
+                                    <div key={i}>{d.char}</div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 主 App 组件
+        const App = () => {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                const voices = window.speechSynthesis.getVoices();
+                const xiaoXiao = voices.find(v => v.name.includes('XiaoXiao') || v.name.includes('zh-CN'));
+                if (xiaoXiao) utterance.voice = xiaoXiao;
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                window.speechSynthesis.speak(utterance);
+            }, [isMuted]);
+
+            useEffect(() => {
+                if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                speak(STEPS[currentStep].explanation);
+                return () => { if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current); };
+            }, [currentStep, speak]);
+
+            useEffect(() => {
+                const handleKeydown = (e) => {
+                    if (e.code === 'Space') { e.preventDefault(); setIsPlaying(prev => !prev); }
+                    else if (e.code === 'ArrowRight' && currentStep < STEPS.length - 1) setCurrentStep(prev => prev + 1);
+                    else if (e.code === 'ArrowLeft' && currentStep > 0) setCurrentStep(prev => prev - 1);
+                };
+                window.addEventListener('keydown', handleKeydown);
+                return () => window.removeEventListener('keydown', handleKeydown);
+            }, [currentStep]);
+
+            const renderVisualization = () => {
+                switch (STEPS[currentStep].visualization) {
+                    case 'usb-basic': return <UsbBasic step={STEPS[currentStep]} />;
+                    case 'usb-hardware': return <UsbHardware step={STEPS[currentStep]} />;
+                    case 'usb-descriptors': return <UsbDescriptors step={STEPS[currentStep]} />;
+                    case 'usb-enumeration': return <UsbEnumeration step={STEPS[currentStep]} />;
+                    case 'usb-endpoints': return <UsbEndpoints step={STEPS[currentStep]} />;
+                    case 'usb-interrupts': return <UsbInterrupts step={STEPS[currentStep]} />;
+                    case 'usb-hid': return <UsbHid step={STEPS[currentStep]} />;
+                    case 'usb-cdc': return <UsbCdc step={STEPS[currentStep]} />;
+                    default: return <div>可视化组件</div>;
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <h1 className="text-3xl font-bold text-center mb-6 bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                            STM32 USB 设备开发完整指南
+                        </h1>
+                        <div className="flex justify-center mb-6">
+                            <div className="flex space-x-2">
+                                {STEPS.map((_, idx) => (
+                                    <button key={idx} onClick={() => setCurrentStep(idx)}
+                                        className={`w-3 h-3 rounded-full transition-all ${
+                                            idx === currentStep ? 'bg-blue-600 scale-125' :
+                                            idx < currentStep ? 'bg-blue-400' : 'bg-gray-300'
+                                        }`} />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-blue-600 flex items-center">
+                                    <span className="mr-2">💻</span>{STEPS[currentStep].title}
+                                </h2>
+                                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-cyan-600 flex items-center">
+                                    <span className="mr-2">🎨</span>可视化演示
+                                </h2>
+                                <div className="h-96 overflow-auto">{renderVisualization()}</div>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-purple-600 flex items-center">
+                                    <span className="mr-2">📖</span>说明
+                                </h2>
+                                <p className="text-gray-700 leading-relaxed">{STEPS[currentStep].explanation}</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-center mt-6 space-x-4">
+                            <button onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0 ? 'bg-gray-200 text-gray-400' : 'bg-blue-600 text-white hover:bg-blue-700'
+                                }`}>⏮ 上一步</button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isPlaying ? 'bg-yellow-500 text-white' : 'bg-green-500 text-white'
+                                }`}>{isPlaying ? '⏸ 暂停' : '▶ 播放'}</button>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isMuted ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'
+                                }`}>{isMuted ? '🔇 取消静音' : '🔊 静音'}</button>
+                            <button onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1 ? 'bg-gray-200 text-gray-400' : 'bg-blue-600 text-white hover:bg-blue-700'
+                                }`}>下一步 ⏭</button>
+                        </div>
+                        <div className="text-center mt-4 text-sm text-gray-500">快捷键：空格 播放/暂停 | ← → 切换步骤</div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1150 - Bootloader 基础 | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes move { 0% { transform: translateY(0); } 100% { transform: translateY(30px); } }
+    @keyframes jump { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .animate-move { animation: move 2s ease-in-out infinite alternate; }
+    .animate-jump { animation: jump 1s ease-in-out infinite; }
+    .highlight { box-shadow: 0 0 20px rgba(139, 92, 246, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(139, 92, 246, 0.2); border-left: 3px solid #8b5cf6; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#8b5cf6', primaryLight: '#a78bfa',
+      secondary: '#7c3aed', secondaryLight: '#9333ea',
+      accent: '#6d28d9', accentLight: '#8b5cf6',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== Bootloader 基础 =====
+// 系统启动时首先执行的程序
+
+// 1. 内存布局
+// Flash: [Bootloader: 0x08000000-0x08007FFF] [App: 0x08008000-...]
+//          32KB 保留给 Bootloader          应用程序区
+
+#define BOOTLOADER_SIZE     0x8000        // 32KB
+#define APP_START_ADDRESS   0x08008000    // 应用起始地址
+
+// 2. 应用向量表结构
+typedef struct {
+  uint32_t *initial_sp;      // 栈顶指针
+  void (*reset_handler)(void); // 复位中断向量
+  void (*nmi_handler)(void);   // NMI
+  void (*hardfault_handler)(void); // HardFault
+  // ... 其他中断向量
+} App_VectorTable;
+
+// 3. 跳转到应用
+void boot_app(uint32_t app_addr) {
+  uint32_t app_sp = *(uint32_t*)app_addr;
+  uint32_t app_reset = *(uint32_t*)(app_addr + 4);
+
+  __disable_irq();              // 关中断
+  SysTick->CTRL = 0;            // 关闭 SysTick
+  __set_MSP(app_sp);            // 设置主栈指针
+  __DSB(); __ISB();             // 屏障指令
+
+  ((void(*)(void))app_reset)(); // 跳转到应用复位向量
+}
+
+// 4. 检查是否需要进入 Bootloader
+void check_bootloader_entry(void) {
+  // 方法 1: 检查 GPIO 引脚 (按键)
+  if (HAL_GPIO_ReadPin(BUTTON_PORT, BUTTON_PIN) == GPIO_PIN_RESET) {
+    stay_in_bootloader();
+  }
+
+  // 方法 2: 检查魔术字 (Magic Word)
+  uint32_t magic = *(uint32_t*)0x20000000;
+  if (magic == 0xDEADBEEF) {
+    *(uint32_t*)0x20000000 = 0;  // 清除魔术字
+    stay_in_bootloader();
+  }
+
+  // 方法 3: 检查应用有效性
+  if (!is_app_valid()) {
+    stay_in_bootloader();
+  }
+}
+
+// 5. 应用有效性验证
+int is_app_valid(void) {
+  uint32_t app_sp = *(uint32_t*)APP_START_ADDRESS;
+  uint32_t app_reset = *(uint32_t*)(APP_START_ADDRESS + 4);
+
+  // 检查栈顶地址是否合理
+  if (app_sp < 0x20000000 || app_sp > 0x20010000) {
+    return 0;
+  }
+
+  // 检查复位向量是否在 Flash 范围内
+  if (app_reset < APP_START_ADDRESS) {
+    return 0;
+  }
+
+  return 1;
+}
+
+// 6. CRC 校验验证
+uint32_t calculate_crc32(const uint8_t *data, uint32_t size) {
+  uint32_t crc = 0xFFFFFFFF;
+  for (uint32_t i = 0; i < size; i++) {
+    crc ^= data[i];
+    for (int j = 0; j < 8; j++) {
+      crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
+    }
+  }
+  return ~crc;
+}`;
+
+    const STEPS = [
+      {
+        title: "Bootloader 基本概念",
+        codeHighlight: [3, 4, 5],
+        explanation: "Bootloader 是系统上电后首先执行的程序，负责初始化硬件、检查更新条件，并决定是否跳转到用户应用。"
+      },
+      {
+        title: "Flash 内存布局",
+        codeHighlight: [7, 8, 9, 10],
+        explanation: "典型的内存布局：Bootloader 占用低地址区（如 32KB），应用从 0x08008000 开始。这种布局确保 Bootloader 总是首先执行。",
+        visualization: "layout"
+      },
+      {
+        title: "向量表结构",
+        codeHighlight: [13, 14, 15, 16, 17, 18, 19],
+        explanation: "应用向量表包含初始栈指针和复位中断向量。跳转前需要读取这些值来正确初始化应用。",
+        visualization: "vector"
+      },
+      {
+        title: "跳转到应用的流程",
+        codeHighlight: [22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+        explanation: "关中断 → 关闭 SysTick → 设置 MSP → 执行屏障指令 → 跳转到复位向量。顺序不能错！",
+        visualization: "jump"
+      },
+      {
+        title: "Bootloader 入口条件检测",
+        codeHighlight: [34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45],
+        explanation: "三种常见进入方式：1) GPIO 按键 2) 魔术字 (Magic Word) 3) 应用无效时自动进入。",
+        visualization: "check"
+      },
+      {
+        title: "应用有效性验证",
+        codeHighlight: [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60],
+        explanation: "检查向量表的合理性：栈指针应在 RAM 范围内，复位向量应在 Flash 应用区内。",
+        visualization: "validate"
+      },
+      {
+        title: "CRC 校验保护",
+        codeHighlight: [63, 64, 65, 66, 67, 68, 69, 70, 71],
+        explanation: "使用 CRC32 校验固件完整性。在烧录时计算 CRC 并存储在固件末尾，Bootloader 启动时重新计算并比对。",
+        visualization: "crc"
+      },
+      {
+        title: "实际应用场景",
+        codeHighlight: [1, 2],
+        explanation: "Bootloader 用于：1) OTA 空中升级 2) USB/UART 固件更新 3) 双 Bank 切换 4) 固件加密验证。",
+        visualization: "summary"
+      }
+    ];
+
+    function MemoryLayout({ step }) {
+      return (
+        <div className="space-y-4">
+          <div className="relative h-64 bg-gray-800 rounded-lg overflow-hidden border-2 border-purple-500">
+            {/* Flash 区域 */}
+            <div className="absolute inset-0 flex flex-col">
+              <div className={`h-1/3 bg-gradient-to-b from-purple-600 to-purple-700 transition-all duration-500 ${step >= 1 ? 'opacity-100' : 'opacity-30'}`}>
+                <div className="p-2 text-center font-bold">Bootloader</div>
+                <div className="text-center text-xs">0x08000000 - 0x08007FFF</div>
+                <div className="text-center text-xs">32KB</div>
+                {step >= 1 && (
+                  <div className="flex justify-center mt-2">
+                    <div className="w-8 h-8 bg-white rounded-full animate-pulse flex items-center justify-center text-purple-600 text-xs font-bold">BL</div>
+                  </div>
+                )}
+              </div>
+              <div className={`h-2/3 bg-gradient-to-b from-blue-600 to-blue-700 transition-all duration-500 ${step >= 1 ? 'opacity-100' : 'opacity-30'}`}>
+                <div className="p-2 text-center font-bold">Application</div>
+                <div className="text-center text-xs">0x08008000 - 0x080FFFFF</div>
+                <div className="text-center text-xs">480KB</div>
+                {step >= 1 && (
+                  <div className="flex justify-center mt-4">
+                    <div className="w-12 h-12 bg-white rounded-full animate-pulse flex items-center justify-center text-blue-600 text-xs font-bold">APP</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-purple-900/30 p-3 rounded border border-purple-500">
+              <div className="text-purple-400 text-sm font-bold">Bootloader 区</div>
+              <div className="text-xs text-gray-400 mt-1">复位向量 → 初始化 → 检查 → 跳转</div>
+            </div>
+            <div className="bg-blue-900/30 p-3 rounded border border-blue-500">
+              <div className="text-blue-400 text-sm font-bold">应用区</div>
+              <div className="text-xs text-gray-400 mt-1">向量表 → 代码 → 数据</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function VectorTable({ step }) {
+      const vectors = [
+        { name: "Initial SP", value: "0x20010000", highlight: step >= 2 },
+        { name: "Reset Handler", value: "0x08008104", highlight: step >= 2 },
+        { name: "NMI Handler", value: "0x08008108", highlight: step >= 2 },
+        { name: "HardFault Handler", value: "0x0800810C", highlight: step >= 2 },
+      ];
+
+      return (
+        <div className="space-y-2">
+          <div className="text-center text-purple-400 font-bold mb-3">
+            应用向量表 (0x08008000)
+          </div>
+          {vectors.map((v, i) => (
+            <div
+              key={i}
+              className={`flex justify-between items-center p-3 rounded transition-all duration-300 ${
+                v.highlight ? 'bg-purple-900/50 border-l-4 border-purple-500' : 'bg-gray-800'
+              }`}
+            >
+              <span className="text-sm text-gray-400">+{i * 4}</span>
+              <span className={`font-mono ${v.highlight ? 'text-purple-300' : 'text-gray-500'}`}>{v.name}</span>
+              <span className="font-mono text-xs text-blue-400">{v.value}</span>
+            </div>
+          ))}
+          {step >= 2 && (
+            <div className="mt-4 p-3 bg-yellow-900/30 rounded border border-yellow-500">
+              <div className="text-yellow-400 text-xs">
+                ⚠️ 跳转前必须从向量表读取 SP 和 Reset Handler
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function JumpFlow({ step }) {
+      const stages = [
+        { name: "关中断", icon: "🔒", active: step >= 3 },
+        { name: "关 SysTick", icon: "⏱️", active: step >= 3 },
+        { name: "设 MSP", icon: "📍", active: step >= 3 },
+        { name: "屏障指令", icon: "🛡️", active: step >= 3 },
+        { name: "跳转", icon: "🚀", active: step >= 3 },
+      ];
+
+      return (
+        <div className="space-y-3">
+          {stages.map((s, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-3 p-3 rounded transition-all duration-500 ${
+                s.active ? 'bg-gradient-to-r from-purple-900/50 to-blue-900/50' : 'bg-gray-800'
+              }`}
+            >
+              <span className="text-2xl">{s.icon}</span>
+              <span className={s.active ? 'text-white' : 'text-gray-500'}>{s.name}</span>
+              {s.active && <span className="ml-auto text-purple-400 animate-pulse">✓</span>}
+            </div>
+          ))}
+          {step >= 3 && (
+            <div className="mt-4 text-center">
+              <div className="inline-block px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg animate-jump">
+                <span className="font-bold">跳转到应用！🚀</span>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function EntryCheck({ step }) {
+      const methods = [
+        { name: "GPIO 按键", icon: "🔘", desc: "Boot 引脚", active: step >= 4 },
+        { name: "魔术字", icon: "🔑", desc: "0xDEADBEEF", active: step >= 4 },
+        { name: "应用无效", icon: "❌", desc: "自动进入", active: step >= 4 },
+      ];
+
+      return (
+        <div className="space-y-3">
+          {methods.map((m, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 p-4 rounded-lg transition-all duration-300 ${
+                m.active ? 'bg-purple-900/50 border-2 border-purple-500' : 'bg-gray-800'
+              }`}
+            >
+              <span className="text-3xl">{m.icon}</span>
+              <div className="flex-1">
+                <div className="font-bold text-purple-300">{m.name}</div>
+                <div className="text-xs text-gray-400">{m.desc}</div>
+              </div>
+              {m.active && <span className="text-green-400 text-xl">✓</span>}
+            </div>
+          ))}
+          {step >= 4 && (
+            <div className="mt-4 p-3 bg-green-900/30 rounded border border-green-500 text-center">
+              <div className="text-green-400 text-sm">任一条件满足 → 进入 Bootloader</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function ValidateApp({ step }) {
+      const checks = [
+        { name: "检查 SP 范围", value: "0x20000000 - 0x20010000", pass: step >= 5 },
+        { name: "检查 Reset 向量", value: "> 0x08008000", pass: step >= 5 },
+        { name: "检查 Flash 内容", value: "CRC 校验", pass: step >= 5 },
+      ];
+
+      return (
+        <div className="space-y-3">
+          {checks.map((c, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 p-4 rounded-lg transition-all duration-300 ${
+                c.pass ? 'bg-green-900/30 border border-green-500' : 'bg-gray-800'
+              }`}
+            >
+              <span className={`text-2xl ${c.pass ? '' : 'text-gray-600'}`}>
+                {c.pass ? '✅' : '⏳'}
+              </span>
+              <div className="flex-1">
+                <div className={`font-bold ${c.pass ? 'text-green-300' : 'text-gray-500'}`}>{c.name}</div>
+                <div className="text-xs text-gray-400 font-mono">{c.value}</div>
+              </div>
+            </div>
+          ))}
+          {step >= 5 && (
+            <div className="mt-4 p-4 bg-gradient-to-r from-green-900/50 to-blue-900/50 rounded-lg border-2 border-green-500">
+              <div className="text-center text-green-300 font-bold">✅ 应用有效，可以跳转</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function CRCCheck({ step }) {
+      const bits = [1, 0, 1, 1, 0, 0, 1, 0];
+
+      return (
+        <div className="space-y-4">
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-center text-purple-400 font-bold mb-3">CRC32 计算过程</div>
+            <div className="flex justify-center gap-1 mb-4">
+              {bits.map((b, i) => (
+                <div
+                  key={i}
+                  className={`w-8 h-12 flex items-center justify-center rounded ${
+                    step >= 6 ? 'bg-purple-600' : 'bg-gray-700'
+                  } transition-all duration-300`}
+                  style={{ animationDelay: `${i * 100}ms` }}
+                >
+                  {b}
+                </div>
+              ))}
+            </div>
+            <div className="text-center font-mono text-xs text-gray-400">
+              多项式：0xEDB88320
+            </div>
+          </div>
+          {step >= 6 && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-blue-900/30 p-3 rounded border border-blue-500">
+                <div className="text-blue-400 text-xs">烧录时 CRC</div>
+                <div className="font-mono text-sm">0x12345678</div>
+              </div>
+              <div className="bg-green-900/30 p-3 rounded border border-green-500">
+                <div className="text-green-400 text-xs">运行时 CRC</div>
+                <div className="font-mono text-sm">0x12345678</div>
+              </div>
+            </div>
+          )}
+          {step >= 6 && (
+            <div className="mt-4 p-4 bg-green-900/30 rounded-lg border-2 border-green-500 text-center">
+              <div className="text-green-300 font-bold">✅ CRC 匹配，固件完整</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function Summary({ step }) {
+      const scenarios = [
+        { icon: "📡", name: "OTA 升级", desc: "无线固件更新" },
+        { icon: "🔌", name: "USB/UART", desc: "有线固件更新" },
+        { icon: "🔄", name: "双 Bank 切换", desc: "A/B 分区" },
+        { icon: "🔐", name: "固件加密", desc: "安全启动" },
+      ];
+
+      return (
+        <div className="space-y-3">
+          {scenarios.map((s, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-4 p-4 bg-gradient-to-r from-purple-900/30 to-blue-900/30 rounded-lg border border-purple-500/50"
+            >
+              <span className="text-3xl">{s.icon}</span>
+              <div className="flex-1">
+                <div className="font-bold text-purple-300">{s.name}</div>
+                <div className="text-xs text-gray-400">{s.desc}</div>
+              </div>
+            </div>
+          ))}
+          <div className="mt-6 p-4 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg">
+            <div className="text-center text-white font-bold">
+              🎯 Bootloader = 系统的守门人
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Visualization({ step, visualization }) {
+      switch(visualization) {
+        case 'layout': return <MemoryLayout step={step} />;
+        case 'vector': return <VectorTable step={step} />;
+        case 'jump': return <JumpFlow step={step} />;
+        case 'check': return <EntryCheck step={step} />;
+        case 'validate': return <ValidateApp step={step} />;
+        case 'crc': return <CRCCheck step={step} />;
+        case 'summary': return <Summary step={step} />;
+        default: return null;
+      }
+    }
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPaused, setIsPaused] = useState(false);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [showCode, setShowCode] = useState(true);
+      const voiceEndTimerRef = useRef(null);
+      const stepRef = useRef(0);
+
+      const speak = useCallback((text) => {
+        if (!('speechSynthesis' in window)) return;
+
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        // 尝试使用高质量中文语音
+        const voices = window.speechSynthesis.getVoices();
+        const zhVoice = voices.find(v =>
+          v.lang === 'zh-CN' ||
+          v.lang === 'zh-CN-XiaoxiaoNeural' ||
+          v.name.includes('Xiaoxiao') ||
+          v.name.includes('Chinese')
+        );
+        if (zhVoice) utterance.voice = zhVoice;
+
+        utterance.onend = () => {
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (!isPaused && isPlaying && stepRef.current < STEPS.length - 1) {
+              setCurrentStep(prev => {
+                stepRef.current = prev + 1;
+                return prev + 1;
+              });
+            }
+          }, 800);
+        };
+
+        utterance.onerror = (event) => {
+          console.warn('Speech synthesis error:', event.error);
+          if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (!isPaused && isPlaying && stepRef.current < STEPS.length - 1) {
+              setCurrentStep(prev => {
+                stepRef.current = prev + 1;
+                return prev + 1;
+              });
+            }
+          }, 800);
+        };
+
+        window.speechSynthesis.speak(utterance);
+      }, [isPaused, isPlaying]);
+
+      useEffect(() => {
+        stepRef.current = currentStep;
+      }, [currentStep]);
+
+      useEffect(() => {
+        const loadVoices = () => {
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.getVoices();
+          }
+        };
+
+        loadVoices();
+        if ('speechSynthesis' in window && window.speechSynthesis.onvoiceschanged !== undefined) {
+          window.speechSynthesis.onvoiceschanged = loadVoices;
+        }
+      }, []);
+
+      useEffect(() => {
+        const step = STEPS[currentStep];
+        if (step && isPlaying) {
+          speak(step.title + "。" + step.explanation);
+        }
+        return () => {
+          if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        };
+      }, [currentStep, isPlaying, speak]);
+
+      const handleStepClick = (index) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setCurrentStep(index);
+        stepRef.current = index;
+      };
+
+      const togglePlay = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsPlaying(!isPlaying);
+        if (!isPlaying && currentStep < STEPS.length - 1) {
+          setTimeout(() => setCurrentStep(prev => prev + 1), 100);
+        }
+      };
+
+      const togglePause = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsPaused(!isPaused);
+      };
+
+      const reset = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setCurrentStep(0);
+        stepRef.current = 0;
+        setIsPaused(false);
+        setIsPlaying(true);
+      };
+
+      const nextStep = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => {
+            stepRef.current = prev + 1;
+            return prev + 1;
+          });
+        }
+      };
+
+      const prevStep = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        if (currentStep > 0) {
+          setCurrentStep(prev => {
+            stepRef.current = prev - 1;
+            return prev - 1;
+          });
+        }
+      };
+
+      const currentStepData = STEPS[currentStep];
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="mb-4 text-center">
+            <h1 className="text-3xl font-bold mb-2" style={{ color: COLOR_MAP.primary }}>
+              1150 - Bootloader 基础
+            </h1>
+            <p className="text-gray-400">Embedded C Animation · 共 {STEPS.length} 步</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* 代码区域 */}
+            {showCode && (
+              <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4 overflow-auto" style={{ maxHeight: '70vh' }}>
+                <pre className="text-xs font-mono leading-relaxed">
+                  {CODE.split('\n').map((line, i) => (
+                    <div
+                      key={i}
+                      className={`code-line px-2 py-1 rounded ${
+                        currentStepData?.codeHighlight?.includes(i + 1) ? 'active' : ''
+                      }`}
+                    >
+                      <span className="text-gray-500 select-none w-8 inline-block">{i + 1}</span>
+                      <span className={currentStepData?.codeHighlight?.includes(i + 1) ? 'text-white' : 'text-gray-300'}>
+                        {line}
+                      </span>
+                    </div>
+                  ))}
+                </pre>
+              </div>
+            )}
+
+            {/* 可视化区域 */}
+            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4" style={{ maxHeight: '70vh', overflow: 'auto' }}>
+              <h3 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.primary }}>
+                {currentStepData?.title}
+              </h3>
+              <Visualization step={currentStep} visualization={currentStepData?.visualization} />
+            </div>
+
+            {/* 说明区域 */}
+            <div className="lg:col-span-1 space-y-4">
+              <div className="bg-gray-800 rounded-lg p-4">
+                <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.primaryLight }}>
+                  说明
+                </h3>
+                <p className="text-gray-300 leading-relaxed">
+                  {currentStepData?.explanation}
+                </p>
+              </div>
+
+              {/* 进度指示器 */}
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="flex flex-wrap gap-2">
+                  {STEPS.map((step, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleStepClick(index)}
+                      className={`px-3 py-2 rounded text-xs font-bold transition-all duration-300 ${
+                        index === currentStep
+                          ? 'bg-purple-600 text-white scale-105'
+                          : index < currentStep
+                          ? 'bg-purple-900/50 text-purple-300'
+                          : 'bg-gray-700 text-gray-400'
+                      }`}
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 控制按钮 */}
+          <div className="mt-6 flex justify-center gap-4">
+            <button
+              onClick={reset}
+              className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors"
+            >
+              🔄 重置
+            </button>
+            <button
+              onClick={prevStep}
+              disabled={currentStep === 0}
+              className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50"
+            >
+              ⏮️ 上一步
+            </button>
+            <button
+              onClick={togglePlay}
+              className={`px-6 py-3 rounded-lg font-bold transition-colors ${
+                isPlaying ? 'bg-purple-600 hover:bg-purple-700' : 'bg-green-600 hover:bg-green-700'
+              }`}
+            >
+              {isPlaying ? '⏸️ 暂停' : '▶️ 播放'}
+            </button>
+            <button
+              onClick={togglePause}
+              disabled={!isPlaying}
+              className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50"
+            >
+              {isPaused ? '▶️ 继续' : '⏯️ 挂起'}
+            </button>
+            <button
+              onClick={nextStep}
+              disabled={currentStep === STEPS.length - 1}
+              className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50"
+            >
+              下一步 ⏭️
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

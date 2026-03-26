@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1153 - 信号量与互斥锁 | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes acquire { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .animate-acquire { animation: acquire 0.5s ease-in-out; }
+    .highlight { box-shadow: 0 0 20px rgba(245, 158, 11, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(245, 158, 11, 0.2); border-left: 3px solid #f59e0b; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#f59e0b', primaryLight: '#fbbf24',
+      secondary: '#d97706', secondaryLight: '#f59e0b',
+      accent: '#b45309', accentLight: '#fbbf24',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== 信号量与互斥锁 (Semaphore & Mutex) =====
+// RTOS 同步与互斥原语
+
+// 1. 信号量结构
+typedef struct {
+  uint32_t count;           // 信号量计数值
+  uint32_t max_count;       // 最大计数值 (计数信号量)
+  List_t wait_queue;        // 等待队列
+} Semaphore_t;
+
+// 2. 互斥量结构 (带优先级继承)
+typedef struct {
+  uint32_t owned;           // 是否被占用 (0/1)
+  TCB_t *owner;             // 持有者 TCB
+  uint8_t  original_prio;   // 所有者原始优先级
+  uint8_t  current_prio;    // 当前优先级 (可能已提升)
+  List_t wait_queue;        // 等待队列
+} Mutex_t;
+
+// 3. 创建信号量
+Semaphore_t* sem_create(uint32_t initial, uint32_t max) {
+  Semaphore_t *sem = malloc(sizeof(Semaphore_t));
+  sem->count = initial;       // 初始计数
+  sem->max_count = max;       // 最大计数
+  list_init(&sem->wait_queue);
+  return sem;
+}
+
+// 4. 获取信号量 (P 操作 / wait)
+void sem_wait(Semaphore_t *sem, uint32_t timeout) {
+  __disable_irq();
+
+  if (sem->count > 0) {
+    sem->count--;             // 有资源，直接获取
+    __enable_irq();
+  } else {
+    // 无资源，阻塞当前任务
+    current_task->state = TASK_BLOCKED;
+    list_add(&sem->wait_queue, current_task);
+    __enable_irq();
+    schedule();               // 触发调度
+  }
+}
+
+// 5. 释放信号量 (V 操作 / post)
+void sem_post(Semaphore_t *sem) {
+  __disable_irq();
+
+  if (!list_empty(&sem->wait_queue)) {
+    // 有任务在等待，唤醒最高优先级
+    TCB_t *t = queue_remove_head(&sem->wait_queue);
+    t->state = TASK_READY;
+  } else {
+    if (sem->count < sem->max_count) {
+      sem->count++;           // 增加资源计数
+    }
+  }
+
+  __enable_irq();
+}
+
+// 6. 互斥锁获取 (带优先级继承)
+void mutex_lock(Mutex_t *mtx) {
+  __disable_irq();
+
+  if (!mtx->owned) {
+    // 无人占用，直接获取
+    mtx->owned = 1;
+    mtx->owner = current_task;
+    mtx->original_prio = current_task->priority;
+    __enable_irq();
+  } else {
+    // 被占用，检查优先级继承
+    if (current_task->priority < mtx->owner->priority) {
+      // 当前任务优先级更高，提升所有者优先级
+      mtx->owner->priority = current_task->priority;
+    }
+    // 阻塞当前任务
+    current_task->state = TASK_BLOCKED;
+    list_add(&mtx->wait_queue, current_task);
+    __enable_irq();
+    schedule();
+  }
+}
+
+// 7. 互斥锁释放
+void mutex_unlock(Mutex_t *mtx) {
+  __disable_irq();
+
+  mtx->owned = 0;
+  // 恢复原始优先级
+  mtx->owner->priority = mtx->original_prio;
+
+  if (!list_empty(&mtx->wait_queue)) {
+    TCB_t *t = queue_remove_head(&mtx->wait_queue);
+    t->state = TASK_READY;
+    mtx->owner = t;
+    mtx->owned = 1;
+  }
+
+  __enable_irq();
+  schedule();
+}`;
+
+    const STEPS = [
+      {
+        title: "信号量与互斥锁概述",
+        codeHighlight: [3, 4, 5],
+        explanation: "信号量用于资源计数和多任务同步，互斥锁用于保护共享资源的互斥访问。互斥锁带优先级继承机制，防止优先级反转问题。",
+        visualization: "overview"
+      },
+      {
+        title: "信号量结构",
+        codeHighlight: [8, 9, 10, 11, 12],
+        explanation: "信号量包含：计数值 (可用资源数)、最大计数值 (限制上限)、等待队列 (阻塞任务)。计数信号量可允许多个任务同时访问资源。",
+        visualization: "semaphore"
+      },
+      {
+        title: "互斥量结构",
+        codeHighlight: [15, 16, 17, 18, 19, 20, 21],
+        explanation: "互斥量是二元信号量的特例，额外包含：所有者指针、原始优先级、当前优先级。优先级继承是解决优先级反转的关键机制。",
+        visualization: "mutex"
+      },
+      {
+        title: "创建信号量",
+        codeHighlight: [24, 25, 26, 27, 28, 29],
+        explanation: "创建时设置初始计数 (可用资源数) 和最大计数。例如初始=3 表示最多 3 个任务可同时访问资源。max 限制计数上限防止溢出。",
+        visualization: "create"
+      },
+      {
+        title: "获取信号量 (P 操作)",
+        codeHighlight: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43],
+        explanation: "P 操作：计数>0 则减 1 并返回；计数=0 则阻塞当前任务并加入等待队列。这是典型的"等待 - 信号量"语义。",
+        visualization: "wait"
+      },
+      {
+        title: "释放信号量 (V 操作)",
+        codeHighlight: [46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56],
+        explanation: "V 操作：有等待任务则唤醒最高优先级者；无等待任务且计数未满则加 1。这是"发送 - 信号量"语义。",
+        visualization: "post"
+      },
+      {
+        title: "互斥锁获取与优先级继承",
+        codeHighlight: [59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74],
+        explanation: "获取互斥锁时，如果已被低优先级任务占用，且当前任务优先级更高，则临时提升所有者的优先级到当前任务级别，防止优先级反转。",
+        visualization: "lock"
+      },
+      {
+        title: "互斥锁释放与优先级恢复",
+        codeHighlight: [77, 78, 79, 80, 81, 82, 83, 84, 85, 86],
+        explanation: "释放互斥锁：1) 清空占用标志 2) 恢复所有者原始优先级 3) 唤醒等待队列中的最高优先级任务 4) 触发调度。",
+        visualization: "unlock"
+      }
+    ];
+
+    function Overview({ step }) {
+      return (
+        <div className="space-y-4">
+          <div className="text-center mb-6">
+            <div className="text-6xl mb-4 animate-pulse">🔐</div>
+            <div className="text-yellow-400 font-bold text-xl">信号量与互斥锁</div>
+            <div className="text-gray-400 text-sm mt-2">Semaphore & Mutex</div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-yellow-900/30 p-4 rounded-lg border border-yellow-500">
+              <div className="text-2xl mb-2">🎫</div>
+              <div className="text-yellow-300 font-bold text-sm">计数信号量</div>
+              <div className="text-gray-400 text-xs mt-1">多资源访问控制</div>
+            </div>
+            <div className="bg-green-900/30 p-4 rounded-lg border border-green-500">
+              <div className="text-2xl mb-2">🔒</div>
+              <div className="text-green-300 font-bold text-sm">互斥锁</div>
+              <div className="text-gray-400 text-xs mt-1">独占访问保护</div>
+            </div>
+            <div className="bg-blue-900/30 p-4 rounded-lg border border-blue-500">
+              <div className="text-2xl mb-2">🤝</div>
+              <div className="text-blue-300 font-bold text-sm">任务同步</div>
+              <div className="text-gray-400 text-xs mt-1">事件协调</div>
+            </div>
+            <div className="bg-purple-900/30 p-4 rounded-lg border border-purple-500">
+              <div className="text-2xl mb-2">⚡</div>
+              <div className="text-purple-300 font-bold text-sm">优先级继承</div>
+              <div className="text-gray-400 text-xs mt-1">防止优先级反转</div>
+            </div>
+          </div>
+          <div className="mt-6 p-4 bg-gradient-to-r from-yellow-900/50 to-green-900/50 rounded-lg border-2 border-yellow-500">
+            <div className="text-center text-yellow-300 font-bold">
+              🎯 同步 + 互斥 = 安全并发
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function SemaphoreStruct({ step }) {
+      const fields = [
+        { name: "count", value: step >= 1 ? '3' : '-', desc: "当前可用资源", active: step >= 1 },
+        { name: "max_count", value: "10", desc: "最大计数值", active: step >= 1 },
+        { name: "wait_queue", value: "[]", desc: "等待任务队列", active: step >= 1 },
+      ];
+
+      return (
+        <div className="space-y-2">
+          <div className="text-center text-yellow-400 font-bold mb-3">
+            信号量结构
+          </div>
+          {fields.map((f, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 p-3 rounded transition-all duration-300 ${
+                f.active ? 'bg-yellow-900/50 border-l-4 border-yellow-500' : 'bg-gray-800'
+              }`}
+            >
+              <span className="font-mono font-bold text-yellow-300 w-24">{f.name}</span>
+              <span className="font-mono text-xs text-green-400 flex-1">{f.value}</span>
+              <span className="text-xs text-gray-500">{f.desc}</span>
+            </div>
+          ))}
+          {step >= 1 && (
+            <div className="mt-4 flex justify-center gap-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white font-bold animate-pulse">
+                  {i}
+                </div>
+              ))}
+              <div className="text-gray-600 px-4 flex items-center">...</div>
+              <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center text-gray-500 font-bold">
+                10
+              </div>
+            </div>
+          )}
+          {step >= 1 && (
+            <div className="mt-4 p-3 bg-blue-900/30 rounded border border-blue-500">
+              <div className="text-blue-400 text-xs">
+                💡 计数信号量控制同时访问某资源的任务数量
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function MutexStruct({ step }) {
+      const fields = [
+        { name: "owned", value: step >= 2 ? '1' : '0', desc: "占用标志", active: step >= 2 },
+        { name: "owner", value: "0x20001000", desc: "所有者 TCB", active: step >= 2 },
+        { name: "original_prio", value: "5", desc: "原始优先级", active: step >= 2 },
+        { name: "current_prio", value: step >= 2 ? '2' : '5', desc: "当前优先级 (可能已提升)", active: step >= 2 },
+        { name: "wait_queue", value: "[T1, T3]", desc: "等待队列", active: step >= 2 },
+      ];
+
+      return (
+        <div className="space-y-2">
+          <div className="text-center text-green-400 font-bold mb-3">
+            互斥量结构 (带优先级继承)
+          </div>
+          {fields.map((f, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 p-3 rounded transition-all duration-300 ${
+                f.active ? 'bg-green-900/50 border-l-4 border-green-500' : 'bg-gray-800'
+              }`}
+            >
+              <span className="font-mono font-bold text-green-300 w-28">{f.name}</span>
+              <span className="font-mono text-xs text-blue-400 flex-1">{f.value}</span>
+              <span className="text-xs text-gray-500">{f.desc}</span>
+            </div>
+          ))}
+          {step >= 2 && (
+            <div className="mt-4 p-3 bg-yellow-900/30 rounded border border-yellow-500">
+              <div className="text-yellow-400 text-xs">
+                ⚡ 优先级继承：低优先级持有者临时提升到高优先级等待者的级别
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function CreateSemaphore({ step }) {
+      return (
+        <div className="space-y-3">
+          <div className="flex items-center gap-4 p-4 bg-yellow-900/30 rounded-lg border border-yellow-500">
+            <span className="text-3xl">📦</span>
+            <div className="flex-1">
+              <div className="text-yellow-300 font-bold">分配信号量内存</div>
+              <div className="text-gray-400 text-xs">malloc(sizeof(Semaphore_t))</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 p-4 bg-green-900/30 rounded-lg border border-green-500">
+            <span className="text-3xl">🔢</span>
+            <div className="flex-1">
+              <div className="text-green-300 font-bold">设置初始计数</div>
+              <div className="text-gray-400 text-xs">sem-&gt;count = initial (如 3)</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 p-4 bg-blue-900/30 rounded-lg border border-blue-500">
+            <span className="text-3xl">📊</span>
+            <div className="flex-1">
+              <div className="text-blue-300 font-bold">设置最大计数</div>
+              <div className="text-gray-400 text-xs">sem-&gt;max_count = max (如 10)</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 p-4 bg-purple-900/30 rounded-lg border border-purple-500">
+            <span className="text-3xl">📋</span>
+            <div className="flex-1">
+              <div className="text-purple-300 font-bold">初始化等待队列</div>
+              <div className="text-gray-400 text-xs">list_init(&amp;sem-&gt;wait_queue)</div>
+            </div>
+          </div>
+          {step >= 3 && (
+            <div className="mt-4 p-4 bg-gradient-to-r from-green-900/50 to-blue-900/50 rounded-lg border-2 border-green-500 text-center">
+              <div className="text-green-300 font-bold">✅ 信号量创建完成，3 个可用资源</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function SemWait({ step }) {
+      const scenarios = [
+        { condition: "count > 0", action: "count--，返回成功", icon: "✅", active: step >= 4 },
+        { condition: "count == 0", action: "阻塞任务，加入等待队列", icon: "⏸️", active: step >= 4 },
+      ];
+
+      return (
+        <div className="space-y-4">
+          {scenarios.map((s, i) => (
+            <div
+              key={i}
+              className={`p-4 rounded-lg transition-all duration-300 ${
+                s.active ? 'bg-yellow-900/50 border-2 border-yellow-500' : 'bg-gray-800'
+              }`}
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-2xl">{s.icon}</span>
+                <div className="font-bold text-yellow-300">当 {s.condition}</div>
+              </div>
+              <div className="text-gray-400 text-sm ml-10">{s.action}</div>
+            </div>
+          ))}
+          {step >= 4 && (
+            <div className="bg-gray-800 p-4 rounded-lg">
+              <div className="text-center text-gray-400 text-sm mb-3">信号量状态变化</div>
+              <div className="flex justify-center items-center gap-4">
+                <div className="flex gap-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center text-white font-bold">
+                      {i}
+                    </div>
+                  ))}
+                </div>
+                <span className="text-yellow-400 text-2xl">→</span>
+                <div className="flex gap-2">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center text-white font-bold animate-pulse">
+                      {i}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="text-center text-gray-400 text-xs mt-3">count: 3 → 2</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function SemPost({ step }) {
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center gap-4 p-4 bg-yellow-900/30 rounded-lg border border-yellow-500">
+            <span className="text-3xl">🔍</span>
+            <div className="flex-1">
+              <div className="text-yellow-300 font-bold">检查等待队列</div>
+              <div className="text-gray-400 text-xs">是否有任务在等待？</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 p-4 bg-green-900/30 rounded-lg border border-green-500">
+            <span className="text-3xl">📬</span>
+            <div className="flex-1">
+              <div className="text-green-300 font-bold">有等待任务</div>
+              <div className="text-gray-400 text-xs">唤醒最高优先级任务 → READY</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 p-4 bg-blue-900/30 rounded-lg border border-blue-500">
+            <span className="text-3xl">📈</span>
+            <div className="flex-1">
+              <div className="text-blue-300 font-bold">无等待任务</div>
+              <div className="text-gray-400 text-xs">count &lt; max 则 count++</div>
+            </div>
+          </div>
+          {step >= 5 && (
+            <div className="bg-gray-800 p-4 rounded-lg">
+              <div className="text-center text-gray-400 text-sm mb-3">释放操作效果</div>
+              <div className="flex justify-center items-center gap-4">
+                <div className="flex gap-2">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center text-white font-bold">
+                      {i}
+                    </div>
+                  ))}
+                </div>
+                <span className="text-yellow-400 text-2xl">→</span>
+                <div className="flex gap-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center text-white font-bold animate-pulse">
+                      {i}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="text-center text-gray-400 text-xs mt-3">count: 2 → 3</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function MutexLock({ step }) {
+      const steps = [
+        { num: 1, text: "检查 owned 标志", result: "owned=0 则直接获取", icon: "🔍" },
+        { num: 2, text: "设置 owned=1, owner=current", result: "记录所有者", icon: "✍️" },
+        { num: 3, text: "如果 owned=1 且我的优先级更高", result: "提升所有者优先级", icon: "⚡" },
+        { num: 4, text: "阻塞当前任务", result: "加入等待队列", icon: "⏸️" },
+        { num: 5, text: "schedule() 触发调度", result: "让出 CPU", icon: "🔄" },
+      ];
+
+      return (
+        <div className="space-y-2">
+          <div className="text-center text-green-400 font-bold mb-3">
+            互斥锁获取流程 (带优先级继承)
+          </div>
+          {steps.map((s) => (
+            <div
+              key={s.num}
+              className={`flex items-center gap-4 p-3 rounded transition-all duration-300 ${
+                step >= 6 ? 'bg-green-900/50 border-l-4 border-green-500' : 'bg-gray-800'
+              }`}
+            >
+              <span className="text-2xl">{s.icon}</span>
+              <div className="flex-1">
+                <div className="text-green-300 font-bold text-sm">步骤{s.num}: {s.text}</div>
+                <div className="text-gray-400 text-xs">{s.result}</div>
+              </div>
+            </div>
+          ))}
+          {step >= 6 && (
+            <div className="mt-4 p-4 bg-yellow-900/30 rounded-lg border border-yellow-500">
+              <div className="text-yellow-400 text-xs">
+                💡 优先级继承防止"优先级反转"：高优先级任务不会因低优先级持有锁而长时间阻塞
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function MutexUnlock({ step }) {
+      return (
+        <div className="space-y-3">
+          <div className="p-4 bg-green-900/30 rounded-lg border border-green-500">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">🔓</span>
+              <div>
+                <div className="text-green-300 font-bold text-sm">清空占用标志</div>
+                <div className="text-gray-400 text-xs font-mono">owned = 0</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-4 bg-blue-900/30 rounded-lg border border-blue-500">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">⬇️</span>
+              <div>
+                <div className="text-blue-300 font-bold text-sm">恢复原始优先级</div>
+                <div className="text-gray-400 text-xs font-mono">owner-&gt;prio = original_prio</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-4 bg-purple-900/30 rounded-lg border border-purple-500">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">📬</span>
+              <div>
+                <div className="text-purple-300 font-bold text-sm">唤醒等待者</div>
+                <div className="text-gray-400 text-xs font-mono">移除队列头 → READY</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-4 bg-yellow-900/30 rounded-lg border border-yellow-500">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">🔄</span>
+              <div>
+                <div className="text-yellow-300 font-bold text-sm">触发调度</div>
+                <div className="text-gray-400 text-xs font-mono">schedule()</div>
+              </div>
+            </div>
+          </div>
+          {step >= 7 && (
+            <div className="mt-4 p-4 bg-gradient-to-r from-green-900/50 to-blue-900/50 rounded-lg border-2 border-green-500 text-center">
+              <div className="text-green-300 font-bold">✅ 互斥锁释放完成</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function Visualization({ step, visualization }) {
+      switch(visualization) {
+        case 'overview': return <Overview step={step} />;
+        case 'semaphore': return <SemaphoreStruct step={step} />;
+        case 'mutex': return <MutexStruct step={step} />;
+        case 'create': return <CreateSemaphore step={step} />;
+        case 'wait': return <SemWait step={step} />;
+        case 'post': return <SemPost step={step} />;
+        case 'lock': return <MutexLock step={step} />;
+        case 'unlock': return <MutexUnlock step={step} />;
+        default: return null;
+      }
+    }
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPaused, setIsPaused] = useState(false);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [showCode, setShowCode] = useState(true);
+      const voiceEndTimerRef = useRef(null);
+      const stepRef = useRef(0);
+
+      const speak = useCallback((text) => {
+        if (!('speechSynthesis' in window)) return;
+
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        const voices = window.speechSynthesis.getVoices();
+        const zhVoice = voices.find(v =>
+          v.lang === 'zh-CN' ||
+          v.lang === 'zh-CN-XiaoxiaoNeural' ||
+          v.name.includes('Xiaoxiao') ||
+          v.name.includes('Chinese')
+        );
+        if (zhVoice) utterance.voice = zhVoice;
+
+        utterance.onend = () => {
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (!isPaused && isPlaying && stepRef.current < STEPS.length - 1) {
+              setCurrentStep(prev => {
+                stepRef.current = prev + 1;
+                return prev + 1;
+              });
+            }
+          }, 800);
+        };
+
+        utterance.onerror = (event) => {
+          console.warn('Speech synthesis error:', event.error);
+          if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (!isPaused && isPlaying && stepRef.current < STEPS.length - 1) {
+              setCurrentStep(prev => {
+                stepRef.current = prev + 1;
+                return prev + 1;
+              });
+            }
+          }, 800);
+        };
+
+        window.speechSynthesis.speak(utterance);
+      }, [isPaused, isPlaying]);
+
+      useEffect(() => {
+        stepRef.current = currentStep;
+      }, [currentStep]);
+
+      useEffect(() => {
+        const loadVoices = () => {
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.getVoices();
+          }
+        };
+
+        loadVoices();
+        if ('speechSynthesis' in window && window.speechSynthesis.onvoiceschanged !== undefined) {
+          window.speechSynthesis.onvoiceschanged = loadVoices;
+        }
+      }, []);
+
+      useEffect(() => {
+        const step = STEPS[currentStep];
+        if (step && isPlaying) {
+          speak(step.title + "。" + step.explanation);
+        }
+        return () => {
+          if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        };
+      }, [currentStep, isPlaying, speak]);
+
+      const handleStepClick = (index) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setCurrentStep(index);
+        stepRef.current = index;
+      };
+
+      const togglePlay = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsPlaying(!isPlaying);
+        if (!isPlaying && currentStep < STEPS.length - 1) {
+          setTimeout(() => setCurrentStep(prev => prev + 1), 100);
+        }
+      };
+
+      const togglePause = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsPaused(!isPaused);
+      };
+
+      const reset = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setCurrentStep(0);
+        stepRef.current = 0;
+        setIsPaused(false);
+        setIsPlaying(true);
+      };
+
+      const nextStep = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => {
+            stepRef.current = prev + 1;
+            return prev + 1;
+          });
+        }
+      };
+
+      const prevStep = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        if (currentStep > 0) {
+          setCurrentStep(prev => {
+            stepRef.current = prev - 1;
+            return prev - 1;
+          });
+        }
+      };
+
+      const currentStepData = STEPS[currentStep];
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="mb-4 text-center">
+            <h1 className="text-3xl font-bold mb-2" style={{ color: COLOR_MAP.primary }}>
+              1153 - 信号量与互斥锁
+            </h1>
+            <p className="text-gray-400">Embedded C Animation · 共 {STEPS.length} 步</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {showCode && (
+              <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4 overflow-auto" style={{ maxHeight: '70vh' }}>
+                <pre className="text-xs font-mono leading-relaxed">
+                  {CODE.split('\n').map((line, i) => (
+                    <div
+                      key={i}
+                      className={`code-line px-2 py-1 rounded ${
+                        currentStepData?.codeHighlight?.includes(i + 1) ? 'active' : ''
+                      }`}
+                    >
+                      <span className="text-gray-500 select-none w-8 inline-block">{i + 1}</span>
+                      <span className={currentStepData?.codeHighlight?.includes(i + 1) ? 'text-white' : 'text-gray-300'}>
+                        {line}
+                      </span>
+                    </div>
+                  ))}
+                </pre>
+              </div>
+            )}
+
+            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4" style={{ maxHeight: '70vh', overflow: 'auto' }}>
+              <h3 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.primary }}>
+                {currentStepData?.title}
+              </h3>
+              <Visualization step={currentStep} visualization={currentStepData?.visualization} />
+            </div>
+
+            <div className="lg:col-span-1 space-y-4">
+              <div className="bg-gray-800 rounded-lg p-4">
+                <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.primaryLight }}>
+                  说明
+                </h3>
+                <p className="text-gray-300 leading-relaxed">
+                  {currentStepData?.explanation}
+                </p>
+              </div>
+
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="flex flex-wrap gap-2">
+                  {STEPS.map((step, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleStepClick(index)}
+                      className={`px-3 py-2 rounded text-xs font-bold transition-all duration-300 ${
+                        index === currentStep
+                          ? 'bg-yellow-600 text-white scale-105'
+                          : index < currentStep
+                          ? 'bg-yellow-900/50 text-yellow-300'
+                          : 'bg-gray-700 text-gray-400'
+                      }`}
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex justify-center gap-4">
+            <button onClick={reset} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors">
+              🔄 重置
+            </button>
+            <button onClick={prevStep} disabled={currentStep === 0} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50">
+              ⏮️ 上一步
+            </button>
+            <button onClick={togglePlay} className={`px-6 py-3 rounded-lg font-bold transition-colors ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'}`}>
+              {isPlaying ? '⏸️ 暂停' : '▶️ 播放'}
+            </button>
+            <button onClick={togglePause} disabled={!isPlaying} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50">
+              {isPaused ? '▶️ 继续' : '⏯️ 挂起'}
+            </button>
+            <button onClick={nextStep} disabled={currentStep === STEPS.length - 1} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50">
+              下一步 ⏭️
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

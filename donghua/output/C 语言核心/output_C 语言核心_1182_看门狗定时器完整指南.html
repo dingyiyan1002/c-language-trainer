@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1182 - 看门狗定时器完整指南 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: transparent; } 50% { background-color: rgba(251,191,36,0.2); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdownAnim { 0% { width: 100%; } 100% { width: 0%; } }
+        @keyframes kickAnim { 0% { transform: scale(1); } 50% { transform: scale(1.2); background-color: rgba(34,197,94,0.5); } 100% { transform: scale(1); } }
+        @keyframes timeoutAnim { 0%, 100% { background-color: rgba(239,68,68,0.3); } 50% { background-color: rgba(239,68,68,0.6); } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-countdown { animation: countdownAnim 4s linear infinite; }
+        .animate-kick { animation: kickAnim 0.5s ease-out; }
+        .animate-timeout { animation: timeoutAnim 2s infinite; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: 'from-orange-500 to-red-600',
+            light: 'from-orange-50 to-red-50',
+            text: 'text-orange-600',
+            bg: 'bg-orange-50',
+            border: 'border-orange-200',
+            hover: 'hover:bg-orange-100'
+        };
+
+        const CODE_EXAMPLES = [
+            {
+                title: "看门狗基础概念",
+                code: `// 看门狗定时器 (Watchdog Timer, WDT)
+// 作用：检测系统是否死机，自动复位
+
+// 工作原理:
+// 1. 看门狗是独立递减计数器
+// 2. 系统正常时定期"喂狗"(重置计数器)
+// 3. 系统死机时无法喂狗，计数器归零
+// 4. 计数器归零时产生系统复位
+
+// 看门狗类型:
+// 1. IWDG (独立看门狗)
+//    - 独立时钟源 (LSI 32kHz)
+//    - 即使主时钟故障也能工作
+//    - 适合检测系统死机
+
+// 2. WWDG (窗口看门狗)
+//    - 系统时钟驱动
+//    - 有喂狗时间窗口限制
+//    - 适合检测程序跑飞
+
+// 3. 窗口看门狗 (高级 MCU)
+//    - 只能在指定窗口内喂狗
+//    - 过早或过晚喂狗都会复位`,
+                highlight: "喂狗",
+                explanation: "看门狗是独立递减计数器，系统正常时定期喂狗重置计数器。系统死机时无法喂狗，计数器归零产生复位。IWDG 用于检测死机，WWDG 用于检测程序跑飞。"
+            },
+            {
+                title: "IWDG 独立看门狗配置",
+                code: `// IWDG 配置 (STM32)
+void IWDG_Config(void) {
+    // 1. 使能 LSI 时钟
+    RCC->CSR |= RCC_CSR_LSION;
+    while (!(RCC->CSR & RCC_CSR_LSIRDY));
+
+    // 2. 使能看门狗写访问
+    IWDG->KR = 0x5555;  // 解锁
+
+    // 3. 配置预分频 (4/8/16/32/64/128/256)
+    IWDG->PR = 0x03;    // 32 分频
+    // 超时 = (预分频 × 重装载值) / LSI 频率
+    //      = (32 × 1000) / 32000 = 1 秒
+
+    // 4. 配置重装载值
+    IWDG->RLR = 1000;   // 1 秒超时
+
+    // 5. 等待寄存器同步
+    while (IWDG->SR != 0);
+
+    // 6. 启动看门狗
+    IWDG->KR = 0xCCCC;  // 启动
+
+    // 7. 重新装载 (喂狗)
+    IWDG->KR = 0xAAAA;  // 立即重装载
+}
+
+// 喂狗宏
+#define FEED_DOG() (IWDG->KR = 0xAAAA)`,
+                highlight: "0xCCCC",
+                explanation: "IWDG 配置步骤：使能 LSI→解锁→设置预分频→设置重装载值→等待同步→启动。喂狗使用 0xAAAA 命令。超时时间由预分频和重装载值决定。"
+            },
+            {
+                title: "WWDG 窗口看门狗配置",
+                code: `// WWDG 窗口看门狗
+void WWDG_Config(void) {
+    // 1. 使能时钟
+    RCC->APB1ENR |= RCC_APB1ENR_WWDGEN;
+
+    // 2. 配置看门狗
+    // Counter: 0x7F (最大值)
+    // Prescaler: 8 分频
+    // Window: 0x5F (喂狗窗口)
+    WWDG->CFR =
+        (0x00 << 7) |     // Counter = 0x7F
+        (0x01 << 6) |     // Prescaler = 8
+        (0x5F);           // Window = 0x5F
+
+    // 3. 使能提前唤醒中断 (可选)
+    WWDG->CFR |= WWDG_CFR_EWI;
+    NVIC_EnableIRQ(WWDG_IRQn);
+
+    // 4. 启动看门狗
+    WWDG->CR = WWDG_CR_WDGA | 0x7F;
+}
+
+// 喂狗 (必须在窗口内)
+void WWDG_Feed(void) {
+    // 窗口：0x40 ~ 0x5F
+    // 过早 (<0x40): 不会喂狗
+    // 过晚 (>0x5F): 系统复位
+    WWDG->CR = 0x7F;  // 重置计数器
+}
+
+// 窗口计算:
+// 最小喂狗时间 = (0x7F - 0x5F) × 预分频 / PCLK1`,
+                highlight: "窗口",
+                explanation: "WWDG 窗口看门狗要求在规定窗口内喂狗。过早喂狗 (计数器太大) 不会重置，过晚喂狗 (计数器太小) 会产生复位。适合检测程序执行时序异常。"
+            },
+            {
+                title: "喂狗策略",
+                code: `// ✅ 正确喂狗策略
+
+// 1. 主循环喂狗 (最简单)
+void main_loop(void) {
+    while (1) {
+        processSensors();
+        processCommunication();
+        FEED_DOG();  // 每次循环喂狗
+    }
+}
+// 超时时间 > 最长循环周期
+
+// 2. 关键代码段后喂狗
+void criticalTask(void) {
+    initHardware();
+    FEED_DOG();       // 阶段 1 完成
+    loadConfig();
+    FEED_DOG();       // 阶段 2 完成
+    startApplication();
+    FEED_DOG();       // 阶段 3 完成
+}
+
+// 3. 任务调度喂狗
+Task tasks[] = {task1, task2, task3};
+void scheduler(void) {
+    for (int i = 0; i < 3; i++) {
+        tasks[i]();
+        FEED_DOG();   // 每个任务后喂狗
+    }
+}
+
+// ❌ 错误：在 ISR 中喂狗
+// void ISR_Handler(void) {
+//     FEED_DOG();  // 即使主程序死机也会喂狗!
+// }`,
+                highlight: "主循环",
+                explanation: "喂狗应该在主循环或关键任务完成后进行。不要在中断中喂狗，因为即使主程序死机中断仍会执行，导致看门狗失去意义。超时时间应大于最长正常执行周期。"
+            },
+            {
+                title: "看门狗调试技巧",
+                code: `// 1. 看门狗复位检测
+void checkWatchdogReset(void) {
+    if (RCC->CSR & RCC_CSR_IWDGRSTF) {
+        // 看门狗复位发生
+        logError("看门狗复位!");
+        RCC->CSR |= RCC_CSR_RMVF;  // 清除标志
+    }
+}
+
+// 2. 喂狗日志 (调试用)
+void FEED_DOG_DEBUG(const char *location) {
+    IWDG->KR = 0xAAAA;
+    // USART 打印最后喂狗位置
+    printf("Dog fed at: %s\\n", location);
+}
+
+// 3. 喂狗监控 (检测喂狗频率)
+uint32_t g_feedCount = 0;
+void monitorFeed(void) {
+    g_feedCount++;
+    if (g_feedCount > MAX_FEED_PER_SEC) {
+        // 喂狗过于频繁，可能有 Bug
+        logError("喂狗异常频繁!");
+    }
+}
+
+// 4. 临时禁用 (调试阶段)
+#ifdef DEBUG
+    // 禁用看门狗，方便调试
+    // IWDG->KR = 0x0000;
+#endif`,
+                highlight: "复位检测",
+                explanation: "调试看门狗时，可以检测复位标志确认是否看门狗复位。添加喂狗日志记录最后喂狗位置。监控喂狗频率检测异常。调试阶段可以临时禁用看门狗。"
+            },
+            {
+                title: "看门狗应用案例",
+                code: `// 案例 1: 工业控制器
+void industrialController(void) {
+    IWDG_Config();  // 2 秒超时
+
+    while (1) {
+        readSensors();       // 100ms
+        processLogic();      // 200ms
+        updateOutputs();     // 100ms
+        communicatePLC();    // 500ms
+        FEED_DOG();          // 总周期<2 秒
+    }
+}
+
+// 案例 2: 通信网关
+void communicationGateway(void) {
+    WWDG_Config();  // 窗口 50-100ms
+
+    while (1) {
+        recvUART();        // 看门狗确保时序
+        processPacket();   // 不能过早或过晚
+        sendResponse();    // 喂狗窗口内
+        WWDG_Feed();       // 精确时序
+    }
+}
+
+// 案例 3: 多任务系统
+typedef struct {
+    void (*task)(void);
+    uint32_t timeout_ms;
+} Task;
+
+Task tasks[] = {
+    {task1, 100},
+    {task2, 200},
+    {task3, 300}
+};
+
+void rtos_watchdog(void) {
+    IWDG_Config();  // 总超时 1 秒
+    while (1) {
+        for (int i = 0; i < 3; i++) {
+            tasks[i].task();
+            FEED_DOG();  // 每任务后喂狗
+        }
+    }
+}`,
+                highlight: "多任务",
+                explanation: "工业控制器使用 IWDG 确保整个循环在超时内完成。通信网关使用 WWDG 确保精确的执行时序。多任务系统在每任务完成后喂狗，确保所有任务都正常执行。"
+            },
+            {
+                title: "看门狗 vs 其他复位",
+                code: `// 复位源对比
+void analyzeResetSource(void) {
+    uint32_t csr = RCC->CSR;
+
+    if (csr & RCC_CSR_LPWRRSTF) {
+        // 低功耗管理复位
+        log("低功耗复位");
+    }
+    if (csr & RCC_CSR_PINRSTF) {
+        // NRST 引脚复位 (外部)
+        log("外部复位按键");
+    }
+    if (csr & RCC_CSR_PORRSTF) {
+        // 上电/掉电复位
+        log("上电/掉电复位");
+    }
+    if (csr & RCC_CSR_SFTRSTF) {
+        // 软件复位
+        log("软件复位 (NVIC)");
+    }
+    if (csr & RCC_CSR_IWDGRSTF) {
+        // 独立看门狗复位
+        log("看门狗复位 - 系统可能死机!");
+    }
+    if (csr & RCC_CSR_WWDGRSTF) {
+        // 窗口看门狗复位
+        log("窗口看门狗复位 - 程序跑飞!");
+    }
+
+    RCC->CSR |= RCC_CSR_RMVF;  // 清除标志
+}
+
+// 看门狗复位是最常见的异常复位原因
+// 遇到看门狗复位应检查:
+// 1. 是否忘记喂狗
+// 2. 喂狗间隔是否太长
+// 3. 是否有代码死循环
+// 4. 是否有优先级反转`,
+                highlight: "IWDGRSTF",
+                explanation: "通过 RCC 控制状态寄存器可以判断复位源。看门狗复位 (IWDGRSTF/WWDGRSTF) 表明系统异常。遇到看门狗复位应检查喂狗逻辑、执行时间、死循环等问题。"
+            },
+            {
+                title: "看门狗最佳实践",
+                code: `// ✅ 看门狗设计原则:
+
+// 1. 选择合适的超时时间
+// - IWDG: 2-4 倍于最长正常周期
+// - WWDG: 根据任务时序精确计算
+// - 预留 20% 余量
+
+// 2. 喂狗位置设计
+// □ 主循环结束前喂狗
+// □ 长任务分段喂狗
+// □ 不要在 ISR 中喂狗
+// □ 初始化完成后再启动看门狗
+
+// 3. 启动时机
+// □ 硬件初始化完成后
+// □ 软件自检通过后
+// □ 进入主循环前
+
+// 4. 复位分析
+// □ 启动时检查复位源
+// □ 记录看门狗复位日志
+// □ 复位计数超过阈值报警
+
+// 5. 调试支持
+// □ DEBUG 模式下可禁用
+// □ 添加喂狗日志
+// □ 监控喂狗频率
+
+// 目标：零看门狗复位 (生产环境)`,
+                highlight: "设计原则",
+                explanation: "看门狗最佳实践：选择合适超时时间 (2-4 倍正常周期加 20% 余量)、主循环喂狗不在中断喂狗、初始化完成后启动、检查复位源分析原因、调试模式支持禁用。"
+            }
+        ];
+
+        function App() {
+            const [step, setStep] = React.useState(0);
+            const [kickEffect, setKickEffect] = React.useState(false);
+            const [countdown, setCountdown] = React.useState(100);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                speakCurrentStep();
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, []);
+
+            React.useEffect(() => {
+                const interval = setInterval(() => {
+                    setCountdown(prev => {
+                        if (prev <= 0) return 100;
+                        return prev - 1;
+                    });
+                }, 40);
+                return () => clearInterval(interval);
+            }, []);
+
+            const handleKick = () => {
+                setKickEffect(true);
+                setCountdown(100);
+                setTimeout(() => setKickEffect(false), 500);
+            };
+
+            const speakCurrentStep = () => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                }
+
+                const currentExample = CODE_EXAMPLES[step];
+                const explanations = [
+                    "看门狗是独立递减计数器，系统正常时定期喂狗重置计数器。系统死机时无法喂狗，计数器归零产生复位。IWDG 用于检测死机，WWDG 用于检测程序跑飞。",
+                    "IWDG 配置步骤：使能 LSI 时钟、解锁写访问、设置预分频、设置重装载值、等待同步、启动看门狗。喂狗使用 0xAAAA 命令。超时时间由预分频和重装载值决定。",
+                    "WWDG 窗口看门狗要求在规定窗口内喂狗。过早喂狗计数器太大不会重置，过晚喂狗计数器太小会产生复位。适合检测程序执行时序是否异常。",
+                    "喂狗应该在主循环或关键任务完成后进行。不要在中断中喂狗，因为即使主程序死机中断仍会执行，导致看门狗失去检测死机的意义。",
+                    "调试看门狗时可以检测复位标志确认是否看门狗复位。添加喂狗日志记录最后喂狗位置。监控喂狗频率可以检测异常。调试阶段可以临时禁用看门狗。",
+                    "工业控制器使用 IWDG 确保整个循环在超时内完成。通信网关使用 WWDG 确保精确的执行时序。多任务系统在每任务完成后喂狗确保所有任务正常执行。",
+                    "通过 RCC 控制状态寄存器可以判断复位源。看门狗复位表明系统异常。遇到看门狗复位应检查喂狗逻辑、执行时间、是否存在死循环等问题。",
+                    "看门狗最佳实践：选择合适超时时间、主循环喂狗不在中断喂狗、初始化完成后启动、检查复位源分析原因、调试模式支持禁用看门狗。"
+                ];
+
+                const text = `第${step + 1}步：${currentExample.title}。${explanations[step]}`;
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                const voices = speechSynthesis.getVoices();
+                const xiaoxiaoVoice = voices.find(voice =>
+                    voice.name.includes('Xiaoxiao') ||
+                    voice.name.includes('zh-CN')
+                );
+                if (xiaoxiaoVoice) {
+                    utterance.voice = xiaoxiaoVoice;
+                }
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            React.useEffect(() => {
+                speakCurrentStep();
+            }, [step]);
+
+            const renderWatchdogDemo = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-orange-50 to-red-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-orange-800 mb-4">看门狗工作原理</h4>
+                        <div className="space-y-4">
+                            <div className="relative h-12 bg-gray-200 rounded overflow-hidden">
+                                <div
+                                    className={`absolute inset-y-0 right-0 transition-all duration-100 ${
+                                        countdown > 30 ? 'bg-green-400' :
+                                        countdown > 10 ? 'bg-yellow-400' :
+                                        'bg-red-400 animate-pulse'
+                                    }`}
+                                    style={{width: `${countdown}%`}}
+                                ></div>
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <span className="font-bold text-gray-800">倒计时：{countdown}%</span>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleKick}
+                                className={`w-full py-3 rounded font-bold text-white transition-all ${
+                                    kickEffect ? 'bg-green-500 scale-105' : 'bg-orange-500 hover:bg-orange-600'
+                                }`}
+                            >
+                                {kickEffect ? '✓ 已喂狗!' : '喂狗 (Kick)'}
+                            </button>
+                            <div className="text-xs text-gray-600 text-center">
+                                计数器归零前点击"喂狗"重置
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderCompareTable = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-orange-50 to-red-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-orange-800 mb-4">IWDG vs WWDG</h4>
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b-2 border-orange-300">
+                                    <th className="p-2 text-left">特性</th>
+                                    <th className="p-2">IWDG</th>
+                                    <th className="p-2">WWDG</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td className="p-2 font-bold">时钟源</td>
+                                    <td className="p-2">LSI (独立)</td>
+                                    <td className="p-2">PCLK (系统)</td>
+                                </tr>
+                                <tr>
+                                    <td className="p-2 font-bold">喂狗</td>
+                                    <td className="p-2">随时</td>
+                                    <td className="p-2">窗口内</td>
+                                </tr>
+                                <tr>
+                                    <td className="p-2 font-bold">用途</td>
+                                    <td className="p-2">死机检测</td>
+                                    <td className="p-2">时序检测</td>
+                                </tr>
+                                <tr>
+                                    <td className="p-2 font-bold">精度</td>
+                                    <td className="p-2">低</td>
+                                    <td className="p-2">高</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-orange-50 via-red-50 to-yellow-50 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="text-center mb-6">
+                            <h1 className="text-4xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent mb-2">
+                                1182 - 看门狗定时器完整指南
+                            </h1>
+                            <p className="text-lg text-gray-700">C 语言核心 - IWDG/WWDG/喂狗策略/ 复位分析</p>
+                            <div className="flex justify-center gap-2 mt-4">
+                                <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm">IWDG</span>
+                                <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm">WWDG</span>
+                                <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm">喂狗策略</span>
+                                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">复位分析</span>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-orange-500">
+                                    <h3 className="text-xl font-bold text-orange-700 mb-3">代码示例</h3>
+                                    <div className="bg-gray-50 rounded p-3 font-mono text-sm overflow-x-auto">
+                                        <pre className="text-gray-800 whitespace-pre-wrap">
+                                            {CODE_EXAMPLES[step].code}
+                                        </pre>
+                                    </div>
+                                    <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                        <p className="text-sm text-yellow-800">
+                                            <span className="font-bold">亮点:</span> {CODE_EXAMPLES[step].highlight}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-red-500">
+                                    <h3 className="text-xl font-bold text-red-700 mb-3">可视化演示</h3>
+                                    {step === 0 && renderWatchdogDemo()}
+                                    {step === 1 && (
+                                        <div className="p-4 bg-gradient-to-r from-orange-50 to-red-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-orange-800 mb-4">IWDG 配置流程</h4>
+                                            <div className="space-y-2">
+                                                {['1. 使能 LSI 时钟', '2. 解锁 (0x5555)', '3. 设置预分频', '4. 设置重装载值', '5. 等待同步', '6. 启动 (0xCCCC)', '7. 喂狗 (0xAAAA)'].map((s, i) => (
+                                                    <div key={i} className="p-2 bg-white rounded border-l-4 border-orange-400 text-sm">
+                                                        {s}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 2 && renderCompareTable()}
+                                    {step === 3 && (
+                                        <div className="p-4 bg-gradient-to-r from-orange-50 to-red-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-orange-800 mb-4">喂狗位置示意</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-green-50 rounded border-2 border-green-300">
+                                                    <div className="font-bold text-green-700">✅ 主循环喂狗</div>
+                                                    <div className="text-xs text-green-600">每次循环结束前</div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded border-2 border-green-300">
+                                                    <div className="font-bold text-green-700">✅ 任务分段喂狗</div>
+                                                    <div className="text-xs text-green-600">长任务分阶段</div>
+                                                </div>
+                                                <div className="p-3 bg-red-50 rounded border-2 border-red-300">
+                                                    <div className="font-bold text-red-700">❌ 中断喂狗</div>
+                                                    <div className="text-xs text-red-600">死机时仍会执行</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 4 && (
+                                        <div className="p-4 bg-gradient-to-r from-orange-50 to-red-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-orange-800 mb-4">调试技巧</h4>
+                                            <div className="space-y-2">
+                                                <div className="p-2 bg-blue-50 rounded">
+                                                    <div className="font-bold text-blue-700">复位检测</div>
+                                                    <div className="text-xs text-blue-600">检查 RCC->CSR</div>
+                                                </div>
+                                                <div className="p-2 bg-purple-50 rounded">
+                                                    <div className="font-bold text-purple-700">喂狗日志</div>
+                                                    <div className="text-xs text-purple-600">记录最后位置</div>
+                                                </div>
+                                                <div className="p-2 bg-yellow-50 rounded">
+                                                    <div className="font-bold text-yellow-700">频率监控</div>
+                                                    <div className="text-xs text-yellow-600">检测异常喂狗</div>
+                                                </div>
+                                                <div className="p-2 bg-green-50 rounded">
+                                                    <div className="font-bold text-green-700">DEBUG 禁用</div>
+                                                    <div className="text-xs text-green-600">方便调试</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 5 && (
+                                        <div className="p-4 bg-gradient-to-r from-orange-50 to-red-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-orange-800 mb-4">应用案例</h4>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="p-3 bg-blue-50 rounded">
+                                                    <div className="font-bold text-blue-700">工业控制</div>
+                                                    <div className="text-xs text-blue-600">IWDG 2 秒超时</div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded">
+                                                    <div className="font-bold text-green-700">通信网关</div>
+                                                    <div className="text-xs text-green-600">WWDG 精确时序</div>
+                                                </div>
+                                                <div className="p-3 bg-yellow-50 rounded">
+                                                    <div className="font-bold text-yellow-700">多任务系统</div>
+                                                    <div className="text-xs text-yellow-600">每任务喂狗</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded">
+                                                    <div className="font-bold text-purple-700">安全关键</div>
+                                                    <div className="text-xs text-purple-600">双看门狗</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 6 && (
+                                        <div className="p-4 bg-gradient-to-r from-orange-50 to-red-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-orange-800 mb-4">复位源分析</h4>
+                                            <div className="space-y-2">
+                                                {[
+                                                    {flag: 'LPWRRSTF', name: '低功耗复位', color: 'bg-blue-100'},
+                                                    {flag: 'PINRSTF', name: '外部按键复位', color: 'bg-green-100'},
+                                                    {flag: 'PORRSTF', name: '上电/掉电复位', color: 'bg-yellow-100'},
+                                                    {flag: 'SFTRSTF', name: '软件复位', color: 'bg-purple-100'},
+                                                    {flag: 'IWDGRSTF', name: '看门狗复位', color: 'bg-red-100'},
+                                                    {flag: 'WWDGRSTF', name: '窗口看门狗复位', color: 'bg-orange-100'}
+                                                ].map((item, i) => (
+                                                    <div key={i} className={`p-2 ${item.color} rounded flex justify-between items-center`}>
+                                                        <span className="font-mono text-xs">{item.flag}</span>
+                                                        <span className="text-xs">{item.name}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 7 && (
+                                        <div className="p-4 bg-gradient-to-r from-orange-50 to-red-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-orange-800 mb-4">最佳实践清单</h4>
+                                            <div className="space-y-2">
+                                                {['选择 2-4 倍超时', '主循环喂狗', '不在 ISR 喂狗', '初始化后启动', '检查复位源', 'DEBUG 可禁用'].map((item, i) => (
+                                                    <div key={i} className="flex items-center gap-2 p-2 bg-white rounded border-l-4 border-orange-400">
+                                                        <span className="text-orange-500">✓</span>
+                                                        <span className="text-sm">{item}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-yellow-500">
+                                    <h3 className="text-xl font-bold text-yellow-700 mb-3">关键要点</h3>
+                                    <div className="space-y-3">
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 0 ? 'bg-orange-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-orange-600">原理:</span> 递减计数器
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 1 ? 'bg-red-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-red-600">IWDG:</span> LSI 独立时钟
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 2 ? 'bg-yellow-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-yellow-600">WWDG:</span> 窗口限制
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 3 ? 'bg-green-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-green-600">喂狗:</span> 不在 ISR
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 4 ? 'bg-blue-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-blue-600">调试:</span> 检查复位源
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 5 ? 'bg-purple-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-purple-600">应用:</span> 工业/通信
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 6 ? 'bg-pink-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-pink-600">复位:</span> 6 种源
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 7 ? 'bg-teal-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-teal-600">目标:</span> 零看门狗复位
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                        <p className="text-sm text-yellow-800">
+                                            {CODE_EXAMPLES[step].explanation}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-r from-orange-500 to-red-600 rounded-lg shadow-lg p-4 text-white">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm">进度</span>
+                                        <span className="text-sm font-bold">{step + 1} / {CODE_EXAMPLES.length}</span>
+                                    </div>
+                                    <div className="w-full bg-white bg-opacity-30 rounded-full h-2">
+                                        <div
+                                            className="bg-white rounded-full h-2 transition-all duration-500"
+                                            style={{ width: `${((step + 1) / CODE_EXAMPLES.length) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <footer className="text-center mt-8 text-gray-600">
+                            <p className="text-sm">C 语言核心 · 看门狗定时器完整指南 · 嵌入式系统可靠性保障</p>
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

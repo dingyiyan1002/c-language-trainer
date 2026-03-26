@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WDG 看门狗定时器完整指南 - 嵌入式 C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes flow { 0% { stroke-dashoffset: 100; } 100% { stroke-dashoffset: 0; } }
+        @keyframes highlight { 0%, 100% { fill: #8b5cf6; } 50% { fill: #fbbf24; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        @keyframes danger { 0%, 100% { fill: #22c55e; } 50% { fill: #ef4444; } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-flow { animation: flow 1.5s linear infinite; }
+        .animate-highlight { animation: highlight 1s infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-countdown { animation: countdown 0.5s ease-in-out infinite; }
+        .animate-danger { animation: danger 1s infinite; }
+        .animate-reset { animation: reset 1s linear infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#8b5cf6',
+            secondary: '#06b6d4',
+            accent: '#fbbf24',
+            success: '#22c55e',
+            danger: '#ef4444',
+            info: '#3b82f6'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [feedTimer, setFeedTimer] = React.useState(false);
+            const [watchdogCounter, setWatchdogCounter] = React.useState(100);
+            const [windowMode, setWindowMode] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const STEPS = [
+                {
+                    title: "看门狗基础概念",
+                    code: `// 看门狗定时器 (Watchdog Timer)
+// 核心作用：检测并恢复系统故障
+
+// 工作原理
+// 1. 看门狗独立运行 (即使 CPU 死机也继续计数)
+// 2. 程序正常时定期"喂狗"(重置计数器)
+// 3. 程序异常时无法喂狗，计数器溢出
+// 4. 溢出时产生系统复位，恢复运行
+
+// 看门狗类型
+// 1. 独立看门狗 (IWDG): 低速内部时钟 (LSI)
+//    - 优点：低功耗，独立于主时钟
+//    - 缺点：精度较低
+// 2. 窗口看门狗 (WWDG): APB 时钟
+//    - 优点：精度高，窗口模式
+//    - 缺点：依赖主时钟
+
+// 关键术语
+// - 喂狗 (Feed/Kick): 重置计数器
+// - 溢出 (Timeout): 计数器归零，触发复位
+// - 窗口 (Window): 限定喂狗时间窗口`,
+                    explanation: "看门狗是系统可靠性保障。独立看门狗使用内部 LSI 时钟，即使主时钟失效也能工作。窗口看门狗可检测过早或过晚喂狗，提供更严格的时序监控。程序跑飞或死循环时无法及时喂狗，看门狗复位系统。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <defs>
+                                <linearGradient id="wdogGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stopColor={COLOR_MAP.primary} />
+                                    <stop offset="100%" stopColor={COLOR_MAP.secondary} />
+                                </linearGradient>
+                            </defs>
+                            {/* 看门狗框图 */}
+                            <text x="200" y="25" fill={COLOR_MAP.accent} fontSize="12" textAnchor="middle">看门狗工作原理</text>
+                            {/* 独立看门狗 */}
+                            <rect x="20" y="35" width="160" height="100" fill="#1f2937" stroke={COLOR_MAP.primary} rx="10" />
+                            <text x="100" y="55" fill={COLOR_MAP.primary} fontSize="11" textAnchor="middle" fontWeight="bold">独立看门狗 IWDG</text>
+                            {/* LSI 时钟 */}
+                            <rect x="40" y="65" width="40" height="30" fill="#374151" stroke={COLOR_MAP.info} rx="3" />
+                            <text x="60" y="83" fill={COLOR_MAP.info} fontSize="8" textAnchor="middle">LSI</text>
+                            <text x="60" y="93" fill="#9ca3af" fontSize="7" textAnchor="middle">~32kHz</text>
+                            {/* 计数器 */}
+                            <line x1="80" y1="80" x2="100" y2="80" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            <rect x="100" y="60" width="60" height="40" fill="#374151" stroke={COLOR_MAP.success} rx="3" />
+                            <text x="130" y="82" fill={COLOR_MAP.success} fontSize="9" textAnchor="middle">计数器</text>
+                            <text x="130" y="94" fill={COLOR_MAP.accent} fontSize="10" textAnchor="middle" fontWeight="bold">{watchdogCounter}</text>
+                            {/* 复位输出 */}
+                            <line x1="160" y1="80" x2="180" y2="80" stroke={COLOR_MAP.danger} strokeWidth="2" />
+                            <circle cx="180" cy="80" r="8" fill={watchdogCounter <= 10 ? COLOR_MAP.danger : COLOR_MAP.success} className={watchdogCounter <= 10 ? 'animate-blink' : ''} />
+                            <text x="195" y="85" fill="#9ca3af" fontSize="9">RESET</text>
+                            {/* 窗口看门狗 */}
+                            <rect x="220" y="35" width="160" height="100" fill="#1f2937" stroke={COLOR_MAP.secondary} rx="10" />
+                            <text x="300" y="55" fill={COLOR_MAP.secondary} fontSize="11" textAnchor="middle" fontWeight="bold">窗口看门狗 WWDG</text>
+                            {/* APB 时钟 */}
+                            <rect x="240" y="65" width="40" height="30" fill="#374151" stroke={COLOR_MAP.info} rx="3" />
+                            <text x="260" y="83" fill={COLOR_MAP.info} fontSize="8" textAnchor="middle">APB</text>
+                            <text x="260" y="93" fill="#9ca3af" fontSize="7" textAnchor="middle">72MHz</text>
+                            {/* 窗口比较器 */}
+                            <line x1="280" y1="80" x2="300" y2="80" stroke={COLOR_MAP.accent} strokeWidth="2" />
+                            <rect x="300" y="60" width="60" height="40" fill="#374151" stroke={COLOR_MAP.accent} rx="3" />
+                            <text x="330" y="78" fill={COLOR_MAP.accent} fontSize="8" textAnchor="middle">窗口</text>
+                            <text x="330" y="92" fill="#fbbf24" fontSize="9" textAnchor="middle">{windowMode ? '64-127' : '0-127'}</text>
+                            {/* 喂狗按钮 */}
+                            <rect x="60" y="150" width="80" height="35" fill={COLOR_MAP.success} stroke={COLOR_MAP.success} rx="8"
+                                onClick={() => { setFeedTimer(true); setWatchdogCounter(100); }} style={{cursor: 'pointer'}} />
+                            <text x="100" y="172" fill="white" fontSize="11" textAnchor="middle" fontWeight="bold">🦴 喂狗</text>
+                            {/* 状态指示 */}
+                            <rect x="240" y="150" width="120" height="70" fill="#1f2937" stroke={watchdogCounter > 10 ? COLOR_MAP.success : COLOR_MAP.danger} rx="8" />
+                            <text x="300" y="170" fill="white" fontSize="10" textAnchor="middle">系统状态</text>
+                            <text x="300" y="195" fill={watchdogCounter > 10 ? COLOR_MAP.success : COLOR_MAP.danger} fontSize="14" textAnchor="middle" fontWeight="bold">
+                                {watchdogCounter > 10 ? '✓ 正常运行' : '⚠ 即将复位'}
+                            </text>
+                            {/* 计数器递减动画 */}
+                            <line x1="100" y1="240" x2="300" y2="240" stroke="#374151" strokeWidth="2" />
+                            <rect x="100" y="230" width={200 * watchdogCounter / 100} height="20" fill={watchdogCounter > 30 ? COLOR_MAP.success : watchdogCounter > 10 ? COLOR_MAP.accent : COLOR_MAP.danger} rx="3" />
+                            <text x="200" y="265" fill="#9ca3af" fontSize="10" textAnchor="middle">计数器剩余：{watchdogCounter}%</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "独立看门狗 IWDG 配置",
+                    code: `// STM32 独立看门狗 (IWDG) 配置
+// 时钟源：LSI(~32kHz 内部低速时钟)
+
+void IWDG_Init(void) {
+    // 1. 使能访问 IWDG 寄存器
+    IWDG->KR = 0x5555;  // 解锁
+
+    // 2. 配置预分频器 (64 分频)
+    IWDG->PR = IWDG_PR_PR_2;  // /64
+    // 时钟 = 32kHz / 64 = 500Hz (2ms 周期)
+
+    // 3. 配置重装载值
+    IWDG->RLR = 1000;  // 1000 × 2ms = 2 秒超时
+
+    // 4. 等待寄存器同步
+    while (IWDG->SR);
+
+    // 5. 启动看门狗 (开始计数)
+    IWDG->KR = 0xCCCC;  // 启动
+}
+
+// 喂狗函数 (在主循环中调用)
+void IWDG_Feed(void) {
+    IWDG->KR = 0xAAAA;  // 重载计数器
+}
+
+// 超时计算
+// Timeout = (RLR + 1) × (Prescaler / LSI)
+// 例：1000 × 64 / 32000 = 2 秒`,
+                    explanation: "IWDG 使用独立 LSI 时钟，即使主时钟失效也能工作。配置步骤：解锁→设置预分频→设置重装载值→启动。喂狗时写入 0xAAAA 重载计数器。超时时间由预分频和重装载值决定。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.primary} fontSize="12" textAnchor="middle">独立看门狗 IWDG 配置流程</text>
+                            {/* 配置步骤 */}
+                            <g onClick={() => {}} style={{cursor: 'pointer'}}>
+                                <rect x="20" y="35" width="70" height="45" fill="#1f2937" stroke={COLOR_MAP.info} strokeWidth="2" rx="5" />
+                                <text x="55" y="55" fill="white" fontSize="9" textAnchor="middle">1. 解锁</text>
+                                <text x="55" y="70" fill={COLOR_MAP.info} fontSize="8" textAnchor="middle" fontFamily="monospace">0x5555</text>
+                            </g>
+                            <line x1="90" y1="57" x2="110" y2="57" stroke="#6b7280" strokeWidth="1" />
+                            <polygon points="110,57 105,52 105,62" fill="#6b7280" />
+                            <g>
+                                <rect x="120" y="35" width="70" height="45" fill="#1f2937" stroke={COLOR_MAP.accent} strokeWidth="2" rx="5" />
+                                <text x="155" y="55" fill="white" fontSize="9" textAnchor="middle">2. 预分频</text>
+                                <text x="155" y="70" fill={COLOR_MAP.accent} fontSize="8" textAnchor="middle">/64</text>
+                            </g>
+                            <line x1="190" y1="57" x2="210" y2="57" stroke="#6b7280" strokeWidth="1" />
+                            <polygon points="210,57 205,52 205,62" fill="#6b7280" />
+                            <g>
+                                <rect x="220" y="35" width="70" height="45" fill="#1f2937" stroke={COLOR_MAP.success} strokeWidth="2" rx="5" />
+                                <text x="255" y="55" fill="white" fontSize="9" textAnchor="middle">3. 重装载</text>
+                                <text x="255" y="70" fill={COLOR_MAP.success} fontSize="8" textAnchor="middle">1000</text>
+                            </g>
+                            <line x1="290" y1="57" x2="310" y2="57" stroke="#6b7280" strokeWidth="1" />
+                            <polygon points="310,57 305,52 305,62" fill="#6b7280" />
+                            <g>
+                                <rect x="320" y="35" width="70" height="45" fill={COLOR_MAP.danger} stroke={COLOR_MAP.danger} strokeWidth="2" rx="5" />
+                                <text x="355" y="55" fill="white" fontSize="9" textAnchor="middle">4. 启动</text>
+                                <text x="355" y="70" fill="#fbbf24" fontSize="8" textAnchor="middle" fontFamily="monospace">0xCCCC</text>
+                            </g>
+                            {/* 时钟树 */}
+                            <rect x="40" y="100" width="140" height="90" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="110" y="120" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">时钟树</text>
+                            <rect x="55" y="130" width="50" height="30" fill="#374151" stroke={COLOR_MAP.info} rx="3" />
+                            <text x="80" y="148" fill={COLOR_MAP.info} fontSize="8" textAnchor="middle">LSI</text>
+                            <text x="80" y="158" fill="#9ca3af" fontSize="7" textAnchor="middle">~32kHz</text>
+                            <line x1="105" y1="145" x2="125" y2="145" stroke={COLOR_MAP.accent} strokeWidth="2" />
+                            <rect x="125" y="130" width="45" height="30" fill="#374151" stroke={COLOR_MAP.accent} rx="3" />
+                            <text x="147" y="148" fill={COLOR_MAP.accent} fontSize="8" textAnchor="middle">PR</text>
+                            <text x="147" y="158" fill="#fbbf24" fontSize="7" textAnchor="middle">/64</text>
+                            <line x1="170" y1="145" x2="190" y2="145" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            <circle cx="205" cy="145" r="15" fill="#374151" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            <text x="205" y="149" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle">500Hz</text>
+                            {/* 计数器 */}
+                            <rect x="220" y="100" width="140" height="90" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="290" y="120" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">递减计数器</text>
+                            <text x="290" y="150" fill={COLOR_MAP.accent} fontSize="24" textAnchor="middle" fontWeight="bold">{watchdogCounter}</text>
+                            <text x="290" y="175" fill="#9ca3af" fontSize="9" textAnchor="middle">RLR={1000}</text>
+                            {/* 喂狗按钮 */}
+                            <rect x="80" y="205" width="80" height="35" fill={COLOR_MAP.success} rx="8"
+                                onClick={() => { setFeedTimer(true); setWatchdogCounter(100); }} style={{cursor: 'pointer'}} />
+                            <text x="120" y="227" fill="white" fontSize="11" textAnchor="middle" fontWeight="bold">🦴 喂狗</text>
+                            {/* 公式 */}
+                            <rect x="220" y="205" width="140" height="55" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="290" y="225" fill={COLOR_MAP.info} fontSize="9" textAnchor="middle" fontWeight="bold">超时时间计算</text>
+                            <text x="290" y="242" fill="#9ca3af" fontSize="8" textAnchor="middle" fontFamily="monospace">T = RLR × (PR/LSI)</text>
+                            <text x="290" y="255" fill={COLOR_MAP.accent} fontSize="9" textAnchor="middle">1000 × (64/32000) = 2 秒</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "窗口看门狗 WWDG 配置",
+                    code: `// STM32 窗口看门狗 (WWDG) 配置
+// 时钟源：APB1 时钟 (72MHz)
+
+void WWDG_Init(void) {
+    // 1. 使能时钟
+    RCC->APB1ENR |= RCC_APB1ENR_WWDGEN;
+
+    // 2. 配置窗口值 (64-127 之间喂狗有效)
+    WWDG->CFR = (100 << 0);  // 窗口=100
+    // 必须在计数器 64-100 之间喂狗
+    // < 64: 已溢出复位
+    // > 100: 过早喂狗，复位
+
+    // 3. 配置预分频和使能中断
+    WWDG->CFR |= (0 << 6);   // /1 (72MHz)
+    WWDG->CFR |= WWDG_CFR_EWI; // 提前唤醒中断
+
+    // 4. 启动看门狗
+    WWDG->CR = WWDG_CR_WDGA; // 使能
+    WWDG->CR |= (127 << 0);  // 初始值
+}
+
+// 喂狗函数 (必须在窗口内调用)
+void WWDG_Feed(void) {
+    // 检查计数器是否在窗口内
+    if ((WWDG->CR & 0x7F) <= 100) {
+        WWDG->CR = (127 << 0);  // 喂狗
+    }
+}`,
+                    explanation: "窗口看门狗提供更严格的时序监控。必须在规定窗口内喂狗：过早喂狗 (程序跑太快) 或过晚喂狗 (程序卡住) 都会复位。适合检测程序执行时序异常。提前唤醒中断可在复位前执行紧急处理。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.secondary} fontSize="12" textAnchor="middle">窗口看门狗 WWDG 工作原理</text>
+                            {/* 计数器时间线 */}
+                            <rect x="40" y="40" width="320" height="60" fill="#1f2937" stroke={COLOR_MAP.secondary} rx="8" />
+                            {/* 危险区 (过早) */}
+                            <rect x="50" y="50" width="80" height="40" fill={COLOR_MAP.danger} opacity="0.3" rx="3" />
+                            <text x="90" y="73" fill={COLOR_MAP.danger} fontSize="9" textAnchor="middle">过早 ⚠</text>
+                            {/* 安全窗口 */}
+                            <rect x="130" y="50" width="120" height="40" fill={COLOR_MAP.success} opacity="0.3" rx="3" />
+                            <text x="190" y="73" fill={COLOR_MAP.success} fontSize="9" textAnchor="middle">安全窗口 ✓</text>
+                            {/* 危险区 (过晚) */}
+                            <rect x="250" y="50" width="100" height="40" fill={COLOR_MAP.danger} opacity="0.3" rx="3" />
+                            <text x="300" y="73" fill={COLOR_MAP.danger} fontSize="9" textAnchor="middle">过晚 ⚠</text>
+                            {/* 刻度 */}
+                            <text x="50" y="110" fill="#9ca3af" fontSize="9" textAnchor="middle">127</text>
+                            <text x="130" y="110" fill={COLOR_MAP.accent} fontSize="9" textAnchor="middle">100</text>
+                            <text x="250" y="110" fill={COLOR_MAP.danger} fontSize="9" textAnchor="middle">64</text>
+                            <text x="350" y="110" fill={COLOR_MAP.danger} fontSize="9" textAnchor="middle">0</text>
+                            {/* 当前计数器位置 */}
+                            <circle cx={350 - 300 * (watchdogCounter / 127)} cy="80" r="12"
+                                fill={watchdogCounter > 64 && watchdogCounter <= 100 ? COLOR_MAP.success : COLOR_MAP.danger}
+                                className={watchdogCounter > 64 && watchdogCounter <= 100 ? '' : 'animate-blink'} />
+                            <text x={350 - 300 * (watchdogCounter / 127)} y="85" fill="white" fontSize="10" textAnchor="middle" fontWeight="bold">{watchdogCounter}</text>
+                            {/* 配置寄存器 */}
+                            <rect x="40" y="130" width="150" height="70" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="115" y="150" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle" fontWeight="bold">CFR 配置寄存器</text>
+                            <text x="55" y="170" fill="#9ca3af" fontSize="8">窗口值：</text>
+                            <text x="100" y="170" fill={COLOR_MAP.accent} fontSize="9" fontFamily="monospace">100</text>
+                            <text x="55" y="185" fill="#9ca3af" fontSize="8">预分频：</text>
+                            <text x="100" y="185" fill={COLOR_MAP.accent} fontSize="9" fontFamily="monospace">/1</text>
+                            <text x="55" y="200" fill="#9ca3af" fontSize="8">中断：</text>
+                            <text x="100" y="200" fill={COLOR_MAP.success} fontSize="9">✓ 使能</text>
+                            {/* 状态指示 */}
+                            <rect x="210" y="130" width="150" height="70" fill="#1f2937" stroke={watchdogCounter > 64 && watchdogCounter <= 100 ? COLOR_MAP.success : COLOR_MAP.danger} rx="8" />
+                            <text x="285" y="150" fill="white" fontSize="10" textAnchor="middle" fontWeight="bold">喂狗状态</text>
+                            <text x="285" y="175" fill={watchdogCounter > 64 && watchdogCounter <= 100 ? COLOR_MAP.success : COLOR_MAP.danger}
+                                fontSize="12" textAnchor="middle" fontWeight="bold">
+                                {watchdogCounter > 100 ? '⚠ 过早' : watchdogCounter <= 64 ? '⚠ 过晚' : '✓ 窗口内'}
+                            </text>
+                            <text x="285" y="195" fill="#9ca3af" fontSize="9" textAnchor="middle">64 < {watchdogCounter} ≤ 100</text>
+                            {/* 喂狗按钮 */}
+                            <rect x="140" y="215" width="120" height="35" fill={watchdogCounter > 64 && watchdogCounter <= 100 ? COLOR_MAP.success : COLOR_MAP.danger} rx="8"
+                                onClick={() => { if (watchdogCounter > 64 && watchdogCounter <= 100) setWatchdogCounter(127); }} style={{cursor: 'pointer'}} />
+                            <text x="200" y="237" fill="white" fontSize="11" textAnchor="middle" fontWeight="bold">
+                                {watchdogCounter > 64 && watchdogCounter <= 100 ? '🦴 喂狗' : '⚠ 禁止喂狗'}
+                            </text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "喂狗策略与最佳实践",
+                    code: `// 喂狗最佳实践
+
+// 1. 在主循环中喂狗 (不在中断中)
+void main(void) {
+    IWDG_Init();
+    while (1) {
+        Process_Sensor();  // 处理传感器
+        Update_Display();  // 更新显示
+        Check_Alerts();    // 检查告警
+        IWDG_Feed();       // 主循环结束喂狗
+    }
+}
+
+// 2. 看门狗复位检测
+void System_Init(void) {
+    if (RCC->CSR & RCC_CSR_IWDGRSTF) {
+        // 看门狗复位发生！记录故障
+        Log_Error("Watchdog Reset Detected");
+        RCC->CSR |= RCC_CSR_RMVF;  // 清除标志
+    }
+}
+
+// 3. 多级看门狗策略
+// - 任务级：软件标志检测超时
+// - 模块级：看门狗喂狗检测
+// - 系统级：独立看门狗复位
+
+// 4. 避免错误喂狗
+// 不要在以下情况喂狗:
+// - 初始化未完成
+// - 关键外设故障
+// - 系统进入低功耗前`,
+                    explanation: "喂狗应在主循环末尾，确保所有任务正常完成。中断中喂狗可能掩盖任务阻塞问题。复位检测可记录故障原因。多级看门狗提供分层保护：软件标志检测任务超时，硬件看门狗提供最终保障。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.accent} fontSize="12" textAnchor="middle">喂狗策略与最佳实践</text>
+                            {/* 主循环喂狗 */}
+                            <rect x="20" y="35" width="170" height="100" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="105" y="55" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">主循环喂狗 (正确)</text>
+                            {/* 任务流程 */}
+                            <rect x="35" y="65" width="120" height="60" fill="#374151" stroke={COLOR_MAP.success} rx="5" />
+                            <rect x="45" y="72" width="100" height="15" fill={COLOR_MAP.info} opacity="0.3" rx="2" />
+                            <text x="95" y="82" fill={COLOR_MAP.info} fontSize="8" textAnchor="middle">Task 1: 传感器</text>
+                            <rect x="45" y="90" width="100" height="15" fill={COLOR_MAP.info} opacity="0.3" rx="2" />
+                            <text x="95" y="100" fill={COLOR_MAP.info} fontSize="8" textAnchor="middle">Task 2: 显示</text>
+                            <rect x="45" y="108" width="100" height="15" fill={COLOR_MAP.success} rx="2" />
+                            <text x="95" y="118" fill="white" fontSize="8" textAnchor="middle">🦴 喂狗 IWDG_Feed()</text>
+                            {/* 中断喂狗 (错误) */}
+                            <rect x="210" y="35" width="170" height="50" fill="#1f2937" stroke={COLOR_MAP.danger} rx="8" />
+                            <text x="295" y="55" fill={COLOR_MAP.danger} fontSize="10" textAnchor="middle" fontWeight="bold">中断喂狗 (错误 ⚠)</text>
+                            <text x="295" y="75" fill="#9ca3af" fontSize="9" textAnchor="middle">可能掩盖任务阻塞问题</text>
+                            {/* 复位检测 */}
+                            <rect x="210" y="95" width="170" height="70" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="295" y="115" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle" fontWeight="bold">复位检测与记录</text>
+                            <text x="225" y="135" fill="#9ca3af" fontSize="8" fontFamily="monospace">if (RCC->CSR & IWDGRSTF)</text>
+                            <text x="225" y="150" fill="#9ca3af" fontSize="8" fontFamily="monospace">Log_Error("WDT Reset");</text>
+                            {/* 多级看门狗 */}
+                            <rect x="20" y="145" width="170" height="70" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="105" y="165" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">多级看门狗架构</text>
+                            <text x="35" y="185" fill="#9ca3af" fontSize="8">• 任务级：软件超时检测</text>
+                            <text x="35" y="200" fill="#9ca3af" fontSize="8">• 模块级：喂狗检测</text>
+                            <text x="35" y="215" fill="#9ca3af" fontSize="8">• 系统级：IWDG 复位</text>
+                            {/* 喂狗检查清单 */}
+                            <rect x="210" y="175" width="170" height="85" fill="#1f2937" stroke={COLOR_MAP.accent} rx="8" />
+                            <text x="295" y="195" fill={COLOR_MAP.accent} fontSize="10" textAnchor="middle" fontWeight="bold">禁止喂狗场景</text>
+                            <text x="225" y="215" fill={COLOR_MAP.danger} fontSize="8">⚠ 初始化未完成</text>
+                            <text x="225" y="230" fill={COLOR_MAP.danger} fontSize="8">⚠ 关键外设故障</text>
+                            <text x="225" y="245" fill={COLOR_MAP.danger} fontSize="8">⚠ 进入低功耗前</text>
+                            {/* 喂狗按钮 */}
+                            <rect x="120" y="225" width="70" height="30" fill={COLOR_MAP.success} rx="6"
+                                onClick={() => { setFeedTimer(true); setWatchdogCounter(100); }} style={{cursor: 'pointer'}} />
+                            <text x="155" y="244" fill="white" fontSize="10" textAnchor="middle" fontWeight="bold">🦴 喂狗</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "看门狗调试技巧",
+                    code: `// 看门狗调试技巧
+
+// 1. 临时禁用看门狗 (调试阶段)
+#ifdef DEBUG
+    // 调试时不启动看门狗
+    // 避免断点调试时复位
+    #define IWDG_DISABLE()
+#else
+    #define IWDG_DISABLE() IWDG->KR = 0xCCCC
+#endif
+
+// 2. 添加喂狗计数器
+volatile uint32_t feed_count = 0;
+void IWDG_Feed(void) {
+    feed_count++;  // 记录喂狗次数
+    IWDG->KR = 0xAAAA;
+}
+
+// 3. 检查栈溢出 (常见死机原因)
+// 填充栈空间为特定值
+// 检查填充值是否被覆盖
+
+// 4. 使用 DWT 计数器检测任务时间
+void Task_Start(void) {
+    task_start_time = DWT->CYCCNT;
+}
+void Task_Check(void) {
+    uint32_t elapsed = DWT->CYCCNT - task_start_time;
+    if (elapsed > MAX_TASK_TIME) {
+        Log_Warning("Task Timeout");
+    }
+}`,
+                    explanation: "调试时临时禁用看门狗避免断点触发复位。喂狗计数器帮助诊断问题。栈溢出是常见死机原因，可填充特定值检测。DWT 计数器精确测量任务执行时间，提前发现超时风险。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.info} fontSize="12" textAnchor="middle">看门狗调试技巧</text>
+                            {/* 调试模式检测 */}
+                            <rect x="20" y="35" width="170" height="60" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="105" y="55" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">调试模式检测</text>
+                            <text x="35" y="75" fill="#9ca3af" fontSize="8" fontFamily="monospace">#ifdef DEBUG</text>
+                            <text x="35" y="88" fill={COLOR_MAP.success} fontSize="8">// 禁用看门狗</text>
+                            <text x="35" y="100" fill="#9ca3af" fontSize="8" fontFamily="monospace">#endif</text>
+                            {/* 喂狗计数器 */}
+                            <rect x="210" y="35" width="170" height="60" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="295" y="55" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">喂狗计数器</text>
+                            <text x="225" y="75" fill="#9ca3af" fontSize="8" fontFamily="monospace">feed_count++</text>
+                            <text x="295" y="88" fill={COLOR_MAP.accent} fontSize="14" textAnchor="middle" fontWeight="bold">{counterValue % 1000}</text>
+                            {/* 栈溢出检测 */}
+                            <rect x="20" y="105" width="170" height="80" fill="#1f2937" stroke={COLOR_MAP.danger} rx="8" />
+                            <text x="105" y="125" fill={COLOR_MAP.danger} fontSize="10" textAnchor="middle" fontWeight="bold">栈溢出检测</text>
+                            {/* 栈示意图 */}
+                            <rect x="40" y="135" width="20" height="40" fill="#374151" stroke={COLOR_MAP.info} rx="2" />
+                            <rect x="40" y="155" width="20" height="18" fill={COLOR_MAP.danger} opacity="0.5" rx="2" />
+                            <text x="70" y="150" fill="#9ca3af" fontSize="8">栈顶</text>
+                            <text x="70" y="165" fill={COLOR_MAP.danger} fontSize="8">溢出区域</text>
+                            <text x="50" y="172" fill="white" fontSize="6" textAnchor="middle">0xDE</text>
+                            {/* DWT 计数器 */}
+                            <rect x="210" y="105" width="170" height="80" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="295" y="125" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle" fontWeight="bold">DWT 任务计时</text>
+                            <text x="225" y="145" fill="#9ca3af" fontSize="8" fontFamily="monospace">DWT->CYCCNT</text>
+                            <text x="225" y="160" fill={COLOR_MAP.accent} fontSize="9">开始：{counterValue % 10000}</text>
+                            <text x="225" y="175" fill={COLOR_MAP.success} fontSize="9">耗时：{(counterValue % 100)} μs</text>
+                            {/* 调试输出 */}
+                            <rect x="20" y="195" width="360" height="65" fill="#1f2937" stroke={COLOR_MAP.accent} rx="8" />
+                            <text x="200" y="215" fill={COLOR_MAP.accent} fontSize="10" textAnchor="middle" fontWeight="bold">调试信息输出</text>
+                            <text x="40" y="235" fill="#9ca3af" fontSize="8" fontFamily="monospace">[DBG] Feed count: {counterValue % 1000}</text>
+                            <text x="200" y="235" fill="#9ca3af" fontSize="8" fontFamily="monospace">Stack free: {80 - (counterValue % 60)}%</text>
+                            <text x="300" y="235" fill={COLOR_MAP.success} fontSize="8" fontFamily="monospace">Task time: {(counterValue % 50)}ms</text>
+                            <text x="150" y="255" fill={COLOR_MAP.info} fontSize="8" fontFamily="monospace">Last feed: {(counterValue % 1000)}ms ago</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "看门狗应用实例",
+                    code: `// 看门狗完整应用实例
+
+// 系统状态机
+typedef enum {
+    SYS_INIT,      // 初始化
+    SYS_RUNNING,   // 正常运行
+    SYS_ERROR,     // 错误状态
+    SYS_SLEEP     // 低功耗
+} SystemState_t;
+
+volatile SystemState_t sysState = SYS_INIT;
+
+// 主循环
+int main(void) {
+    System_Init();
+    IWDG_Init();  // 启动看门狗
+
+    while (1) {
+        switch (sysState) {
+            case SYS_INIT:
+                if (Init_Complete())
+                    sysState = SYS_RUNNING;
+                break;
+
+            case SYS_RUNNING:
+                if (Check_Sensors() == OK)
+                    IWDG_Feed();  // 喂狗
+                else
+                    sysState = SYS_ERROR;
+                break;
+
+            case SYS_ERROR:
+                // 错误时不喂狗，触发复位
+                Error_Handler();
+                break;
+
+            case SYS_SLEEP:
+                // 进入低功耗前停止看门狗
+                IWDG_Stop();
+                Enter_Sleep();
+                break;
+        }
+    }
+}`,
+                    explanation: "完整应用实例展示状态机与看门狗配合。初始化完成后启动看门狗。正常运行时定期检查传感器并喂狗。错误状态不喂狗触发复位。低功耗模式前需停止看门狗。这种设计确保系统故障时自动恢复。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.accent} fontSize="12" textAnchor="middle">看门狗应用实例 - 状态机</text>
+                            {/* 状态机 */}
+                            <circle cx="200" cy="100" r="70" fill="#1f2937" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                            {/* INIT 状态 */}
+                            <rect x="175" y="45" width="50" height="25" fill={watchdogCounter >= 90 ? COLOR_MAP.info : '#374151'} stroke={COLOR_MAP.info} rx="3" />
+                            <text x="200" y="60" fill="white" fontSize="8" textAnchor="middle">INIT</text>
+                            {/* RUNNING 状态 */}
+                            <rect x="175" y="125" width="50" height="25" fill={watchdogCounter >= 50 && watchdogCounter < 90 ? COLOR_MAP.success : '#374151'} stroke={COLOR_MAP.success} rx="3" />
+                            <text x="200" y="140" fill="white" fontSize="8" textAnchor="middle">RUN</text>
+                            {/* ERROR 状态 */}
+                            <rect x="130" y="87" width="50" height="25" fill={watchdogCounter < 30 ? COLOR_MAP.danger : '#374151'} stroke={COLOR_MAP.danger} rx="3" />
+                            <text x="155" y="102" fill="white" fontSize="8" textAnchor="middle">ERR</text>
+                            {/* SLEEP 状态 */}
+                            <rect x="220" y="87" width="50" height="25" fill="#374151" stroke="#6b7280" rx="3" />
+                            <text x="245" y="102" fill="white" fontSize="8" textAnchor="middle">SLP</text>
+                            {/* 状态转换箭头 */}
+                            <path d="M 200 70 L 200 125" stroke="#6b7280" strokeWidth="1" markerEnd="url(#arrow)" />
+                            <path d="M 175 137 L 180 120" stroke="#6b7280" strokeWidth="1" />
+                            <path d="M 225 100 L 240 100" stroke="#6b7280" strokeWidth="1" />
+                            {/* 当前状态 */}
+                            <circle cx="200" cy="100" r="8" fill={COLOR_MAP.accent} className="animate-pulse" />
+                            <text x="200" y="104" fill="white" fontSize="8" textAnchor="middle" fontWeight="bold">●</text>
+                            {/* 喂狗指示 */}
+                            <rect x="30" y="180" width="150" height="80" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="105" y="200" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">喂狗条件</text>
+                            <text x="45" y="220" fill={watchdogCounter >= 50 && watchdogCounter < 90 ? COLOR_MAP.success : COLOR_MAP.danger} fontSize="9">
+                                {watchdogCounter >= 50 && watchdogCounter < 90 ? '✓' : '✗'} 系统正常运行
+                            </text>
+                            <text x="45" y="235" fill={watchdogCounter >= 50 && watchdogCounter < 90 ? COLOR_MAP.success : COLOR_MAP.danger} fontSize="9">
+                                {watchdogCounter >= 50 && watchdogCounter < 90 ? '✓' : '✗'} 传感器检测通过
+                            </text>
+                            <text x="45" y="250" fill="#9ca3af" fontSize="9">状态：{watchdogCounter >= 90 ? 'INIT' : watchdogCounter >= 50 ? 'RUNNING' : 'ERROR'}</text>
+                            {/* 复位计数器 */}
+                            <rect x="200" y="180" width="170" height="80" fill="#1f2937" stroke={COLOR_MAP.danger} rx="8" />
+                            <text x="285" y="200" fill={COLOR_MAP.danger} fontSize="10" textAnchor="middle" fontWeight="bold">复位统计</text>
+                            <text x="220" y="225" fill="#9ca3af" fontSize="9">看门狗复位:</text>
+                            <text x="280" y="225" fill={COLOR_MAP.danger} fontSize="12" textAnchor="middle">{(counterValue / 100) % 10}</text>
+                            <text x="220" y="245" fill="#9ca3af" fontSize="9">上电复位:</text>
+                            <text x="280" y="245" fill={COLOR_MAP.info} fontSize="12" textAnchor="middle">1</text>
+                            <text x="340" y="245" fill="#9ca3af" fontSize="9">总复位:</text>
+                            <text x="360" y="245" fill={COLOR_MAP.accent} fontSize="12" textAnchor="middle">{((counterValue / 100) % 10) + 1}</text>
+                            {/* 喂狗按钮 */}
+                            <rect x="140" y="265" width="120" height="25" fill={watchdogCounter >= 50 && watchdogCounter < 90 ? COLOR_MAP.success : COLOR_MAP.danger} rx="6"
+                                onClick={() => { if (watchdogCounter >= 50 && watchdogCounter < 90) setWatchdogCounter(100); }} style={{cursor: 'pointer'}} />
+                            <text x="200" y="281" fill="white" fontSize="9" textAnchor="middle" fontWeight="bold">
+                                {watchdogCounter >= 50 && watchdogCounter < 90 ? '🦴 喂狗' : '⚠ 无法喂狗'}
+                            </text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "看门狗总结与选型",
+                    code: `// 看门狗总结与选型指南
+
+// IWDG vs WWDG 对比
+// +----------+----------+----------+
+// | 特性     | IWDG     | WWDG     |
+// +----------+----------+----------+
+// | 时钟源   | LSI      | APB      |
+// | 独立性   | 高       | 中       |
+// | 精度     | 低       | 高       |
+// | 功耗     | 低       | 中       |
+// | 窗口模式 | 无       | 有       |
+// | 适用场景 | 通用     | 时序敏感 |
+// +----------+----------+----------+
+
+// 选型建议
+// 1. 一般应用：IWDG(简单可靠)
+// 2. 时序敏感：WWDG(窗口检测)
+// 3. 高可靠：IWDG + WWDG 双重保护
+// 4. 低功耗：IWDG(独立 LSI)
+
+// 关键设计原则
+// 1. 喂狗点分散，避免集中
+// 2. 错误时不喂狗，触发复位
+// 3. 记录复位原因，便于调试
+// 4. 看门狗超时 > 最长任务时间`,
+                    explanation: "IWDG 独立可靠适合通用场景，WWDG 精度高带窗口检测适合时序敏感应用。高可靠性系统可同时使用两者。设计原则：喂狗点分散布置，错误时停止喂狗，记录复位原因，超时时间留足余量。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.accent} fontSize="12" textAnchor="middle">看门狗总结与选型指南</text>
+                            {/* 对比表格 */}
+                            <rect x="20" y="35" width="360" height="110" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="200" y="55" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">IWDG vs WWDG 对比</text>
+                            {/* 表头 */}
+                            <rect x="35" y="65" width="80" height="20" fill="#374151" rx="2" />
+                            <text x="75" y="78" fill="white" fontSize="8" textAnchor="middle">特性</text>
+                            <rect x="115" y="65" width="80" height="20" fill={COLOR_MAP.info} opacity="0.3" rx="2" />
+                            <text x="155" y="78" fill={COLOR_MAP.info} fontSize="8" textAnchor="middle">IWDG</text>
+                            <rect x="195" y="65" width="80" height="20" fill={COLOR_MAP.secondary} opacity="0.3" rx="2" />
+                            <text x="235" y="78" fill={COLOR_MAP.secondary} fontSize="8" textAnchor="middle">WWDG</text>
+                            {/* 行 1: 时钟源 */}
+                            <text x="45" y="95" fill="#9ca3af" fontSize="8">时钟源</text>
+                            <text x="155" y="95" fill={COLOR_MAP.info} fontSize="8" textAnchor="middle">LSI (~32kHz)</text>
+                            <text x="235" y="95" fill={COLOR_MAP.secondary} fontSize="8" textAnchor="middle">APB (72MHz)</text>
+                            {/* 行 2: 独立性 */}
+                            <text x="45" y="112" fill="#9ca3af" fontSize="8">独立性</text>
+                            <text x="155" y="112" fill={COLOR_MAP.success} fontSize="8" textAnchor="middle">高 ✓</text>
+                            <text x="235" y="112" fill={COLOR_MAP.accent} fontSize="8" textAnchor="middle">中</text>
+                            {/* 行 3: 精度 */}
+                            <text x="45" y="129" fill="#9ca3af" fontSize="8">精度</text>
+                            <text x="155" y="129" fill={COLOR_MAP.danger} fontSize="8" textAnchor="middle">低</text>
+                            <text x="235" y="129" fill={COLOR_MAP.success} fontSize="8" textAnchor="middle">高 ✓</text>
+                            {/* 行 4: 窗口模式 */}
+                            <text x="45" y="146" fill="#9ca3af" fontSize="8">窗口模式</text>
+                            <text x="155" y="146" fill={COLOR_MAP.danger} fontSize="8" textAnchor="middle">无 ✗</text>
+                            <text x="235" y="146" fill={COLOR_MAP.success} fontSize="8" textAnchor="middle">有 ✓</text>
+                            {/* 选型建议 */}
+                            <rect x="20" y="155" width="170" height="75" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="105" y="175" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">选型建议</text>
+                            <text x="35" y="195" fill="#9ca3af" fontSize="8">• 一般应用 → IWDG</text>
+                            <text x="35" y="210" fill="#9ca3af" fontSize="8">• 时序敏感 → WWDG</text>
+                            <text x="35" y="225" fill="#9ca3af" fontSize="8">• 高可靠 → 双重保护</text>
+                            {/* 设计原则 */}
+                            <rect x="210" y="155" width="170" height="75" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="295" y="175" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle" fontWeight="bold">设计原则</text>
+                            <text x="225" y="195" fill="#9ca3af" fontSize="8">• 喂狗点分散</text>
+                            <text x="225" y="210" fill="#9ca3af" fontSize="8">• 错误不喂狗</text>
+                            <text x="225" y="225" fill="#9ca3af" fontSize="8">• 记录复位原因</text>
+                            {/* 双重保护示意 */}
+                            <circle cx="200" cy="265" r="15" fill={COLOR_MAP.primary} opacity="0.5" />
+                            <circle cx="200" cy="265" r="10" fill={COLOR_MAP.secondary} opacity="0.5" />
+                            <text x="200" y="269" fill="white" fontSize="8" textAnchor="middle" fontWeight="bold">I+W</text>
+                            <text x="200" y="285" fill={COLOR_MAP.accent} fontSize="9" textAnchor="middle">双重保护</text>
+                        </svg>
+                    )
+                }
+            ];
+
+            const [counterValue, setCounterValue] = React.useState(0);
+
+            React.useEffect(() => {
+                const speak = (text) => {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v => v.lang.includes('zh-CN') && v.name.includes('Xiaoxiao'))
+                        || voices.find(v => v.lang.includes('zh-CN'))
+                        || voices[0];
+                    if (zhVoice) utterance.voice = zhVoice;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev + 1) % STEPS.length);
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev + 1) % STEPS.length);
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak(STEPS[currentStep].title);
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [currentStep]);
+
+            React.useEffect(() => {
+                const timer = setInterval(() => {
+                    setWatchdogCounter(prev => {
+                        if (prev <= 0) return 100;
+                        return prev - 1;
+                    });
+                    setCounterValue(prev => (prev + 1) % 10000);
+                }, 100);
+                return () => clearInterval(timer);
+            }, []);
+
+            return (
+                <div class="flex flex-col h-screen bg-gray-900 text-white">
+                    <div class="flex-1 flex overflow-hidden">
+                        {/* 左侧：代码区 */}
+                        <div class="w-1/3 border-r border-gray-700 flex flex-col bg-gray-800">
+                            <div class="p-3 border-b border-gray-700 bg-gray-900">
+                                <h2 class="text-lg font-bold text-purple-400">💻 代码示例</h2>
+                            </div>
+                            <div class="flex-1 overflow-auto p-4">
+                                <pre class="text-sm text-green-400 font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        </div>
+
+                        {/* 中间：可视化区 */}
+                        <div class="w-1/3 border-r border-gray-700 flex flex-col">
+                            <div class="p-3 border-b border-gray-700 bg-gray-900">
+                                <h2 class="text-lg font-bold text-cyan-400">🎬 可视化动画</h2>
+                            </div>
+                            <div class="flex-1 p-4 bg-gray-800">
+                                {STEPS[currentStep].renderVisual()}
+                            </div>
+                        </div>
+
+                        {/* 右侧：解释区 */}
+                        <div class="w-1/3 flex flex-col bg-gray-800">
+                            <div class="p-3 border-b border-gray-700 bg-gray-900">
+                                <h2 class="text-lg font-bold text-yellow-400">📖 原理解析</h2>
+                            </div>
+                            <div class="flex-1 overflow-auto p-4">
+                                <p class="text-base text-gray-300 leading-relaxed">
+                                    {STEPS[currentStep].explanation}
+                                </p>
+                                <div class="mt-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
+                                    <h3 class="text-sm font-bold text-purple-400 mb-2">📌 关键要点</h3>
+                                    <ul class="text-sm text-gray-400 space-y-1 list-disc list-inside">
+                                        {currentStep === 0 && <li>看门狗检测系统故障并复位</li>}
+                                        {currentStep === 0 && <li>独立看门狗使用 LSI 时钟</li>}
+                                        {currentStep === 0 && <li>窗口看门狗检测时序异常</li>}
+                                        {currentStep === 1 && <li>IWDG 配置：解锁→分频→重载→启动</li>}
+                                        {currentStep === 1 && <li>喂狗写入 0xAAAA 重载计数器</li>}
+                                        {currentStep === 1 && <li>超时 = RLR × (PR/LSI)</li>}
+                                        {currentStep === 2 && <li>窗口内喂狗：64-100</li>}
+                                        {currentStep === 2 && <li>过早/过晚喂狗都会复位</li>}
+                                        {currentStep === 2 && <li>提前唤醒中断可紧急处理</li>}
+                                        {currentStep === 3 && <li>主循环喂狗，不在中断中</li>}
+                                        {currentStep === 3 && <li>复位检测记录故障原因</li>}
+                                        {currentStep === 3 && <li>多级看门狗分层保护</li>}
+                                        {currentStep === 4 && <li>调试时临时禁用看门狗</li>}
+                                        {currentStep === 4 && <li>栈溢出检测定位死机</li>}
+                                        {currentStep === 4 && <li>DWT 计数器测量任务时间</li>}
+                                        {currentStep === 5 && <li>状态机管理运行模式</li>}
+                                        {currentStep === 5 && <li>错误状态不喂狗触发复位</li>}
+                                        {currentStep === 5 && <li>低功耗前停止看门狗</li>}
+                                        {currentStep === 6 && <li>IWDG：独立可靠，通用场景</li>}
+                                        {currentStep === 6 && <li>WWDG：精度高，时序敏感</li>}
+                                        {currentStep === 6 && <li>高可靠系统双重保护</li>}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部控制栏 */}
+                    <div class="border-t border-gray-700 bg-gray-800 p-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-4">
+                                <span class="text-sm text-gray-400">步骤 {currentStep + 1} / {STEPS.length}</span>
+                                <div class="flex space-x-2">
+                                    {STEPS.map((_, i) => (
+                                        <button key={i} onClick={() => setCurrentStep(i)}
+                                            className={`w-3 h-3 rounded-full transition-all ${i === currentStep ? 'bg-purple-400 scale-125' : 'bg-gray-600'}`}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                            <div class="flex space-x-3">
+                                <button onClick={() => setCurrentStep((prev - 1 + STEPS.length) % STEPS.length)}
+                                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">
+                                    ⏮ 上一步
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm transition-colors">
+                                    {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                                </button>
+                                <button onClick={() => setCurrentStep((prev + 1) % STEPS.length)}
+                                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">
+                                    下一步 ⏭
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

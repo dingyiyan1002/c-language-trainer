@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>restrict 指针限定符 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#4c1d95;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#5b21b6;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#ede9fe,#ddd6fe);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#a78bfa;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#7c3aed;box-shadow:0 0 20px rgba(124,58,237,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#4c1d95;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .pointer-container{display:flex;flex-direction:column;gap:12px;margin:16px 0}
+    .pointer-box{border-radius:12px;padding:16px;transition:all 0.4s ease;border:3px solid transparent}
+    .pointer-box.definition{background:linear-gradient(135deg:#ede9fe,#ddd6fe);border-color:#7c3aed}
+    .pointer-box.active{transform:scale(1.02);box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+    .ptr-row{display:flex;align-items:center;margin-bottom:8px;gap:8px}
+    .ptr-label{width:120px;font-size:11px;color:#5b21b6;font-weight:600;font-family:'Consolas',monospace}
+    .pointer-box-inner{flex:1;background:white;border-radius:8px;padding:12px;border:2px solid#e5e7eb;transition:all 0.3s ease;position:relative}
+    .pointer-box-inner.active{border-color:#7c3aed;background:linear-gradient(135deg:#ede9fe,#ddd6fe)}
+    .ptr-type{font-size:10px;color:#64748b}
+    .ptr-value{font-size:12px;font-weight:700;color:#5b21b6;font-family:'Consolas',monospace}
+    .memory-display{background:#1e293b;border-radius:12px;padding:16px;margin:16px 0}
+    .memory-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#0f172a;border-radius:8px;margin-bottom:8px;transition:all 0.4s ease}
+    .memory-row.pending{opacity:0.5}
+    .memory-row.active{background:linear-gradient(135deg,#7c3aed,#6d28d9);border:2px solid#a78bfa}
+    .memory-name{font-size:12px;color:#94a3b8;font-family:'Consolas',monospace}
+    .memory-value{font-size:14px;font-weight:700;color:#c4b5fd;font-family:'Consolas',monospace}
+    .comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+    .compare-card{background:white;border-radius:8px;padding:12px;text-align:center;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .compare-card.active{border-color:#7c3aed;background:linear-gradient(135deg:#ede9fe,#ddd6fe)}
+    .compare-label{font-size:10px;color:#64748b;margin-bottom:4px}
+    .compare-code{font-size:11px;color:#5b21b6;font-family:'Consolas',monospace}
+    .compare-desc{font-size:9px;color:#64748b;margin-top:4px}
+    .use-case-list{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+    .use-item{background:#ede9fe;border-radius:8px;padding:12px;border-left:4px solid#7c3aed;transition:all 0.3s ease}
+    .use-item.active{border-left-color:#22c55e;background:linear-gradient(135deg:#ede9fe,#ddd6fe)}
+    .use-title{font-size:11px;color:#4c1d95;font-weight:700;margin-bottom:4px}
+    .use-example{font-size:10px;color:#5b21b6;font-family:'Consolas',monospace}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#c4b5fd;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#c4b5fd;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+    .overlap-indicator{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#ef4444;color:white;padding:12px 24px;border-radius:12px;font-weight:700;z-index:100;animation:pulse 1s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',violet:'#7c3aed'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:2,text:'void copy(int *restrict dst, const int *restrict src, int n)',color:'#7c3aed'},
+      3:{step:3,text:'{ for(int i=0; i<n; i++) dst[i] = src[i]; }',color:'#a78bfa'},
+      4:{step:4,text:'int a[10] = {0}, b[10] = {1,2,3};',color:'#c4b5fd'},
+      5:{step:5,text:'copy(a, b, 10); // restrict 保证不重叠',color:'#a78bfa'},
+      6:{step:6,text:'return 0;',color:'#3b82f6'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，restrict 用于指针，告诉编译器该指针不与其他指针别名',
+      2:'函数参数使用 restrict，承诺 dst 和 src 指向不重叠的内存区域',
+      3:'循环拷贝数据，编译器可以对 restrict 指针进行激进的循环展开优化',
+      4:'定义两个数组 a 和 b，它们占据不同的内存区域',
+      5:'调用 copy 函数，restrict 保证安全优化，性能提升',
+      6:'程序结束，restrict 用于高性能计算、DSP、向量运算'
+    };
+    const pointers = [
+      {name:'int *restrict dst',target:'数组 a',desc:'目标指针'},
+      {name:'const int *restrict src',target:'数组 b',desc:'源指针'},
+      {name:'int n',target:'数量',desc:'元素个数'}
+    ];
+    const memoryOps = [
+      {op:'数组 a',addr:'0x1000-0x1028',state:'独立区域'},
+      {op:'数组 b',addr:'0x1030-0x1058',state:'独立区域'},
+      {op:'拷贝操作',addr:'a←b',state:'无重叠'}
+    ];
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',pointer:'M12 19l9 2-9-18-9 18 9-2zm0 0v-8'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [activePtr,setActivePtr] = useState(-1);
+      const [memoryIdx,setMemoryIdx] = useState(-1);
+      const [showOverlap,setShowOverlap] = useState(false);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 6; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setActivePtr(-1);
+          setMemoryIdx(-1);
+          setTerminalLines([]);
+          setShowOverlap(false);
+        } else if(step === 2) {
+          setActivePtr(0);
+          setMemoryIdx(0);
+        } else if(step === 3) {
+          setActivePtr(1);
+          setMemoryIdx(1);
+        } else if(step === 4) {
+          setActivePtr(2);
+        } else if(step === 5) {
+          setMemoryIdx(2);
+          setTerminalLines(['copy completed: a[0]=1, a[1]=2, a[2]=3']);
+        } else if(step === 6) {
+          // Complete
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setActivePtr(-1);
+        setMemoryIdx(-1);
+        setTerminalLines([]);
+        setShowOverlap(false);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          {showOverlap && <div className="overlap-indicator">⚠️ 违反 restrict：未定义行为</div>}
+          <div className="header">
+            <h1>restrict 指针限定符 - C 语言可视化</h1>
+            <p>restrict | 指针别名 | 编译器优化</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <button className="btn" style={{background:'#ef4444',color:'white'}} onClick={() => setShowOverlap(true)} disabled={step < 5}>
+              ⚠️ 演示重叠
+            </button>
+            <div style={{background:COLOR_MAP.violet,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                restrict_ptr.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.pointer} size={22} />
+                restrict 可视化
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">restrict</span>
+                  <span className="var-type">Pointer Alias Hint</span>
+                </div>
+                <div className="pointer-container">
+                  <div className={`pointer-box definition ${step >= 2 ? 'active' : ''}`}>
+                    <div style={{fontSize:13,fontWeight:700,color:'#4c1d95',marginBottom:12}}>restrict 指针参数</div>
+                    {pointers.map((p, idx) => (
+                      <div key={p.name} className="ptr-row">
+                        <span className="ptr-label">{p.name}</span>
+                        <div className={`pointer-box-inner ${step >= 2 + idx && activePtr === idx ? 'active' : ''}`}>
+                          <div className="ptr-type">{p.desc} → {p.target}</div>
+                          <div className="ptr-value">{step >= 3 + idx ? '🔒 无别名' : '未初始化'}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="memory-display">
+                  <div style={{color:'#94a3b8',fontSize:12,marginBottom:12}}>内存布局</div>
+                  {memoryOps.map((m, idx) => (
+                    <div key={idx} className={`memory-row ${step >= 2 + idx && memoryIdx >= idx ? 'active' : 'pending'}`}>
+                      <span className="memory-name">{m.op}</span>
+                      <span className="memory-value">{m.addr} - {m.state}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="comparison-grid">
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">restrict</div>
+                    <div className="compare-code">无别名指针</div>
+                    <div className="compare-desc">激进优化</div>
+                  </div>
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">普通指针</div>
+                    <div className="compare-code">可能别名</div>
+                    <div className="compare-desc">保守优化</div>
+                  </div>
+                  <div className={`compare-card ${step >= 3 ? 'active' : ''}`}>
+                    <div className="compare-label">优点</div>
+                    <div className="compare-code">循环展开</div>
+                    <div className="compare-desc">SIMD 优化</div>
+                  </div>
+                  <div className={`compare-card ${step >= 3 ? 'active' : ''}`}>
+                    <div className="compare-label">风险</div>
+                    <div className="compare-code">未定义行为</div>
+                    <div className="compare-desc">重叠时</div>
+                  </div>
+                </div>
+                <div className="use-case-list">
+                  <div className={`use-item ${step >= 2 ? 'active' : ''}`}>
+                    <div className="use-title">内存拷贝函数</div>
+                    <div className="use-example">void *memcpy(void *restrict dst, const void *restrict src, size_t n);</div>
+                  </div>
+                  <div className={`use-item ${step >= 3 ? 'active' : ''}`}>
+                    <div className="use-title">DSP 向量运算</div>
+                    <div className="use-example">void vadd(float *restrict out, const float *restrict a, const float *restrict b);</div>
+                  </div>
+                  <div className={`use-item ${step >= 4 ? 'active' : ''}`}>
+                    <div className="use-title">矩阵运算</div>
+                    <div className="use-example">void matmul(double *restrict C, const double *restrict A, const double *restrict B);</div>
+                  </div>
+                  <div className={`use-item ${step >= 5 ? 'active' : ''}`}>
+                    <div className="use-title">高性能计算</div>
+                    <div className="use-example">循环展开、向量化、指令级并行</div>
+                  </div>
+                </div>
+              </div>
+              {step >= 5 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.violet}}>restrict 含义</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>指针不与其他指针别名</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>编译器优化</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>循环展开、向量化</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>未定义行为</strong>
+                <p style={{marginTop:8,color:'#78350f'>违反 restrict 承诺时</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>应用场景</strong>
+                <p style={{marginTop:8,color:'#78350f'>DSP、矩阵运算、memcpy</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

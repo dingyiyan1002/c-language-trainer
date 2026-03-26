@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>中断服务例程 ISR - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#059669 0%,#047857 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#065f46;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#047857;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#d1fae5,#a7f3d0);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#34d399;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#059669;box-shadow:0 0 20px rgba(5,150,105,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#065f46;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .isr-container{display:flex;flex-direction:column;gap:12px;margin:16px 0}
+    .isr-box{border-radius:12px;padding:16px;transition:all 0.4s ease;border:3px solid transparent}
+    .isr-box.definition{background:linear-gradient(135deg:#d1fae5,#a7f3d0);border-color:#059669}
+    .isr-box.active{transform:scale(1.02);box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+    .isr-row{display:flex;align-items:center;margin-bottom:8px;gap:8px}
+    .isr-label{width:140px;font-size:11px;color:#047857;font-weight:600;font-family:'Consolas',monospace}
+    .isr-box-inner{flex:1;background:white;border-radius:8px;padding:12px;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .isr-box-inner.active{border-color:#059669;background:linear-gradient(135deg:#d1fae5,#a7f3d0)}
+    .isr-type{font-size:10px;color:#64748b}
+    .isr-value{font-size:12px;font-weight:700;color:#047857;font-family:'Consolas',monospace}
+    .context-display{background:#1e293b;border-radius:12px;padding:16px;margin:16px 0}
+    .context-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#0f172a;border-radius:8px;margin-bottom:8px;transition:all 0.4s ease}
+    .context-row.pending{opacity:0.5}
+    .context-row.active{background:linear-gradient(135deg,#059669,#047857);border:2px solid#34d399}
+    .context-name{font-size:12px;color:#94a3b8;font-family:'Consolas',monospace}
+    .context-value{font-size:14px;font-weight:700;color:#6ee7b7;font-family:'Consolas',monospace}
+    .comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+    .compare-card{background:white;border-radius:8px;padding:12px;text-align:center;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .compare-card.active{border-color:#059669;background:linear-gradient(135deg:#d1fae5,#a7f3d0)}
+    .compare-label{font-size:10px;color:#64748b;margin-bottom:4px}
+    .compare-code{font-size:11px;color:#047857;font-family:'Consolas',monospace}
+    .compare-desc{font-size:9px;color:#64748b;margin-top:4px}
+    .use-case-list{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+    .use-item{background:#d1fae5;border-radius:8px;padding:12px;border-left:4px solid#059669;transition:all 0.3s ease}
+    .use-item.active{border-left-color:#22c55e;background:linear-gradient(135deg:#d1fae5,#a7f3d0)}
+    .use-title{font-size:11px;color:#065f46;font-weight:700;margin-bottom:4px}
+    .use-example{font-size:10px;color:#047857;font-family:'Consolas',monospace}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#6ee7b7;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#6ee7b7;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',emerald:'#059669'};
+    const LINE_MAP = {
+      1:{step:1,text:'// 嵌入式系统中断',color:'#059669'},
+      2:{step:2,text:'__attribute__((interrupt))',color:'#34d399'},
+      3:{step:3,text:'void ISR_Timer0(void) {',color:'#6ee7b7'},
+      4:{step:4,text:'  flag = 1; // 设置标志',color:'#a7f3d0'},
+      5:{step:5,text:'  clear_interrupt();',color:'#d1fae5'},
+      6:{step:6,text:'// 硬件触发，自动保存上下文',color:'#3b82f6'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，中断服务例程 ISR 是硬件触发的特殊函数，用于处理异步事件',
+      2:'使用 interrupt 属性标记 ISR 函数，编译器生成特殊的中断返回指令',
+      3:'定义 ISR_Timer0 定时器 0 中断服务例程，无参数无返回值',
+      4:'设置全局标志位 flag，通知主循环中断事件已发生',
+      5:'清除中断标志，为下一次中断做准备',
+      6:'硬件触发中断时自动保存上下文，执行 ISR 后恢复现场'
+    };
+    const isrFuncs = [
+      {name:'ISR_Timer0',signature:'void (void)',desc:'定时器 0 中断'},
+      {name:'ISR_UART',signature:'void (void)',desc:'串口中断'},
+      {name:'ISR_GPIO',signature:'void (void)',desc:'外部中断'}
+    ];
+    const contextOps = [
+      {op:'硬件触发',addr:'中断请求 IRQ',state:'保存上下文'},
+      {op:'执行 ISR',addr:'ISR_Timer0()',state:'设置标志'},
+      {op:'中断返回',addr:'RETI 指令',state:'恢复现场'}
+    ];
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',isr:'M13 10V3L4 14h7v7l9-11h-7z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [activeIsr,setActiveIsr] = useState(-1);
+      const [contextIdx,setContextIdx] = useState(-1);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 6; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setActiveIsr(-1);
+          setContextIdx(-1);
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setActiveIsr(0);
+          setContextIdx(0);
+        } else if(step === 3) {
+          setActiveIsr(1);
+        } else if(step === 4) {
+          setContextIdx(1);
+          setActiveIsr(2);
+        } else if(step === 5) {
+          // ISR complete
+        } else if(step === 6) {
+          setContextIdx(2);
+          setTerminalLines(['ISR triggered, flag=1']);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setActiveIsr(-1);
+        setContextIdx(-1);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>中断服务例程 ISR - 嵌入式 C 可视化</h1>
+            <p>中断服务 | 硬件触发 | 上下文保存</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.emerald,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                isr_example.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.isr} size={22} />
+                ISR 可视化
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">__attribute__((interrupt))</span>
+                  <span className="var-type">ISR Function Qualifier</span>
+                </div>
+                <div className="isr-container">
+                  <div className={`isr-box definition ${step >= 2 ? 'active' : ''}`}>
+                    <div style={{fontSize:13,fontWeight:700,color:'#065f46',marginBottom:12}}>中断服务例程</div>
+                    {isrFuncs.map((i, idx) => (
+                      <div key={i.name} className="isr-row">
+                        <span className="isr-label">{i.name}</span>
+                        <div className={`isr-box-inner ${step >= 2 + idx && activeIsr === idx ? 'active' : ''}`}>
+                          <div className="isr-type">{i.desc}</div>
+                          <div className="isr-value">{i.signature}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="context-display">
+                  <div style={{color:'#94a3b8',fontSize:12,marginBottom:12}}>中断上下文流程</div>
+                  {contextOps.map((c, idx) => (
+                    <div key={idx} className={`context-row ${step >= 2 + idx && contextIdx >= idx ? 'active' : 'pending'}`}>
+                      <span className="context-name">{c.op}</span>
+                      <span className="context-value">{c.addr} → {c.state}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="comparison-grid">
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">普通函数</div>
+                    <div className="compare-code">软件调用</div>
+                    <div className="compare-desc">可预测</div>
+                  </div>
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">ISR</div>
+                    <div className="compare-code">硬件触发</div>
+                    <div className="compare-desc">异步事件</div>
+                  </div>
+                  <div className={`compare-card ${step >= 3 ? 'active' : ''}`}>
+                    <div className="compare-label">保存上下文</div>
+                    <div className="compare-code">自动压栈</div>
+                    <div className="compare-desc">PC/寄存器</div>
+                  </div>
+                  <div className={`compare-card ${step >= 3 ? 'active' : ''}`}>
+                    <div className="compare-label">恢复现场</div>
+                    <div className="compare-code">RETI 指令</div>
+                    <div className="compare-desc">出栈返回</div>
+                  </div>
+                </div>
+                <div className="use-case-list">
+                  <div className={`use-item ${step >= 2 ? 'active' : ''}`}>
+                    <div className="use-title">定时器中断</div>
+                    <div className="use-example">ISR_Timer0: flag=1; // 1ms 定时</div>
+                  </div>
+                  <div className={`use-item ${step >= 3 ? 'active' : ''}`}>
+                    <div className="use-title">串口接收</div>
+                    <div className="use-example">ISR_UART: rx_buf[head++] = UDR; // 接收字节</div>
+                  </div>
+                  <div className={`use-item ${step >= 4 ? 'active' : ''}`}>
+                    <div className="use-title">外部中断</div>
+                    <div className="use-example">ISR_GPIO: if(PINB&0x01) toggle_led(); // 按钮</div>
+                  </div>
+                  <div className={`use-item ${step >= 5 ? 'active' : ''}`}>
+                    <div className="use-title">ADC 完成</div>
+                    <div className="use-example">ISR_ADC: sample = ADCW; adc_ready=1; // 采样完成</div>
+                  </div>
+                </div>
+              </div>
+              {step >= 6 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.emerald}}>ISR 特点</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>硬件触发，无参数无返回</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>上下文保存</strong>
+                <p style={{marginTop:8,color:'#78350f'>自动保存 PC 和寄存器</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>快速执行</strong>
+                <p style={{marginTop:8,color:'#78350f'>设置标志，主循环处理</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>应用场景</strong>
+                <p style={{marginTop:8,color:'#78350f'>定时器、串口、外部中断、ADC</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1179 - 中断服务程序完整指南 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: transparent; } 50% { background-color: rgba(251,191,36,0.2); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes irqAnim { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); background-color: rgba(239,68,68,0.4); } }
+        @keyframes pendingAnim { 0%, 100% { background-color: rgba(59,130,246,0.3); } 50% { background-color: rgba(59,130,246,0.6); } }
+        @keyframes saveAnim { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-irq { animation: irqAnim 1s infinite; }
+        .animate-pending { animation: pendingAnim 2s infinite; }
+        .animate-save { animation: saveAnim 0.3s ease-out; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: 'from-red-500 to-orange-600',
+            light: 'from-red-50 to-orange-50',
+            text: 'text-red-600',
+            bg: 'bg-red-50',
+            border: 'border-red-200',
+            hover: 'hover:bg-red-100'
+        };
+
+        const CODE_EXAMPLES = [
+            {
+                title: "ISR 基础结构",
+                code: `// 中断服务程序 (Interrupt Service Routine)
+// 特点：无返回值、无参数、快速执行
+
+void EXTI0_IRQHandler(void) {
+    // 1. 清除中断标志 (首要!)
+    EXTI->PR = EXTI_PR_PR0;
+
+    // 2. 执行快速处理
+    g_buttonPressed = 1;  // volatile 标志
+
+    // 3. 延迟处理交给主循环
+    // ❌ 不要在 ISR 中:
+    // - 调用 printf/malloc
+    // - 长时间延时
+    // - 复杂计算
+}
+
+// 中断向量表 (STM32 示例)
+// Vector Table @ 0x00000000
+// 0x00000004: &Reset_Handler
+// 0x00000008: &NMI_Handler
+// 0x0000000C: &HardFault_Handler
+// 0x00000040: &EXTI0_IRQHandler  ← 你的 ISR`,
+                highlight: "volatile",
+                explanation: "ISR 没有返回值和参数，由硬件调用。首要任务是清除中断标志。使用 volatile 标志通知主循环，复杂处理留给主循环。"
+            },
+            {
+                title: "volatile 在 ISR 中的应用",
+                code: `// ✅ 正确：volatile 标志
+volatile bool g_dataReady = false;
+volatile uint32_t g_adcValue = 0;
+
+void ADC_IRQHandler(void) {
+    g_adcValue = ADC->DR;     // 读取数据
+    g_dataReady = true;        // 设置标志
+}
+
+int main(void) {
+    while (1) {
+        if (g_dataReady) {     // 每次从内存读取
+            processData(g_adcValue);
+            g_dataReady = false;
+        }
+    }
+}
+
+// ❌ 错误：缺少 volatile
+bool g_dataReady = false;      // 编译器可能优化
+// 主循环可能被优化为:
+// if (g_dataReady) { while(1); }  // 只读一次!`,
+                highlight: "volatile",
+                explanation: "volatile 告诉编译器变量可能被 ISR 修改，禁止优化。每次访问都从内存读取，确保看到 ISR 的最新写入。"
+            },
+            {
+                title: "临界区保护",
+                code: `// 主循环和 ISR 共享数据时需要保护
+volatile uint32_t g_counter = 0;
+
+// 进入临界区 (关中断)
+#define CRITICAL_ENTER() \\
+    uint32_t primask = __get_PRIMASK(); \\
+    __disable_irq()
+
+// 退出临界区 (恢复中断)
+#define CRITICAL_EXIT() \\
+    if (!primask) __enable_irq()
+
+void main_loop(void) {
+    while (1) {
+        CRITICAL_ENTER();      // 关中断
+        uint32_t count = g_counter;  // 原子读取
+        CRITICAL_EXIT();       // 恢复中断
+
+        processData(count);
+    }
+}
+
+// 注意：ISR 中不要使用临界区保护
+// ISR 本身就是原子的 (打断主程序)`,
+                highlight: "CRITICAL",
+                explanation: "临界区防止主程序和 ISR 同时访问共享数据。关中断后尽快恢复。ISR 中不需要，因为 ISR 天然打断主程序。"
+            },
+            {
+                title: "中断延迟与响应",
+                code: `// 中断延迟组成:
+// 1. 硬件延迟 (12 周期 @ Cortex-M4)
+// 2. 保存上下文 (R0-R3, R12, LR, PC, xPSR)
+// 3. 取向量表 (中断向量地址)
+// 4. ISR 执行 (你的代码)
+// 5. 恢复上下文
+
+// ✅ ISR 优化技巧:
+void SPI_IRQHandler(void) {
+    // 最快路径：只读数据，设置标志
+    g_rxByte = SPI->DR;
+    g_rxReady = true;
+
+    // 清除标志 (最后，确保数据已读)
+    SPI->SR;
+}
+
+// 主循环处理耗时操作
+void main_loop(void) {
+    if (g_rxReady) {
+        g_rxReady = false;
+        processSPI(g_rxByte);  // 复杂处理
+    }
+}`,
+                highlight: "最快路径",
+                explanation: "中断延迟包括硬件延迟、上下文保存/恢复。ISR 应该只做最必要的操作，复杂处理交给主循环，减少中断关闭时间。"
+            },
+            {
+                title: "中断优先级 (NVIC)",
+                code: `// NVIC (嵌套向量中断控制器)
+// Cortex-M4: 0-15 优先级，0 最高
+
+// 配置中断优先级
+NVIC_SetPriority(EXTI0_IRQn, 1);  // 高优先级
+NVIC_SetPriority(USART1_IRQn, 5); // 中优先级
+NVIC_SetPriority(SPI1_IRQn, 10);  // 低优先级
+
+// 使能中断
+NVIC_EnableIRQ(EXTI0_IRQn);
+
+// 中断嵌套:
+// 高优先级 ISR 可以打断低优先级 ISR
+// 优先级 1 EXTI0 → 可打断 → 优先级 10 SPI
+
+// 临界区只屏蔽同级或更低优先级
+__disable_irq();  // 屏蔽所有
+// 高优先级 ISR 仍可打断!`,
+                highlight: "优先级",
+                explanation: "NVIC 管理中断优先级。数字越小优先级越高。高优先级 ISR 可打断低优先级 ISR，实现中断嵌套。__disable_irq 只屏蔽同级或更低。"
+            },
+            {
+                title: "常用中断源配置",
+                code: `// 1. 外部中断 (EXTI)
+SYSCFG->EXTICR[0] = SYSCFG_EXTICR1_EXTI0_PA0;
+EXTI->IMR = EXTI_IMR_MR0;       // 屏蔽
+EXTI->FTSR = EXTI_FTSR_TR0;     // 下降沿
+NVIC_EnableIRQ(EXTI0_IRQn);
+
+// 2. 定时器中断
+TIM2->DIER = TIM_DIER_UIE;      // 更新中断
+TIM2->CR1 = TIM_CR1_CEN;        // 使能
+NVIC_EnableIRQ(TIM2_IRQn);
+
+// 3. USART 接收中断
+USART1->CR1 = USART_CR1_RE | USART_CR1_RXNEIE;
+NVIC_EnableIRQ(USART1_IRQn);
+
+// 4. ADC 中断
+ADC1->CR1 = ADC_CR1_EOCIE;      // EOC 中断
+ADC1->CR2 |= ADC_CR2_ADON;      // 启动
+NVIC_EnableIRQ(ADC1_IRQn);`,
+                highlight: "EXTI",
+                explanation: "常用中断源：外部中断 (按键)、定时器 (周期任务)、USART (接收完成)、ADC (转换完成)。配置步骤：使能中断源→配置 NVIC→全局使能。"
+            },
+            {
+                title: "中断驱动架构",
+                code: `// 前后台系统架构
+// 前台：ISR (中断上下文)
+// 后台：主循环 (线程上下文)
+
+// 数据流:
+// ISR → 环形缓冲区 → 主循环处理
+
+#define RX_BUF_SIZE 256
+volatile struct {
+    uint8_t buf[RX_BUF_SIZE];
+    uint16_t head;  // ISR 写入
+    uint16_t tail;  // 主循环读取
+} g_uartRx;
+
+void USART1_IRQHandler(void) {
+    uint8_t byte = USART1->DR;  // 读数据
+    g_uartRx.buf[g_uartRx.head++] = byte;
+    g_uartRx.head %= RX_BUF_SIZE;
+}
+
+void main_loop(void) {
+    if (g_uartRx.head != g_uartRx.tail) {
+        uint8_t byte = g_uartRx.buf[g_uartRx.tail++];
+        g_uartRx.tail %= RX_BUF_SIZE;
+        processByte(byte);
+    }
+}`,
+                highlight: "环形缓冲",
+                explanation: "中断驱动架构使用环形缓冲区解耦 ISR 和主循环。ISR 快速存数据，主循环慢速处理。无锁设计，head 由 ISR 写，tail 由主循环写。"
+            },
+            {
+                title: "ISR 最佳实践总结",
+                code: `// ✅ 应该做:
+// 1. 首先清除中断标志
+// 2. 使用 volatile 共享变量
+// 3. 尽可能快 (最小化关中断时间)
+// 4. 用标志通知主循环
+// 5. 临界区保护共享数据
+
+// ❌ 禁止做:
+// 1. 调用 printf (阻塞/重入问题)
+// 2. 调用 malloc (可能阻塞)
+// 3. 长延时 (__delay_ms)
+// 4. 复杂算法 (FFT、滤波)
+// 5. 调用非重入函数
+
+// 调试技巧:
+// 1. 使用逻辑分析仪捕获中断
+// 2. GPIO 翻转测量 ISR 执行时间
+// 3. 统计中断频率 (计数器)
+// 4. 检查堆栈溢出 (填充模式)
+
+// 堆栈溢出检测
+uint32_t stack_canary = 0xDEADBEEF;
+void check_stack(void) {
+    if (stack_canary != 0xDEADBEEF) {
+        // 堆栈溢出!
+        HardFault_Handler();
+    }
+}`,
+                highlight: "✅/❌",
+                explanation: "ISR 应该快速、简单、无阻塞。禁止调用可能阻塞的函数。使用 GPIO 翻转测量执行时间。堆栈填充模式检测溢出。"
+            }
+        ];
+
+        function App() {
+            const [step, setStep] = React.useState(0);
+            const [voiceEndTimer, setVoiceEndTimer] = React.useState(null);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                speakCurrentStep();
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, []);
+
+            const speakCurrentStep = () => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                }
+
+                const currentExample = CODE_EXAMPLES[step];
+                const explanations = [
+                    "中断服务程序由硬件触发，没有返回值和参数。首要任务是清除中断标志，防止重复进入。使用 volatile 标志通知主循环，复杂处理留给主循环执行。",
+                    "volatile 关键字告诉编译器变量可能被 ISR 修改，禁止编译器优化。每次访问 volatile 变量都从内存读取，确保看到 ISR 的最新写入值。",
+                    "临界区用于保护主程序和 ISR 共享的数据。通过暂时关闭中断，确保读取或写入操作的原子性。ISR 本身不需要临界区保护，因为它天然打断主程序。",
+                    "中断延迟包括硬件延迟、上下文保存和恢复。ISR 应该执行最快路径，只读取数据和设置标志，复杂处理交给主循环，减少中断关闭时间。",
+                    "NVIC 嵌套向量中断控制器管理中断优先级。数字越小优先级越高。高优先级 ISR 可以打断低优先级 ISR，实现中断嵌套处理。",
+                    "常用中断源包括外部中断用于按键、定时器用于周期任务、USART 用于接收完成、ADC 用于转换完成。配置步骤是先使能中断源，再配置 NVIC。",
+                    "中断驱动架构使用环形缓冲区解耦 ISR 和主循环。ISR 快速存储数据到缓冲区，主循环从缓冲区取出数据慢速处理。这是无锁设计。",
+                    "ISR 最佳实践：快速执行、清除标志、使用 volatile、通知主循环、临界区保护。禁止阻塞操作如 printf、malloc、长延时。使用 GPIO 翻转测量执行时间。"
+                ];
+
+                const text = `第${step + 1}步：${currentExample.title}。${explanations[step]}`;
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                const voices = speechSynthesis.getVoices();
+                const xiaoxiaoVoice = voices.find(voice =>
+                    voice.name.includes('Xiaoxiao') ||
+                    voice.name.includes('zh-CN')
+                );
+                if (xiaoxiaoVoice) {
+                    utterance.voice = xiaoxiaoVoice;
+                }
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            React.useEffect(() => {
+                speakCurrentStep();
+            }, [step]);
+
+            const renderIsrFlow = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-red-50 to-orange-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-red-800 mb-4">中断执行流程</h4>
+                        <div className="space-y-2">
+                            <div className="p-3 bg-blue-100 rounded border-l-4 border-blue-500">
+                                <div className="font-bold text-blue-800">1. 硬件事件</div>
+                                <div className="text-xs text-blue-600">按键按下/定时器溢出/数据到达</div>
+                            </div>
+                            <div className="text-center text-gray-400">↓</div>
+                            <div className="p-3 bg-yellow-100 rounded border-l-4 border-yellow-500">
+                                <div className="font-bold text-yellow-800">2. 保存上下文</div>
+                                <div className="text-xs text-yellow-600">R0-R3, R12, LR, PC, xPSR</div>
+                            </div>
+                            <div className="text-center text-gray-400">↓</div>
+                            <div className="p-3 bg-red-100 rounded border-l-4 border-red-500 animate-pulse">
+                                <div className="font-bold text-red-800">3. 执行 ISR</div>
+                                <div className="text-xs text-red-600">清除标志→处理→设置标志</div>
+                            </div>
+                            <div className="text-center text-gray-400">↓</div>
+                            <div className="p-3 bg-green-100 rounded border-l-4 border-green-500">
+                                <div className="font-bold text-green-800">4. 恢复上下文</div>
+                                <div className="text-xs text-green-600">返回主程序</div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderVolatileAccess = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-red-50 to-orange-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-red-800 mb-4">volatile 访问模式</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="p-4 bg-red-50 rounded border-2 border-red-300">
+                                <h5 className="font-bold text-red-700 mb-2">❌ 无 volatile</h5>
+                                <div className="text-xs space-y-1">
+                                    <div className="bg-gray-100 p-2 rounded">主循环:</div>
+                                    <div className="bg-gray-100 p-2 rounded">if (flag)</div>
+                                    <div className="bg-gray-100 p-2 rounded">编译器优化为:</div>
+                                    <div className="bg-red-100 p-2 rounded font-mono">if (flag) while(1);</div>
+                                </div>
+                            </div>
+                            <div className="p-4 bg-green-50 rounded border-2 border-green-300">
+                                <h5 className="font-bold text-green-700 mb-2">✅ volatile</h5>
+                                <div className="text-xs space-y-1">
+                                    <div className="bg-gray-100 p-2 rounded">主循环:</div>
+                                    <div className="bg-gray-100 p-2 rounded">if (flag)</div>
+                                    <div className="bg-gray-100 p-2 rounded">每次从内存读取:</div>
+                                    <div className="bg-green-100 p-2 rounded font-mono">LDR r0, [flag]</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderPriorityNesting = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-red-50 to-orange-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-red-800 mb-4">中断嵌套示意</h4>
+                        <div className="space-y-2">
+                            <div className="relative">
+                                <div className="h-12 bg-blue-200 rounded flex items-center px-4">
+                                    <span className="text-blue-800 font-bold">主程序</span>
+                                </div>
+                                <div className="absolute top-0 left-1/4 w-px h-full bg-blue-400"></div>
+                            </div>
+                            <div className="relative ml-8">
+                                <div className="h-10 bg-yellow-200 rounded flex items-center px-4">
+                                    <span className="text-yellow-800 font-bold text-sm">ISR 低优先级 (10)</span>
+                                </div>
+                                <div className="absolute top-0 left-1/4 w-px h-full bg-yellow-400"></div>
+                            </div>
+                            <div className="relative ml-16">
+                                <div className="h-8 bg-red-200 rounded flex items-center px-4 animate-pulse">
+                                    <span className="text-red-800 font-bold text-xs">ISR 高优先级 (1)</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mt-4 p-3 bg-orange-50 rounded border border-orange-200">
+                            <p className="text-sm text-orange-800">
+                                优先级 1 可以打断优先级 10，形成嵌套
+                            </p>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderRingBuffer = () => {
+                const buffer = Array(16).fill(null);
+                return (
+                    <div className="p-4 bg-gradient-to-r from-red-50 to-orange-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-red-800 mb-4">环形缓冲区</h4>
+                        <div className="grid grid-cols-8 gap-1 mb-4">
+                            {buffer.map((_, i) => (
+                                <div
+                                    key={i}
+                                    className={`h-10 rounded flex items-center justify-center text-xs font-bold ${
+                                        i < 5 ? 'bg-red-200 text-red-800' :
+                                        i < 8 ? 'bg-yellow-200 text-yellow-800' :
+                                        'bg-gray-100 text-gray-600'
+                                    }`}
+                                >
+                                    {i < 5 ? '已处理' : i < 8 ? '待处理' : '空闲'}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 bg-red-200 rounded"></div>
+                                <span className="text-xs">已处理 (tail 之后)</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 bg-yellow-200 rounded"></div>
+                                <span className="text-xs">待处理 (head-tail)</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 bg-gray-100 rounded border"></div>
+                                <span className="text-xs">空闲</span>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50 to-yellow-50 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="text-center mb-6">
+                            <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-transparent mb-2">
+                                1179 - 中断服务程序完整指南
+                            </h1>
+                            <p className="text-lg text-gray-700">C 语言核心 - ISR/volatile/ 临界区/中断驱动架构</p>
+                            <div className="flex justify-center gap-2 mt-4">
+                                <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm">ISR 结构</span>
+                                <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm">volatile</span>
+                                <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm">临界区</span>
+                                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">环形缓冲</span>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-red-500">
+                                    <h3 className="text-xl font-bold text-red-700 mb-3">代码示例</h3>
+                                    <div className="bg-gray-50 rounded p-3 font-mono text-sm overflow-x-auto">
+                                        <pre className="text-gray-800 whitespace-pre-wrap">
+                                            {CODE_EXAMPLES[step].code}
+                                        </pre>
+                                    </div>
+                                    <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                        <p className="text-sm text-yellow-800">
+                                            <span className="font-bold">亮点:</span> {CODE_EXAMPLES[step].highlight}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-orange-500">
+                                    <h3 className="text-xl font-bold text-orange-700 mb-3">可视化演示</h3>
+                                    {step === 0 && renderIsrFlow()}
+                                    {step === 1 && renderVolatileAccess()}
+                                    {step === 2 && (
+                                        <div className="p-4 bg-gradient-to-r from-red-50 to-orange-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-red-800 mb-4">临界区保护</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-blue-100 rounded">
+                                                    <div className="font-bold text-blue-800">正常状态</div>
+                                                    <div className="text-xs text-blue-600">中断使能，可响应</div>
+                                                </div>
+                                                <div className="text-center text-gray-400">↓ CRITICAL_ENTER()</div>
+                                                <div className="p-3 bg-red-100 rounded border-2 border-red-400 animate-pulse">
+                                                    <div className="font-bold text-red-800">临界区</div>
+                                                    <div className="text-xs text-red-600">中断禁用，原子访问</div>
+                                                </div>
+                                                <div className="text-center text-gray-400">↓ CRITICAL_EXIT()</div>
+                                                <div className="p-3 bg-green-100 rounded">
+                                                    <div className="font-bold text-green-800">恢复正常</div>
+                                                    <div className="text-xs text-green-600">中断重新使能</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 3 && (
+                                        <div className="p-4 bg-gradient-to-r from-red-50 to-orange-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-red-800 mb-4">延迟组成</h4>
+                                            <div className="space-y-2">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-32 text-xs text-gray-600">硬件延迟</div>
+                                                    <div className="flex-1 h-6 bg-blue-200 rounded flex items-center px-2">
+                                                        <span className="text-xs">~12 周期</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-32 text-xs text-gray-600">保存上下文</div>
+                                                    <div className="flex-1 h-6 bg-yellow-200 rounded flex items-center px-2">
+                                                        <span className="text-xs">R0-R3, R12, LR, PC, xPSR</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-32 text-xs text-gray-600">ISR 执行</div>
+                                                    <div className="flex-1 h-6 bg-red-200 rounded flex items-center px-2 animate-pulse">
+                                                        <span className="text-xs">你的代码 (最短!)</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-32 text-xs text-gray-600">恢复上下文</div>
+                                                    <div className="flex-1 h-6 bg-green-200 rounded flex items-center px-2">
+                                                        <span className="text-xs">弹出栈帧</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 4 && renderPriorityNesting()}
+                                    {step === 5 && (
+                                        <div className="p-4 bg-gradient-to-r from-red-50 to-orange-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-red-800 mb-4">中断源配置</h4>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                                                    <div className="font-bold text-blue-700">EXTI</div>
+                                                    <div className="text-xs text-blue-600">外部中断 (按键)</div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded border border-green-200">
+                                                    <div className="font-bold text-green-700">TIM</div>
+                                                    <div className="text-xs text-green-600">定时器 (周期)</div>
+                                                </div>
+                                                <div className="p-3 bg-yellow-50 rounded border border-yellow-200">
+                                                    <div className="font-bold text-yellow-700">USART</div>
+                                                    <div className="text-xs text-yellow-600">串口接收</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded border border-purple-200">
+                                                    <div className="font-bold text-purple-700">ADC</div>
+                                                    <div className="text-xs text-purple-600">AD 转换完成</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 6 && renderRingBuffer()}
+                                    {step === 7 && (
+                                        <div className="p-4 bg-gradient-to-r from-red-50 to-orange-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-red-800 mb-4">ISR 检查清单</h4>
+                                            <div className="space-y-2">
+                                                <div className="flex items-center gap-2 p-2 bg-green-50 rounded">
+                                                    <span className="text-green-500">✓</span>
+                                                    <span className="text-sm">清除中断标志</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-green-50 rounded">
+                                                    <span className="text-green-500">✓</span>
+                                                    <span className="text-sm">volatile 共享变量</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-green-50 rounded">
+                                                    <span className="text-green-500">✓</span>
+                                                    <span className="text-sm">快速执行</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-green-50 rounded">
+                                                    <span className="text-green-500">✓</span>
+                                                    <span className="text-sm">标志通知主循环</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-red-50 rounded">
+                                                    <span className="text-red-500">✗</span>
+                                                    <span className="text-sm">printf/malloc</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-red-50 rounded">
+                                                    <span className="text-red-500">✗</span>
+                                                    <span className="text-sm">长延时</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-yellow-500">
+                                    <h3 className="text-xl font-bold text-yellow-700 mb-3">关键要点</h3>
+                                    <div className="space-y-3">
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 0 ? 'bg-red-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-red-600">ISR:</span> 无参数/无返回值
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 1 ? 'bg-orange-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-orange-600">volatile:</span> 禁止优化
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 2 ? 'bg-yellow-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-yellow-600">临界区:</span> 关中断保护
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 3 ? 'bg-green-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-green-600">延迟:</span> 最小化 ISR
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 4 ? 'bg-blue-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-blue-600">优先级:</span> 0 最高，可嵌套
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 5 ? 'bg-purple-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-purple-600">配置:</span> 中断源→NVIC
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 6 ? 'bg-pink-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-pink-600">架构:</span> ISR→ 缓冲→主循环
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 7 ? 'bg-teal-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-teal-600">实践:</span> 6 项清单
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                        <p className="text-sm text-yellow-800">
+                                            {CODE_EXAMPLES[step].explanation}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-r from-red-500 to-orange-600 rounded-lg shadow-lg p-4 text-white">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm">进度</span>
+                                        <span className="text-sm font-bold">{step + 1} / {CODE_EXAMPLES.length}</span>
+                                    </div>
+                                    <div className="w-full bg-white bg-opacity-30 rounded-full h-2">
+                                        <div
+                                            className="bg-white rounded-full h-2 transition-all duration-500"
+                                            style={{ width: `${((step + 1) / CODE_EXAMPLES.length) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <footer className="text-center mt-8 text-gray-600">
+                            <p className="text-sm">C 语言核心 · 中断服务程序完整指南 · 嵌入式开发必备技能</p>
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

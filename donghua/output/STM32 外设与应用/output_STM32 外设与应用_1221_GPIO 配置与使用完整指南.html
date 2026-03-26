@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 GPIO 配置与使用完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(20px); } }
+        @keyframes highlight { 0%, 100% { background-color: #10b981; } 50% { background-color: #34d399; } }
+        @keyframes toggle { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        @keyframes input { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+        @keyframes output { 0% { transform: translateY(0); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s ease-in-out infinite; }
+        .animate-highlight { animation: highlight 2s ease-in-out infinite; }
+        .animate-toggle { animation: toggle 0.5s ease-in-out; }
+        .animate-input { animation: input 2s ease-in-out infinite; }
+        .animate-output { animation: output 1.5s ease-in-out infinite; }
+
+        .pin-block { transition: all 0.3s ease; }
+        .pin-block:hover { transform: scale(1.05); }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#10b981',
+            secondary: '#34d399',
+            accent: '#6ee7b7',
+            highlight: '#a7f3d0',
+            text: '#d1fae5',
+            bg: '#065f46'
+        };
+
+        const STEPS = [
+            { title: "GPIO 基础架构", subtitle: "8 种工作模式" },
+            { title: "输入模式配置", subtitle: "浮空/上拉/下拉/模拟" },
+            { title: "输出模式配置", subtitle: "推挽/开漏" },
+            { title: "复用功能配置", subtitle: "AF 映射与配置" },
+            { title: "速度配置", subtitle: "低速/中速/高速/超高速" },
+            { title: "寄存器操作", subtitle: "ODR/IDR/BSRR/BRR" },
+            { title: "外部中断", subtitle: "EXTI 配置与处理" },
+            { title: "应用实例", subtitle: "LED 控制与按键检测" }
+        ];
+
+        const GPIO_PINS = [
+            { pin: 'PA0', af: ['TIM2_CH1', 'USART2_CTS'], adc: 'ADC1_IN0' },
+            { pin: 'PA1', af: ['TIM2_CH2', 'USART2_RTS'], adc: 'ADC1_IN1' },
+            { pin: 'PA2', af: ['TIM2_CH3', 'USART2_TX'], adc: 'ADC1_IN2' },
+            { pin: 'PA3', af: ['TIM2_CH4', 'USART2_RX'], adc: 'ADC1_IN3' },
+            { pin: 'PA4', af: ['SPI1_NSS', 'USART2_CK'], adc: 'ADC1_IN4' },
+            { pin: 'PA5', af: ['SPI1_SCK'], adc: 'ADC1_IN5' },
+            { pin: 'PA6', af: ['SPI1_MISO', 'TIM3_CH1'], adc: 'ADC1_IN6' },
+            { pin: 'PA7', af: ['SPI1_MOSI', 'TIM3_CH2'], adc: 'ADC1_IN7' }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [pinStates, setPinStates] = React.useState([]);
+            const [outputState, setOutputState] = React.useState(false);
+            const [inputTriggered, setInputTriggered] = React.useState(false);
+            const [extiFired, setExtiFired] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                initPins();
+            }, []);
+
+            const initPins = () => {
+                const pins = [];
+                for (let i = 0; i < 16; i++) {
+                    pins.push({
+                        id: i,
+                        mode: 'input',
+                        output: false,
+                        input: false,
+                        pull: 'none'
+                    });
+                }
+                setPinStates(pins);
+            };
+
+            const toggleOutput = (index) => {
+                const newPins = [...pinStates];
+                newPins[index].output = !newPins[index].output;
+                setPinStates(newPins);
+                setOutputState(newPins[index].output);
+            };
+
+            const simulateInput = (index) => {
+                const newPins = [...pinStates];
+                newPins[index].input = true;
+                setPinStates(newPins);
+                setInputTriggered(true);
+                setTimeout(() => {
+                    newPins[index].input = false;
+                    setPinStates(newPins);
+                    setInputTriggered(false);
+                }, 500);
+            };
+
+            const simulateExti = () => {
+                setExtiFired(true);
+                setTimeout(() => setExtiFired(false), 300);
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    initPins();
+                    setTimeout(() => {
+                        const narration = [
+                            "GPIO 有 8 种工作模式：4 种输入 (浮空/上拉/下拉/模拟) 和 4 种输出 (推挽/开漏/复用推挽/复用开漏)。模式由 MODER、OTYPER、OSPEEDR、PUPDR 寄存器配置。",
+                            "输入模式：浮空输入不确定电平；上拉输入默认高电平；下拉输入默认低电平；模拟输入用于 ADC 采集，关闭数字缓冲器省电。",
+                            "输出模式：推挽输出可输出高低电平，驱动能力强；开漏输出只能输出低电平，高电平需外加上拉电阻，适用于 I2C 等总线。",
+                            "复用功能：GPIO 复用为片上外设引脚。通过 AFRL/AFRH 寄存器选择 AF0-AF15。如 PA2 复用为 USART2_TX 需设置 AF7。",
+                            "速度配置：低速 2MHz、中速 25MHz、高速 50MHz、超高速 100MHz。高速信号功耗和 EMI 更大，选择满足需求的最低速度。",
+                            "寄存器操作：ODR 读写输出数据；IDR 只读输入数据；BSRR 原子置位；BRR 原子复位。BSRR 低 16 位置 1 置位，高 16 位置 1 复位。",
+                            "外部中断：GPIO 可配置为 EXTI 中断线。同一编号引脚 (PA0/PB0/PC0) 共用中断线。通过 SYSCFG 配置 EXTI 源，NVIC 使能中断。",
+                            "应用实例：LED 用推挽输出，按键用上拉输入 + 外部中断。注意消抖动 (硬件电容或软件延时)。多按键可用扫描或中断方式。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            React.useEffect(() => {
+                if (!isPlaying) {
+                    initPins();
+                }
+            }, [currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-emerald-900 to-teal-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 GPIO 配置与使用完整指南</h1>
+                            <p className="text-emerald-200 text-lg">8 种工作模式、寄存器配置与中断应用</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-emerald-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-emerald-700 text-emerald-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-emerald-500/30">
+                                <h3 className="text-xl font-bold text-emerald-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// GPIO 8 种工作模式
+// MODER: 00=输入，01=输出，10=AF，11=模拟
+// OTYPER: 0=推挽，1=开漏
+// OSPEEDR: 00=低，01=中，10=高，11=超高
+// PUPDR: 00=无上拉下拉，01=上拉，10=下拉
+
+// 寄存器地址 (以 GPIOA 为例)
+#define GPIOA_MODER (*(volatile uint32_t*)0x40020000)
+#define GPIOA_OTYPER (*(volatile uint32_t*)0x40020004)
+#define GPIOA_OSPEEDR (*(volatile uint32_t*)0x40020008)
+#define GPIOA_PUPDR (*(volatile uint32_t*)0x4002000C)`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 输入模式配置
+void GPIO_Input_Config(void) {
+    // 1. 使能时钟
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+
+    // 2. MODER=00 (输入，复位值)
+    GPIOA->MODER &= ~(0x3 << 0);
+
+    // 3. PUPDR 配置
+    GPIOA->PUPDR &= ~(0x3 << 0);  // 浮空
+    // GPIOA->PUPDR |= (0x1 << 0);  // 上拉
+    // GPIOA->PUPDR |= (0x2 << 0);  // 下拉
+
+    // 4. 模拟输入 (ADC 用)
+    // GPIOA->MODER |= (0x3 << 0);
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 输出模式配置 (LED 推挽输出)
+void GPIO_Output_Config(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+
+    // MODER: PA5=输出 (01)
+    GPIOA->MODER &= ~(0x3 << 10);
+    GPIOA->MODER |= (0x1 << 10);
+
+    // OTYPER: 推挽 (0)
+    GPIOA->OTYPER &= ~(0x1 << 5);
+
+    // OSPEEDR: 高速 (10)
+    GPIOA->OSPEEDR &= ~(0x3 << 10);
+    GPIOA->OSPEEDR |= (0x2 << 10);
+
+    // PUPDR: 无上拉下拉
+    GPIOA->PUPDR &= ~(0x3 << 10);
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 复用功能配置 (PA2=USART2_TX)
+void GPIO_AF_Config(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+
+    // MODER: PA2=AF (10)
+    GPIOA->MODER &= ~(0x3 << 4);
+    GPIOA->MODER |= (0x2 << 4);
+
+    // OTYPER: 推挽
+    GPIOA->OTYPER &= ~(0x1 << 2);
+
+    // OSPEEDR: 高速
+    GPIOA->OSPEEDR |= (0x2 << 4);
+
+    // AFRL: AF7 (USART2)
+    GPIOA->AFRL &= ~(0xF << 8);
+    GPIOA->AFRL |= (0x7 << 8);
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 速度选择指南
+// 低速 (2MHz): GPIO 低频切换，最低功耗
+GPIOA->OSPEEDR &= ~(0x3 << 0);
+
+// 中速 (25MHz): 一般外设 (UART/SPI)
+GPIOA->OSPEEDR |= (0x1 << 0);
+
+// 高速 (50MHz): 高速通信 (USB/Ethernet)
+GPIOA->OSPEEDR |= (0x2 << 0);
+
+// 超高速 (100MHz): 高速 SDIO/LTDC
+GPIOA->OSPEEDR |= (0x3 << 0);
+
+// 原则：选择满足需求的最低速度`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 寄存器位操作
+// 读取输入 (IDR 只读)
+uint8_t input = (GPIOA->IDR >> 5) & 0x1;
+
+// 写输出 (ODR 可读写)
+GPIOA->ODR |= (1 << 5);   // PA5=1
+GPIOA->ODR &= ~(1 << 5);  // PA5=0
+
+// 原子置位/复位 (BSRR 推荐)
+GPIOA->BSRR = (1 << 5);      // PA5 置位
+GPIOA->BSRR = (1 << 21);     // PA5 复位 (5+16=21)
+GPIOA->BSRR = (1<<5)|(1<<21);// 同时操作
+
+// BRR 也可复位 (但非原子)
+GPIOA->BRR = (1 << 5);`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 外部中断配置
+void EXTI_Config(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+
+    // SYSCFG: PA0 → EXTI0
+    SYSCFG->EXTICR[0] &= ~0xF;
+    SYSCFG->EXTICR[0] |= 0x0;  // 0=PortA
+
+    // EXTI: 上升沿触发
+    EXTI->RTSR |= EXTI_RTSR_TR0;
+    EXTI->FTSR &= ~EXTI_FTSR_TR0;
+
+    // 使能中断
+    EXTI->IMR |= EXTI_IMR_MR0;
+    NVIC_EnableIRQ(EXTI0_IRQn);
+}
+
+void EXTI0_IRQHandler(void) {
+    EXTI->PR = EXTI_PR_PR0;  // 清除标志
+    // 处理中断逻辑
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// LED + 按键完整示例
+void LED_Init(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    GPIOA->MODER |= (0x1 << 10);  // PA5 输出
+    GPIOA->OTYPER &= ~(0x1 << 5); // 推挽
+}
+
+void KEY_Init(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
+    GPIOB->MODER &= ~(0x3 << 0);  // PB0 输入
+    GPIOB->PUPDR |= (0x1 << 0);   // 上拉
+}
+
+void LED_Toggle(void) {
+    GPIOA->ODR ^= (1 << 5);
+}
+
+uint8_t KEY_Read(void) {
+    return (GPIOB->IDR & 0x1) == 0;  // 低电平按下
+}`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => {
+                                                initPins();
+                                                if (currentStep === 6) simulateExti();
+                                            }}
+                                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            ▶️ 运行模拟
+                                        </button>
+                                        <button
+                                            onClick={initPins}
+                                            className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            🔄 重置
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-emerald-500/30">
+                                <h3 className="text-xl font-bold text-emerald-400 mb-4">🔬 GPIO 可视化</h3>
+                                <div className="space-y-4">
+                                    {/* 模式指示 */}
+                                    <div className="grid grid-cols-4 gap-2">
+                                        <div className={`p-2 rounded text-center text-sm ${
+                                            currentStep === 1 ? 'bg-emerald-600 text-white' : 'bg-gray-700 text-gray-400'
+                                        }`}>输入</div>
+                                        <div className={`p-2 rounded text-center text-sm ${
+                                            currentStep === 2 ? 'bg-emerald-600 text-white' : 'bg-gray-700 text-gray-400'
+                                        }`}>输出</div>
+                                        <div className={`p-2 rounded text-center text-sm ${
+                                            currentStep === 3 ? 'bg-emerald-600 text-white' : 'bg-gray-700 text-gray-400'
+                                        }`}>复用</div>
+                                        <div className={`p-2 rounded text-center text-sm ${
+                                            currentStep === 0 ? 'bg-emerald-600 text-white' : 'bg-gray-700 text-gray-400'
+                                        }`}>模拟</div>
+                                    </div>
+
+                                    {/* 8 个引脚状态 */}
+                                    <div className="space-y-2">
+                                        <div className="text-sm text-emerald-300 font-bold mb-2">GPIOA Pins (0-7)</div>
+                                        {pinStates.slice(0, 8).map((pin, i) => (
+                                            <div key={i} className="flex items-center gap-2">
+                                                <span className="text-gray-400 w-10 text-xs">PA{i}</span>
+                                                <div
+                                                    className={`pin-block flex-1 h-6 rounded transition-all cursor-pointer ${
+                                                        pin.output
+                                                            ? 'bg-emerald-500 animate-toggle'
+                                                            : pin.input
+                                                            ? 'bg-blue-500 animate-input'
+                                                            : 'bg-gray-700'
+                                                    }`}
+                                                    onClick={() => toggleOutput(i)}
+                                                ></div>
+                                                <span className={`text-xs w-8 text-center ${
+                                                    pin.output ? 'text-emerald-400' : 'text-gray-500'
+                                                }`}>
+                                                    {pin.output ? 'HIGH' : 'LOW'}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* 操作按钮 */}
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => simulateInput(0)}
+                                            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm transition"
+                                        >
+                                            📥 模拟输入 PA0
+                                        </button>
+                                        <button
+                                            onClick={() => toggleOutput(5)}
+                                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded text-sm transition"
+                                        >
+                                            💡 切换 PA5
+                                        </button>
+                                    </div>
+
+                                    {/* EXTI 状态 */}
+                                    <div className={`p-3 rounded-lg transition-all ${
+                                        extiFired ? 'bg-red-800/50 border border-red-500' : 'bg-gray-800'
+                                    }`}>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-300">EXTI 中断</span>
+                                            <div className={`w-4 h-4 rounded-full ${
+                                                extiFired ? 'bg-red-500 animate-blink' : 'bg-gray-600'
+                                            }`}></div>
+                                        </div>
+                                        <div className="text-center mt-2 text-sm">
+                                            {extiFired ? (
+                                                <span className="text-red-400 font-bold">⚡ 触发!</span>
+                                            ) : (
+                                                <span className="text-gray-500">等待边沿</span>
+                                            )}
+                                        </div>
+                                        <button
+                                            onClick={simulateExti}
+                                            className="w-full mt-2 bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs transition"
+                                        >
+                                            触发中断
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-emerald-500/30">
+                                <h3 className="text-xl font-bold text-emerald-400 mb-4">📖 配置指南</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    {currentStep === 0 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 GPIO 架构</h4>
+                                            <p>每个 GPIO 由 4 个配置寄存器控制：MODER(模式)、OTYPER(类型)、OSPEEDR(速度)、PUPDR(上拉下拉)。数据寄存器：IDR(输入)、ODR(输出)、BSRR(原子置位/复位)。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 输入模式</h4>
+                                            <p>浮空：电平不确定，适用于外部有驱动的信号。上拉：默认高电平，适用于按键 (一端接地)。下拉：默认低电平。模拟：关闭数字输入，用于 ADC。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 输出模式</h4>
+                                            <p>推挽：可驱动高/低电平，适用于 LED、继电器。开漏：只能输出低电平，高电平靠外部上拉，适用于 I2C、1-Wire 等共享总线。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 复用功能</h4>
+                                            <p>GPIO 复用为 UART、SPI、I2C、TIM 等外设引脚。AF0-AF15 共 16 种选择，查 datasheet 确定。AF 模式下 GPIO 由外设控制。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 速度配置</h4>
+                                            <p>低速 2MHz 功耗最低，高速信号 EMI 和功耗更大。选择满足应用的最低速度。LED 可用低速，UART/SPI 用中速，高速接口用高速/超高速。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 位操作</h4>
+                                            <p>BSRR 是原子操作，低 16 位写 1 置位，高 16 位写 1 复位。原子操作在中断场景更安全。ODR 可读可写，但非原子。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 EXTI 中断</h4>
+                                            <p>PA0-PB0-PC0 共用 EXTI0 线，通过 SYSCFG 选择源。配置触发边沿 (上升/下降/双沿)，使能 NVIC。中断服务函数清除 PR 标志。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 应用实例</h4>
+                                            <p>LED：推挽输出，ODR 或 BSRR 控制。按键：上拉输入，检测低电平。消抖：硬件 (电容) 或软件 (延时 10-20ms 后再次检测)。</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-emerald-600 hover:bg-emerald-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-emerald-500/30">
+                            <h2 className="text-2xl font-bold text-emerald-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

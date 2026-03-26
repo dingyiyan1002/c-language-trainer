@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreeRTOS 内存管理完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(20px); } }
+        @keyframes highlight { 0%, 100% { background-color: #3b82f6; } 50% { background-color: #60a5fa; } }
+        @keyframes allocate { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        @keyframes free { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(0.8); opacity: 0.3; } }
+        @keyframes fragment { 0% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } 100% { transform: translateX(0); } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s ease-in-out infinite; }
+        .animate-highlight { animation: highlight 2s ease-in-out infinite; }
+        .animate-allocate { animation: allocate 0.4s ease-out; }
+        .animate-free { animation: free 0.4s ease-out; }
+        .animate-fragment { animation: fragment 0.6s ease-in-out; }
+
+        .heap-block { transition: all 0.3s ease; }
+        .heap-block:hover { transform: scale(1.05); }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#059669',
+            secondary: '#10b981',
+            accent: '#34d399',
+            highlight: '#6ee7b7',
+            text: '#d1fae5',
+            bg: '#064e3b'
+        };
+
+        const STEPS = [
+            { title: "内存管理基础", subtitle: "堆内存模型概览" },
+            { title: "heap_1 静态分配", subtitle: "首次适应算法" },
+            { title: "heap_2 改进版本", subtitle: "首次适应 + 分散处理" },
+            { title: "heap_3 封装 malloc/free", subtitle: "使用 C 库函数" },
+            { title: "heap_4 最佳适应算法", subtitle: "合并相邻空闲块" },
+            { title: "heap_5 多区域支持", subtitle: "多个不连续内存区域" },
+            { title: "内存碎片检测", subtitle: "外部碎片 vs 内部碎片" },
+            { title: "内存管理实践", subtitle: "选择策略与最佳实践" }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [heapBlocks, setHeapBlocks] = React.useState([]);
+            const [allocatedBlocks, setAllocatedBlocks] = React.useState([]);
+            const [fragmentation, setFragmentation] = React.useState(0);
+            const voiceEndTimerRef = React.useRef(null);
+
+            // 初始化堆内存块
+            React.useEffect(() => {
+                initHeapBlocks();
+            }, []);
+
+            const initHeapBlocks = () => {
+                const blocks = [];
+                for (let i = 0; i < 16; i++) {
+                    blocks.push({ id: i, size: 64, allocated: false, color: COLOR_MAP.bg });
+                }
+                setHeapBlocks(blocks);
+            };
+
+            const allocateBlock = (index) => {
+                if (heapBlocks[index] && !heapBlocks[index].allocated) {
+                    const newBlocks = [...heapBlocks];
+                    newBlocks[index] = { ...newBlocks[index], allocated: true, color: COLOR_MAP.primary };
+                    setHeapBlocks(newBlocks);
+                    setAllocatedBlocks([...allocatedBlocks, index]);
+                }
+            };
+
+            const freeBlock = (index) => {
+                if (heapBlocks[index] && heapBlocks[index].allocated) {
+                    const newBlocks = [...heapBlocks];
+                    newBlocks[index] = { ...newBlocks[index], allocated: false, color: COLOR_MAP.bg };
+                    setHeapBlocks(newBlocks);
+                    setAllocatedBlocks(allocatedBlocks.filter(i => i !== index));
+                }
+            };
+
+            const simulateHeap1 = () => {
+                initHeapBlocks();
+                setTimeout(() => allocateBlock(0), 100);
+                setTimeout(() => allocateBlock(1), 300);
+                setTimeout(() => allocateBlock(2), 500);
+                setTimeout(() => freeBlock(0), 700);
+                setTimeout(() => {
+                    // heap_1 不能释放后重新分配
+                    setFragmentation(33);
+                }, 1000);
+            };
+
+            const simulateHeap2 = () => {
+                initHeapBlocks();
+                setTimeout(() => allocateBlock(0), 100);
+                setTimeout(() => allocateBlock(1), 300);
+                setTimeout(() => allocateBlock(2), 500);
+                setTimeout(() => freeBlock(1), 700);
+                setTimeout(() => allocateBlock(1), 900);
+                setTimeout(() => setFragmentation(15), 1200);
+            };
+
+            const simulateHeap4 = () => {
+                initHeapBlocks();
+                setTimeout(() => {
+                    const newBlocks = [...heapBlocks];
+                    newBlocks[0] = { ...newBlocks[0], allocated: true, color: COLOR_MAP.primary };
+                    newBlocks[1] = { ...newBlocks[1], allocated: true, color: COLOR_MAP.primary };
+                    newBlocks[3] = { ...newBlocks[3], allocated: true, color: COLOR_MAP.primary };
+                    newBlocks[4] = { ...newBlocks[4], allocated: true, color: COLOR_MAP.primary };
+                    setHeapBlocks(newBlocks);
+                    setFragmentation(10);
+                }, 500);
+            };
+
+            const simulateHeap5 = () => {
+                initHeapBlocks();
+                setFragmentation(5);
+            };
+
+            const runSimulation = (step) => {
+                initHeapBlocks();
+                switch(step) {
+                    case 1: simulateHeap1(); break;
+                    case 2: simulateHeap2(); break;
+                    case 3: break;
+                    case 4: simulateHeap4(); break;
+                    case 5: simulateHeap5(); break;
+                    case 6: setFragmentation(45); break;
+                    default: setFragmentation(0);
+                }
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    const step = STEPS[currentStep];
+                    runSimulation(currentStep);
+                    setTimeout(() => {
+                        const narration = [
+                            "内存管理是 RTOS 的核心功能。FreeRTOS 提供 5 种堆内存管理方案，分别适用于不同场景。堆内存用于动态分配任务栈、队列、信号量等资源。",
+                            "heap_1 是最简单的实现，使用首次适应算法。只支持 pvPortMalloc，不支持 vPortFree。适用于一旦分配就不需要释放的场景。",
+                            "heap_2 改进了 heap_1，支持内存释放。但仍使用首次适应算法，可能产生外部碎片。适合中等复杂度的应用。",
+                            "heap_3 封装了标准 C 库的 malloc 和 free 函数。支持多线程安全，但依赖 C 库。适合需要完全动态内存管理的场景。",
+                            "heap_4 使用最佳适应算法，并合并相邻空闲块。显著减少外部碎片，是大多数应用的首选方案。性能与效率的平衡。",
+                            "heap_5 在 heap_4 基础上增加多区域支持。可以管理多个不连续的内存区域。适合复杂系统和外部 RAM 扩展。",
+                            "内存碎片是动态分配的主要问题。外部碎片导致无法分配大块内存，内部碎片造成空间浪费。需要定期检测和监控。",
+                            "选择内存管理方案需考虑：是否需要释放、碎片容忍度、性能要求、代码大小。建议在项目初期确定方案并保持一致。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-green-900 to-teal-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">FreeRTOS 内存管理完整指南</h1>
+                            <p className="text-green-200 text-lg">5 种堆内存管理方案深度解析</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-green-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-green-700 text-green-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-green-500/30">
+                                <h3 className="text-xl font-bold text-green-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-green-300 overflow-x-auto">
+                                            <code>{`// FreeRTOS 内存管理接口
+void* pvPortMalloc(size_t size);
+void vPortFree(void* ptr);
+
+// 堆内存配置 (FreeRTOSConfig.h)
+#define configTOTAL_HEAP_SIZE ((size_t)(10 * 1024))
+#define configAPPLICATION_ALLOCATED_HEAP 1
+
+// 内存分配统计
+size_t xPortGetFreeHeapSize(void);
+size_t xPortGetMinimumEverFreeHeapSize(void);`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-green-300 overflow-x-auto">
+                                            <code>{`// heap_1: 首次适应算法
+// 只支持分配，不支持释放
+void* pvPortMalloc(size_t xSize) {
+    uint8_t* p = &ucHeap[uxNextFreeByte];
+    if (uxNextFreeByte + xSize <= configTOTAL_HEAP_SIZE) {
+        uxNextFreeByte += xSize;
+        return p;
+    }
+    return NULL;  // 内存不足
+}
+
+// vPortFree 为空实现
+void vPortFree(void* pv) { (void)pv; }`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-green-300 overflow-x-auto">
+                                            <code>{`// heap_2: 支持释放的首次适应
+void* pvPortMalloc(size_t xSize) {
+    BlockLink_t* pxBlock = pxFirstFreeBlock;
+    while (pxBlock) {
+        if (pxBlock->xBlockSize >= xSize) {
+            // 分配并拆分
+            return pvAllocated;
+        }
+        pxBlock = pxBlock->pxNextFreeBlock;
+    }
+    return NULL;
+}
+
+void vPortFree(void* pv) {
+    vFreeReady = pdTRUE;  // 标记可分散处理
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-green-300 overflow-x-auto">
+                                            <code>{`// heap_3: 封装标准 C 库
+#include <stdlib.h>
+
+void* pvPortMalloc(size_t xSize) {
+    void* pv = malloc(xSize);
+    configASSERT(pv != NULL);
+    return pv;
+}
+
+void vPortFree(void* pv) {
+    free(pv);
+}
+
+// 优点：成熟稳定，支持多线程
+// 缺点：依赖 C 库，代码体积大`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-green-300 overflow-x-auto">
+                                            <code>{`// heap_4: 最佳适应 + 合并相邻块
+void* pvPortMalloc(size_t xSize) {
+    BlockLink_t* pxBlock = pxStart;
+    BlockLink_t* pxBest = NULL;
+
+    while (pxBlock) {
+        if (pxBlock->xBlockSize >= xSize) {
+            if (!pxBest || pxBlock->xBlockSize < pxBest->xBlockSize) {
+                pxBest = pxBlock;  // 找最佳匹配
+            }
+        }
+        pxBlock = pxBlock->pxNextFreeBlock;
+    }
+    // 分配后检查并合并相邻空闲块
+    prvInsertBlockIntoFreeList(pxBlock);
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-green-300 overflow-x-auto">
+                                            <code>{`// heap_5: 多区域内存管理
+// 定义多个内存区域
+static HeapRegion_t xHeapRegions[] = {
+    { (uint8_t*)0x20000000, 0x10000 },  // 内部 SRAM 64KB
+    { (uint8_t*)0x60000000, 0x20000 },  // 外部 SRAM 128KB
+    { NULL, 0 }  // 结束标记
+};
+
+void vPortDefineHeapRegions(const HeapRegion_t* pxRegions) {
+    // 初始化多个内存区域
+    // 优先使用内部 RAM，再使用外部 RAM
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-green-300 overflow-x-auto">
+                                            <code>{`// 内存碎片检测
+void checkFragmentation(void) {
+    size_t freeSize = xPortGetFreeHeapSize();
+    size_t minEver = xPortGetMinimumEverFreeHeapSize();
+    size_t largest = getLargestFreeBlock();
+
+    // 碎片率 = (总空闲 - 最大空闲) / 总空闲
+    float frag = (float)(freeSize - largest) / freeSize * 100;
+
+    printf("碎片率：%.1f%%\\n", frag);
+    if (frag > 30) {
+        printf("警告：碎片率过高！\\n");
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-green-300 overflow-x-auto">
+                                            <code>{`// 最佳实践：静态 + 动态混合
+// 1. 关键任务使用静态分配
+StaticTask_t xTaskBuffer;
+StackType_t xStackBuffer[configMINIMAL_STACK_SIZE];
+TaskHandle_t xTask = xTaskCreateStatic(...);
+
+// 2. 临时数据使用动态分配
+void* data = pvPortMalloc(size);
+// ... 使用数据
+vPortFree(data);
+
+// 3. 监控内存使用
+if (xPortGetFreeHeapSize() < THRESHOLD) {
+    // 触发告警或降级处理
+}`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => runSimulation(currentStep)}
+                                            className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            ▶️ 运行模拟
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                initHeapBlocks();
+                                                setAllocatedBlocks([]);
+                                                setFragmentation(0);
+                                            }}
+                                            className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            🔄 重置
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-green-500/30">
+                                <h3 className="text-xl font-bold text-green-400 mb-4">🔬 可视化演示</h3>
+                                <div className="space-y-4">
+                                    <div className="text-center">
+                                        <div className="text-2xl font-bold text-green-400 mb-2">
+                                            碎片率：{fragmentation.toFixed(1)}%
+                                        </div>
+                                        <div className="w-full bg-gray-700 rounded-full h-4">
+                                            <div
+                                                className="bg-gradient-to-r from-green-500 to-red-500 h-4 rounded-full transition-all duration-500"
+                                                style={{ width: `${fragmentation}%` }}
+                                            ></div>
+                                        </div>
+                                        <div className="flex justify-between text-xs text-gray-400 mt-1">
+                                            <span>0%</span>
+                                            <span>50%</span>
+                                            <span>100%</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-8 gap-1">
+                                        {heapBlocks.map((block, index) => (
+                                            <div
+                                                key={index}
+                                                className={`heap-block h-16 rounded transition-all duration-300 ${
+                                                    block.allocated
+                                                        ? 'bg-green-500 animate-allocate'
+                                                        : 'bg-gray-700 hover:bg-gray-600'
+                                                }`}
+                                                title={`块 ${index}: ${block.size} 字节`}
+                                            >
+                                                {block.allocated && (
+                                                    <div className="text-xs text-white text-center pt-2">
+                                                        {block.size}B
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-2 mt-4">
+                                        <button
+                                            onClick={() => allocateBlock(allocatedBlocks.length % 16)}
+                                            className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm transition"
+                                        >
+                                            📦 分配
+                                        </button>
+                                        <button
+                                            onClick={() => freeBlock(allocatedBlocks[allocatedBlocks.length - 1])}
+                                            disabled={allocatedBlocks.length === 0}
+                                            className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition disabled:opacity-50"
+                                        >
+                                            🗑️ 释放
+                                        </button>
+                                    </div>
+
+                                    <div className="text-sm text-gray-400 mt-4">
+                                        <div>已分配块数：{allocatedBlocks.length}</div>
+                                        <div>空闲块数：{16 - allocatedBlocks.length}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-green-500/30">
+                                <h3 className="text-xl font-bold text-green-400 mb-4">📖 原理解析</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    <div className={`transition-opacity ${currentStep === 0 ? 'opacity-100' : 'opacity-50'}`}>
+                                        <h4 className="font-bold text-green-300 mb-2">📌 内存管理基础</h4>
+                                        <p>FreeRTOS 的堆内存管理分为 5 种实现方案 (heap_1 到 heap_5)。每种方案针对不同的应用场景，在代码大小、性能、功能之间做出权衡。</p>
+                                    </div>
+                                    <div className={`transition-opacity ${currentStep === 1 ? 'opacity-100' : 'opacity-50'}`}>
+                                        <h4 className="font-bold text-green-300 mb-2">📌 heap_1 - 静态分配</h4>
+                                        <p>最简单的实现，仅支持分配不支持释放。适用于任务创建后不删除的场景。无碎片问题，但灵活性最低。</p>
+                                    </div>
+                                    <div className={`transition-opacity ${currentStep === 2 ? 'opacity-100' : 'opacity-50'}`}>
+                                        <h4 className="font-bold text-green-300 mb-2">📌 heap_2 - 支持释放</h4>
+                                        <p>在 heap_1 基础上增加释放功能。使用首次适应算法，可能产生外部碎片。适用于简单动态分配场景。</p>
+                                    </div>
+                                    <div className={`transition-opacity ${currentStep === 3 ? 'opacity-100' : 'opacity-50'}`}>
+                                        <h4 className="font-bold text-green-300 mb-2">📌 heap_3 - 标准 C 库封装</h4>
+                                        <p>直接使用 malloc/free。成熟稳定但依赖 C 库。适合需要完整动态内存管理且对代码大小不敏感的应用。</p>
+                                    </div>
+                                    <div className={`transition-opacity ${currentStep === 4 ? 'opacity-100' : 'opacity-50'}`}>
+                                        <h4 className="font-bold text-green-300 mb-2">📌 heap_4 - 最佳适应算法</h4>
+                                        <p>推荐使用方案。最佳适应算法减少碎片，合并相邻空闲块。性能和效率的最佳平衡点。</p>
+                                    </div>
+                                    <div className={`transition-opacity ${currentStep === 5 ? 'opacity-100' : 'opacity-50'}`}>
+                                        <h4 className="font-bold text-green-300 mb-2">📌 heap_5 - 多区域管理</h4>
+                                        <p>支持多个不连续内存区域。适用于需要管理内部 SRAM 和外部扩展 RAM 的复杂系统。</p>
+                                    </div>
+                                    <div className={`transition-opacity ${currentStep === 6 ? 'opacity-100' : 'opacity-50'}`}>
+                                        <h4 className="font-bold text-green-300 mb-2">📌 碎片检测</h4>
+                                        <p>外部碎片：空闲内存分散，无法分配大块。内部碎片：分配块大于需求。定期监控碎片率，超过 30% 需要优化。</p>
+                                    </div>
+                                    <div className={`transition-opacity ${currentStep === 7 ? 'opacity-100' : 'opacity-50'}`}>
+                                        <h4 className="font-bold text-green-300 mb-2">📌 最佳实践</h4>
+                                        <p>关键任务使用静态分配，临时数据使用动态分配。heap_4 是默认推荐选择。定期监控 xPortGetMinimumEverFreeHeapSize。</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-green-600 hover:bg-green-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-green-500/30">
+                            <h2 className="text-2xl font-bold text-green-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

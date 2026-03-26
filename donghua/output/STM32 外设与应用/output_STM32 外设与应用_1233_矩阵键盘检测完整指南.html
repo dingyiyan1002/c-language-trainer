@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 矩阵键盘检测完整指南</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes press { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.95); } }
+        @keyframes scan { 0% { background-color: rgb(20, 184, 166); } 50% { background-color: rgb(45, 212, 191); } 100% { background-color: rgb(20, 184, 166); } }
+        @keyframes highlight { 0%, 100% { background-color: rgb(245, 158, 11); } 50% { background-color: rgb(251, 191, 36); } }
+        @keyframes activate { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        .pulse { animation: pulse 1s infinite; }
+        .blink { animation: blink 0.5s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .press { animation: press 0.2s ease-in-out; }
+        .scan { animation: scan 1s infinite; }
+        .highlight { animation: highlight 0.5s infinite; }
+        .activate { animation: activate 0.3s ease-in-out; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ========== 可配置参数 ==========
+        const STEPS = [
+            { title: "矩阵键盘基础", code: `// 矩阵键盘：行列交叉结构
+// 优势：节省 GPIO 引脚
+// 应用：计算器、密码锁、工业键盘
+
+// 常见规格:
+// 4×4 = 16 键 (用 8 个 GPIO)
+// 4×3 = 12 键 (用 7 个 GPIO)
+// 3×3 = 9 键 (用 6 个 GPIO)
+
+// 对比独立按键:
+// 16 个独立按键 = 16 个 GPIO
+// 4×4 矩阵键盘 = 8 个 GPIO (省 50%)` },
+            { title: "工作原理", code: `// 扫描原理：逐列 (行) 输出低电平，读取行 (列) 状态
+
+// 行扫描法:
+// 1. 所有行输出低电平
+// 2. 读取列状态，判断哪列有键按下
+// 3. 逐行输出低电平，确定具体按键
+
+// 列扫描法 (类似):
+// 1. 所有列输出低电平
+// 2. 读取行状态
+// 3. 逐列输出低电平
+
+// 按键位置 = 行号 + 列号
+// key_value = row × COLS + col` },
+            { title: "硬件连接", code: `// 4×4 矩阵键盘连接 (STM32F4)
+// 行线：PA0-PA3 (输出)
+// 列线：PA4-PA7 (输入，上拉)
+
+// 按键映射:
+//     COL0 COL1 COL2 COL3
+// ROW0  0    1    2    3    (0x11, 0x21, 0x41, 0x81)
+// ROW1  4    5    6    7    (0x12, 0x22, 0x42, 0x82)
+// ROW2  8    9    A    B    (0x14, 0x24, 0x44, 0x84)
+// ROW3  C    D    E    F    (0x18, 0x28, 0x48, 0x88)
+
+// 扫描码计算:
+// 行值 | 列值 = 唯一扫描码
+// 例如：ROW1(0x02) | COL2(0x10) = 0x12 → 按键 6` },
+            { title: "GPIO 配置", code: `// 矩阵键盘 GPIO 配置
+void KEYMATRIX_Init(void) {
+    // 使能 GPIOA 时钟
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+
+    // 行线配置为推挽输出 (PA0-PA3)
+    GPIOA->MODER &= ~(0xF << 0);  // 清零
+    GPIOA->MODER |= (0x5 << 0);   // 01 = 输出
+    GPIOA->OTYPER &= ~(0xF << 0); // 推挽
+    GPIOA->OSPEEDR |= (0xF << 0); // 高速
+
+    // 列线配置为上拉输入 (PA4-PA7)
+    GPIOA->MODER &= ~(0xF << 8);  // 00 = 输入
+    GPIOA->PUPDR |= (0x5 << 8);   // 01 = 上拉
+}
+
+// 设置行输出
+void KEYMATRIX_SetRow(uint8_t row) {
+    GPIOA->ODR = (GPIOA->ODR & 0xFFF0) | (row & 0x0F);
+}` },
+            { title: "扫描算法", code: `// 矩阵键盘扫描函数
+uint8_t KEYMATRIX_Scan(void) {
+    uint8_t row, col;
+    const uint8_t row_pins[] = {0, 1, 2, 3};  // PA0-PA3
+    const uint8_t col_pins[] = {4, 5, 6, 7};  // PA4-PA7
+
+    for (row = 0; row < 4; row++) {
+        // 输出当前行为低电平
+        GPIOA->BSRR = (0x0F << 16) | (1 << row_pins[row]);
+        Delay_us(10);  // 等待稳定
+
+        // 读取列状态
+        uint8_t col_data = (GPIOA->IDR >> 4) & 0x0F;
+
+        if (col_data != 0x0F) {  // 有列被拉低
+            Delay_ms(10);  // 去抖
+            col_data = (GPIOA->IDR >> 4) & 0x0F;
+            if (col_data != 0x0F) {
+                for (col = 0; col < 4; col++) {
+                    if ((col_data & (1 << col)) == 0) {
+                        return row * 4 + col;  // 返回键值
+                    }
+                }
+            }
+        }
+    }
+    return 0xFF;  // 无按键
+}` },
+            { title: "去抖与连发", code: `// 带去抖和连发的矩阵键盘
+typedef struct {
+    uint8_t key_value;      // 键值
+    uint8_t is_pressed;     // 按下标志
+    uint16_t press_time;    // 按下时间
+    uint8_t long_press;     // 长按标志
+    uint8_t repeat_count;   // 连发计数
+} KEYMATRIX_Key_t;
+
+#define LONG_PRESS_TIME   100  // 1000ms 长按
+#define REPEAT_TIME       30   // 300ms 连发
+
+void KEYMATRIX_Process(KEYMATRIX_Key_t* key) {
+    uint8_t scan = KEYMATRIX_Scan();
+
+    if (scan != 0xFF) {  // 有键按下
+        key->press_time++;
+        if (key->press_time == 2) {  // 20ms 去抖完成
+            key->key_value = scan;
+            key->is_pressed = 1;
+            OnKeyPressed(scan);
+        }
+        if (key->press_time > LONG_PRESS_TIME) {
+            if (!key->long_press) {
+                key->long_press = 1;
+                OnLongPressed(scan);
+            } else if (key->press_time % REPEAT_TIME == 0) {
+                key->repeat_count++;
+                OnKeyRepeat(scan, key->repeat_count);
+            }
+        }
+    } else {
+        key->press_time = 0;
+        key->is_pressed = 0;
+        key->long_press = 0;
+        key->repeat_count = 0;
+    }
+}` },
+            { title: "编码键盘应用", code: `// 4×4 键盘编码表
+const char key_map[16] = {
+    '1', '2', '3', 'A',
+    '4', '5', '6', 'B',
+    '7', '8', '9', 'C',
+    '*', '0', '#', 'D'
+};
+
+// 密码输入处理
+char password[7] = {0};
+uint8_t pwd_index = 0;
+
+void OnKeyPressed(uint8_t key) {
+    if (key < 16 && pwd_index < 6) {
+        password[pwd_index++] = key_map[key];
+        Display_Update();
+    }
+}
+
+void OnLongPressed(uint8_t key) {
+    if (key == 15) {  // D 键长按
+        pwd_index = 0;  // 清空密码
+        memset(password, 0, 7);
+        Display_Clear();
+    }
+}` },
+            { title: "应用实例", code: `// 完整应用：电子密码锁系统
+
+// 系统状态
+typedef enum {
+    STATE_IDLE,
+    STATE_INPUT,
+    STATE_VERIFY,
+    STATE_UNLOCKED
+} SystemState;
+
+SystemState sys_state = STATE_IDLE;
+char correct_pwd[] = "123456";
+
+// 主循环
+void Main_Loop(void) {
+    static KEYMATRIX_Key_t key = {0};
+
+    KEYMATRIX_Process(&key);
+
+    switch (sys_state) {
+        case STATE_IDLE:
+            if (key.is_pressed) {
+                sys_state = STATE_INPUT;
+                pwd_index = 0;
+                OnKeyPressed(key.key_value);
+            }
+            break;
+
+        case STATE_INPUT:
+            if (key.is_pressed) {
+                OnKeyPressed(key.key_value);
+            }
+            if (key.long_press) {
+                sys_state = STATE_VERIFY;
+                if (strcmp(password, correct_pwd) == 0) {
+                    sys_state = STATE_UNLOCKED;
+                    Unlock_Door();
+                } else {
+                    sys_state = STATE_IDLE;
+                    Display_Error();
+                }
+            }
+            break;
+    }
+}` }
+        ];
+
+        // ========== 6 种颜色配置 ==========
+        const COLOR_MAP = {
+            primary: "#f59e0b",     // amber-500 - 主色
+            secondary: "#d97706",   // amber-600 - 次要色
+            accent: "#fbbf24",      // amber-400 - 强调色
+            bgStart: "#fffbeb",     // amber-50 - 背景渐变起始
+            bgEnd: "#fef3c7",       // amber-100 - 背景渐变结束
+            code: "#78350f"         // amber-900 - 代码高亮
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [isComplete, setIsComplete] = useState(false);
+            const [scanningRow, setScanningRow] = useState(0);
+            const [pressedKey, setPressedKey] = useState(null);
+            const [keyMatrix, setKeyMatrix] = useState(Array(16).fill(false));
+            const voiceEndTimerRef = useRef(null);
+
+            // 扫描动画
+            useEffect(() => {
+                if (isPlaying && currentStep >= 2) {
+                    const timer = setInterval(() => {
+                        setScanningRow(prev => (prev + 1) % 4);
+                    }, 500);
+                    return () => clearInterval(timer);
+                }
+            }, [isPlaying, currentStep]);
+
+            // 按键点击处理
+            const handleKeyPress = (keyIndex) => {
+                setKeyMatrix(prev => {
+                    const newState = [...prev];
+                    newState[keyIndex] = true;
+                    setPressedKey(keyIndex);
+                    setTimeout(() => {
+                        newState[keyIndex] = false;
+                        setKeyMatrix([...newState]);
+                        setPressedKey(null);
+                    }, 200);
+                    return prev;
+                });
+            };
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = speechSynthesis.getVoices();
+                    const preferredVoice = voices.find(voice =>
+                        voice.name.includes('Xiaoxiao') ||
+                        voice.name.includes('Chinese') ||
+                        voice.lang === 'zh-CN'
+                    );
+                    if (preferredVoice) utterance.voice = preferredVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (currentStep < STEPS.length - 1 && isPlaying) {
+                                setCurrentStep(prev => prev + 1);
+                            } else if (currentStep >= STEPS.length - 1) {
+                                setIsComplete(true);
+                                setIsPlaying(false);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (currentStep < STEPS.length - 1 && isPlaying) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            // 步骤变化时触发语音
+            useEffect(() => {
+                if (isPlaying || currentStep === 0) {
+                    speak(STEPS[currentStep].title);
+                }
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep, isPlaying]);
+
+            // 初始化语音
+            useEffect(() => {
+                if ('speechSynthesis' in window) {
+                    speechSynthesis.getVoices();
+                }
+            }, []);
+
+            const handleStart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+                setIsComplete(false);
+                speak(STEPS[0].title);
+            };
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const handleReset = () => {
+                setIsPlaying(false);
+                setCurrentStep(0);
+                setIsComplete(false);
+                window.speechSynthesis.cancel();
+            };
+
+            // 矩阵键盘动画组件
+            const KeyMatrixAnimation = () => {
+                const step = currentStep;
+
+                // 步骤 1: 基础概念
+                if (step === 0) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-amber-700 mb-4">矩阵键盘基础</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* GPIO 对比 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <h5 className="text-xs font-bold text-amber-700 mb-2">独立按键</h5>
+                                        <div className="grid grid-cols-4 gap-1">
+                                            {Array(16).fill(0).map((_, i) => (
+                                                <div key={i} className="w-6 h-6 bg-red-400 rounded text-xs flex items-center justify-center text-white">
+                                                    {i}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="text-xs text-red-600 mt-1 font-bold">
+                                            16 键 = 16 GPIO
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 矩阵键盘 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-3 shadow border-2 border-amber-500">
+                                        <h5 className="text-xs font-bold text-amber-700 mb-2">矩阵键盘</h5>
+                                        <div className="grid grid-cols-4 gap-1">
+                                            {Array(16).fill(0).map((_, i) => (
+                                                <div key={i} className="w-6 h-6 bg-amber-400 rounded text-xs flex items-center justify-center text-white cursor-pointer hover:bg-amber-500"
+                                                    onClick={() => handleKeyPress(i)}>
+                                                    {i.toString(16).toUpperCase()}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="text-xs text-amber-600 mt-1 font-bold">
+                                            16 键 = 8 GPIO (省 50%)
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 常见规格 */}
+                            <div className="mt-4 grid grid-cols-3 gap-2">
+                                <div className="bg-white p-2 rounded shadow text-center">
+                                    <div className="text-xs font-bold text-amber-700">4×4</div>
+                                    <div className="text-xs text-gray-500">16 键 / 8 GPIO</div>
+                                </div>
+                                <div className="bg-white p-2 rounded shadow text-center">
+                                    <div className="text-xs font-bold text-amber-700">4×3</div>
+                                    <div className="text-xs text-gray-500">12 键 / 7 GPIO</div>
+                                </div>
+                                <div className="bg-white p-2 rounded shadow text-center">
+                                    <div className="text-xs font-bold text-amber-700">3×3</div>
+                                    <div className="text-xs text-gray-500">9 键 / 6 GPIO</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 2: 工作原理
+                if (step === 1) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-amber-700 mb-4">扫描工作原理</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 行扫描示意 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">行扫描法</h5>
+                                    <div className="relative">
+                                        {/* 4×4 网格 */}
+                                        <div className="grid grid-cols-4 gap-1">
+                                            {Array(16).fill(0).map((_, i) => {
+                                                const row = Math.floor(i / 4);
+                                                const col = i % 4;
+                                                const isScanningRow = row === scanningRow;
+                                                const isPressed = pressedKey === i;
+                                                return (
+                                                    <div
+                                                        key={i}
+                                                        className={`w-10 h-10 rounded flex items-center justify-center text-xs font-bold transition-all ${
+                                                            isPressed
+                                                                ? 'bg-amber-600 text-white scale-95'
+                                                                : isScanningRow
+                                                                ? 'bg-amber-400 text-white scan'
+                                                                : 'bg-gray-200 text-gray-600'
+                                                        }`}
+                                                    >
+                                                        {i.toString(16).toUpperCase()}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {/* 行标签 */}
+                                        <div className="absolute -left-8 top-0 h-full flex flex-col justify-around text-xs text-amber-700 font-bold">
+                                            {['ROW0', 'ROW1', 'ROW2', 'ROW3'].map((label, i) => (
+                                                <div key={i} className={i === scanningRow ? 'text-amber-600' : ''}>{label}</div>
+                                            ))}
+                                        </div>
+
+                                        {/* 列标签 */}
+                                        <div className="absolute -top-6 left-0 w-full flex justify-around text-xs text-amber-700 font-bold">
+                                            {['COL0', 'COL1', 'COL2', 'COL3'].map((label, i) => (
+                                                <div key={i}>{label}</div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 扫描流程 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-2 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-amber-500 rounded-full flex items-center justify-center text-white text-xs font-bold">1</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-amber-700">输出低电平</div>
+                                                <div className="text-gray-500">当前行输出 0</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg p-2 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-amber-500 rounded-full flex items-center justify-center text-white text-xs font-bold">2</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-amber-700">读取列状态</div>
+                                                <div className="text-gray-500">检测哪列为 0</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg p-2 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-amber-500 rounded-full flex items-center justify-center text-white text-xs font-bold">3</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-amber-700">计算键值</div>
+                                                <div className="text-gray-500">key = row × 4 + col</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg p-2 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-amber-500 rounded-full flex items-center justify-center text-white text-xs font-bold">4</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-amber-700">切换下一行</div>
+                                                <div className="text-gray-500">继续扫描</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 3: 硬件连接
+                if (step === 2) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-amber-700 mb-4">硬件连接与映射</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 引脚映射 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">STM32 引脚分配</h5>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between p-2 bg-blue-100 rounded">
+                                            <span className="text-xs font-bold text-blue-700">行线 ROW0-3</span>
+                                            <span className="text-xs text-blue-600">PA0-PA3</span>
+                                        </div>
+                                        <div className="flex items-center justify-between p-2 bg-green-100 rounded">
+                                            <span className="text-xs font-bold text-green-700">列线 COL0-3</span>
+                                            <span className="text-xs text-green-600">PA4-PA7</span>
+                                        </div>
+                                    </div>
+
+                                    {/* 扫描码表 */}
+                                    <div className="mt-3">
+                                        <h6 className="text-xs font-bold text-amber-700 mb-1">扫描码表</h6>
+                                        <div className="grid grid-cols-4 gap-1 text-xs">
+                                            {['0x11', '0x21', '0x41', '0x81',
+                                             '0x12', '0x22', '0x42', '0x82',
+                                             '0x14', '0x24', '0x44', '0x84',
+                                             '0x18', '0x28', '0x48', '0x88'].map((code, i) => (
+                                                <div key={i} className={`p-1 rounded text-center ${
+                                                    pressedKey === i ? 'bg-amber-500 text-white' : 'bg-gray-100'
+                                                }`}>
+                                                    {code}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 交互式键盘 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">点击测试</h5>
+                                    <div className="grid grid-cols-4 gap-2">
+                                        {['1', '2', '3', 'A',
+                                         '4', '5', '6', 'B',
+                                         '7', '8', '9', 'C',
+                                         '*', '0', '#', 'D'].map((label, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => handleKeyPress(i)}
+                                                className={`w-12 h-12 rounded-lg font-bold text-lg transition-all ${
+                                                    pressedKey === i
+                                                        ? 'bg-amber-600 text-white scale-95'
+                                                        : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                                }`}
+                                            >
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {pressedKey !== null && (
+                                        <div className="mt-2 text-center">
+                                            <div className="text-xs text-gray-500">按键值</div>
+                                            <div className="text-lg font-bold text-amber-700">
+                                                {pressedKey.toString(16).toUpperCase()}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 4: GPIO 配置
+                if (step === 3) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-amber-700 mb-4">GPIO 配置详解</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 配置对比 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-3 shadow border-l-4 border-blue-500">
+                                        <h5 className="text-xs font-bold text-blue-700 mb-2">行线配置 (输出)</h5>
+                                        <div className="text-xs space-y-1">
+                                            <div className="flex justify-between">
+                                                <span>MODE</span>
+                                                <span className="font-bold">推挽输出</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>OTYPER</span>
+                                                <span className="font-bold">推挽</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>OSPEEDR</span>
+                                                <span className="font-bold">高速</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>PUPDR</span>
+                                                <span className="font-bold">无上拉</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-lg p-3 shadow border-l-4 border-green-500">
+                                        <h5 className="text-xs font-bold text-green-700 mb-2">列线配置 (输入)</h5>
+                                        <div className="text-xs space-y-1">
+                                            <div className="flex justify-between">
+                                                <span>MODE</span>
+                                                <span className="font-bold">输入</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>PUPDR</span>
+                                                <span className="font-bold">上拉</span>
+                                            </div>
+                                            <div className="flex justify-between bg-green-50 p-1 rounded">
+                                                <span>目的</span>
+                                                <span className="font-bold text-green-600">默认高电平</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* BSRR 操作 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">BSRR 原子操作</h5>
+                                    <div className="bg-amber-50 p-3 rounded text-xs font-mono text-amber-800">
+                                        <div className="mb-2">设置行输出:</div>
+                                        <div>GPIOA->BSRR</div>
+                                        <div className="ml-4">= (0x0F &lt;&lt; 16)  // 复位</div>
+                                        <div className="ml-4">| (row &amp; 0x0F);  // 置位</div>
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-4 gap-1">
+                                        {['R3', 'R2', 'R1', 'R0'].map((label, i) => (
+                                            <div key={i} className={`p-2 rounded text-center text-xs font-bold ${
+                                                scanningRow === (3-i) ? 'bg-amber-500 text-white' : 'bg-gray-200'
+                                            }`}>
+                                                {label}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="mt-2 text-xs text-gray-500 text-center">
+                                        当前扫描行：ROW{scanningRow}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 5: 扫描算法
+                if (step === 4) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-amber-700 mb-4">扫描算法流程</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 流程图 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">扫描流程</h5>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 bg-amber-500 rounded-full flex items-center justify-center text-white text-xs font-bold">1</div>
+                                            <div className="flex-1 bg-amber-100 p-2 rounded text-xs">
+                                                <div className="font-bold">初始化行计数器</div>
+                                                <div className="text-gray-600">row = 0</div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 bg-amber-500 rounded-full flex items-center justify-center text-white text-xs font-bold">2</div>
+                                            <div className="flex-1 bg-amber-100 p-2 rounded text-xs">
+                                                <div className="font-bold">当前行输出低电平</div>
+                                                <div className="text-gray-600">BSRR = ~(1&lt;&lt;row)</div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 bg-amber-500 rounded-full flex items-center justify-center text-white text-xs font-bold">3</div>
+                                            <div className="flex-1 bg-amber-100 p-2 rounded text-xs">
+                                                <div className="font-bold">读取列数据</div>
+                                                <div className="text-gray-600">col = IDR & 0xF0</div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-xs font-bold">4</div>
+                                            <div className="flex-1 bg-green-100 p-2 rounded text-xs">
+                                                <div className="font-bold">判断是否有键按下</div>
+                                                <div className="text-gray-600">col != 0xF0?</div>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold">5</div>
+                                            <div className="flex-1 bg-blue-100 p-2 rounded text-xs">
+                                                <div className="font-bold">计算键值返回</div>
+                                                <div className="text-gray-600">key = row*4 + col</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 代码高亮 */}
+                                <div className="bg-gray-900 rounded-lg p-3 shadow text-xs">
+                                    <div className="text-green-400 font-mono">
+                                        <div className="text-gray-500">// 逐行扫描</div>
+                                        <div className="text-purple-400">for</div> (row = 0; row &lt; 4; row++) {'{'}
+                                        <div className="ml-2 text-blue-400">// 当前行输出低</div>
+                                        <div className="ml-2">GPIOA-&gt;BSRR = ...;</div>
+                                        <div className="ml-2 text-blue-400">// 读列状态</div>
+                                        <div className="ml-2">col = (IDR &gt;&gt; 4) & 0x0F;</div>
+                                        <div className="ml-2 text-purple-400">if</div> (col != 0x0F) {'{'}
+                                        <div className="ml-4 text-green-400">// 去抖</div>
+                                        <div className="ml-4">Delay_ms(10);</div>
+                                        <div className="ml-4 text-purple-400">return</div> row * 4 + col;
+                                        {'}'}
+                                        {'}'}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 6: 去抖与连发
+                if (step === 5) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-amber-700 mb-4">去抖与连发机制</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 状态机 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">按键状态结构体</h5>
+                                    <div className="bg-amber-50 p-3 rounded text-xs font-mono text-amber-800">
+                                        <div>key_value</div>
+                                        <div>is_pressed</div>
+                                        <div>press_time</div>
+                                        <div>long_press</div>
+                                        <div>repeat_count</div>
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-2 gap-2">
+                                        <div className="bg-green-100 p-2 rounded text-center">
+                                            <div className="text-xs font-bold text-green-700">去抖</div>
+                                            <div className="text-xs text-green-600">20ms</div>
+                                        </div>
+                                        <div className="bg-red-100 p-2 rounded text-center">
+                                            <div className="text-xs font-bold text-red-700">长按</div>
+                                            <div className="text-xs text-red-600">1000ms</div>
+                                        </div>
+                                        <div className="bg-blue-100 p-2 rounded text-center col-span-2">
+                                            <div className="text-xs font-bold text-blue-700">连发</div>
+                                            <div className="text-xs text-blue-600">每 300ms 触发一次</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 时序图 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">按键时序</h5>
+                                    <div className="space-y-3">
+                                        {/* 按下 */}
+                                        <div>
+                                            <div className="text-xs text-gray-500 mb-1">按键按下</div>
+                                            <div className="h-6 bg-amber-500 rounded"></div>
+                                        </div>
+                                        {/* 去抖 */}
+                                        <div>
+                                            <div className="text-xs text-gray-500 mb-1">去抖窗口 (20ms)</div>
+                                            <div className="h-6 bg-yellow-300 rounded relative overflow-hidden">
+                                                <div className="absolute inset-0 bg-yellow-500 animate-pulse"></div>
+                                            </div>
+                                        </div>
+                                        {/* 短按确认 */}
+                                        <div>
+                                            <div className="text-xs text-gray-500 mb-1">短按确认</div>
+                                            <div className="h-6 bg-green-500 rounded"></div>
+                                        </div>
+                                        {/* 长按 */}
+                                        <div>
+                                            <div className="text-xs text-gray-500 mb-1">长按检测 (1000ms)</div>
+                                            <div className="h-6 bg-red-500 rounded"></div>
+                                        </div>
+                                        {/* 连发 */}
+                                        <div>
+                                            <div className="text-xs text-gray-500 mb-1">连发 (每 300ms)</div>
+                                            <div className="h-6 bg-blue-500 rounded relative overflow-hidden">
+                                                <div className="flex">
+                                                    {[1,2,3,4,5].map(i => (
+                                                        <div key={i} className="flex-1 border-r border-white"></div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 7: 编码键盘
+                if (step === 6) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-amber-700 mb-4">编码键盘应用</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 键值映射表 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">键值映射表</h5>
+                                    <div className="grid grid-cols-4 gap-1">
+                                        {['1', '2', '3', 'A',
+                                         '4', '5', '6', 'B',
+                                         '7', '8', '9', 'C',
+                                         '*', '0', '#', 'D'].map((label, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => handleKeyPress(i)}
+                                                className={`w-10 h-10 rounded font-bold text-sm transition-all ${
+                                                    pressedKey === i
+                                                        ? 'bg-amber-600 text-white scale-95'
+                                                        : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                                }`}
+                                            >
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="mt-2 text-xs text-gray-500">
+                                        点击按键查看编码
+                                    </div>
+                                </div>
+
+                                {/* 密码输入 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">密码输入处理</h5>
+                                    <div className="bg-gray-100 p-3 rounded mb-3">
+                                        <div className="text-xs text-gray-500 mb-1">输入缓冲区</div>
+                                        <div className="flex gap-1">
+                                            {[0,1,2,3,4,5].map(i => (
+                                                <div key={i} className="w-8 h-8 border-2 border-amber-500 rounded flex items-center justify-center text-lg font-bold">
+                                                    {pressedKey !== null && i < 6 ? '*' : ''}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2 text-xs">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                                            <span>数字键 → 添加到密码</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                                            <span>D 键长按 → 清空</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                                            <span># 键 → 确认</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 8: 应用实例
+                if (step === 7) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-amber-700 mb-4">应用实例 - 电子密码锁</h4>
+
+                            <div className="grid grid-cols-3 gap-4 h-full">
+                                {/* 系统状态 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">系统状态机</h5>
+                                    <div className="space-y-2">
+                                        <div className={`p-2 rounded text-xs text-center ${
+                                            scanningRow === 0 ? 'bg-green-500 text-white' : 'bg-gray-100'
+                                        }`}>
+                                            IDLE (空闲)
+                                        </div>
+                                        <div className={`p-2 rounded text-xs text-center ${
+                                            scanningRow === 1 ? 'bg-blue-500 text-white' : 'bg-gray-100'
+                                        }`}>
+                                            INPUT (输入)
+                                        </div>
+                                        <div className={`p-2 rounded text-xs text-center ${
+                                            scanningRow === 2 ? 'bg-yellow-500 text-white' : 'bg-gray-100'
+                                        }`}>
+                                            VERIFY (验证)
+                                        </div>
+                                        <div className={`p-2 rounded text-xs text-center ${
+                                            scanningRow === 3 ? 'bg-green-500 text-white' : 'bg-gray-100'
+                                        }`}>
+                                            UNLOCKED (已开锁)
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 键盘输入 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">键盘输入</h5>
+                                    <div className="grid grid-cols-4 gap-1">
+                                        {['1', '2', '3', 'A',
+                                         '4', '5', '6', 'B',
+                                         '7', '8', '9', 'C',
+                                         '*', '0', '#', 'D'].map((label, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => handleKeyPress(i)}
+                                                className={`w-8 h-8 rounded font-bold text-xs transition-all ${
+                                                    pressedKey === i
+                                                        ? 'bg-amber-600 text-white scale-95'
+                                                        : 'bg-amber-100 text-amber-700'
+                                                }`}
+                                            >
+                                                {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* 输出显示 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-amber-700 mb-2">系统输出</h5>
+                                    <div className="space-y-2">
+                                        <div className="bg-red-100 p-2 rounded text-center">
+                                            <div className="text-xs text-red-700">LED 红色</div>
+                                            <div className="text-xs text-red-600">验证失败</div>
+                                        </div>
+                                        <div className="bg-green-100 p-2 rounded text-center">
+                                            <div className="text-xs text-green-700">LED 绿色</div>
+                                            <div className="text-xs text-green-600">验证成功</div>
+                                        </div>
+                                        <div className="bg-blue-100 p-2 rounded text-center">
+                                            <div className="text-xs text-blue-700">继电器</div>
+                                            <div className="text-xs text-blue-600">开锁控制</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                return null;
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        {/* 标题 */}
+                        <h1 className="text-3xl font-bold text-center mb-4 text-amber-700">
+                            STM32 矩阵键盘检测完整指南
+                        </h1>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full font-bold transition-all ${
+                                            index === currentStep
+                                                ? 'bg-amber-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-amber-200 text-amber-700'
+                                                : 'bg-gray-200 text-gray-500'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 主内容区 */}
+                        <div className="grid grid-cols-2 gap-6 mb-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900 rounded-lg p-4 shadow-lg">
+                                <div className="text-amber-400 font-bold mb-2">
+                                    步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                                </div>
+                                <pre className="text-green-400 text-xs overflow-auto h-64 font-mono">
+                                    <code>{STEPS[currentStep].code}</code>
+                                </pre>
+                            </div>
+
+                            {/* 动画区 */}
+                            <div className="scaleIn">
+                                <KeyMatrixAnimation />
+                            </div>
+                        </div>
+
+                        {/* 讲解区 */}
+                        <div className="bg-white rounded-lg p-6 shadow-lg mb-6">
+                            <h3 className="text-xl font-bold text-amber-700 mb-4">核心知识点</h3>
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="border-l-4 border-amber-500 pl-4">
+                                    <h4 className="font-bold text-amber-700 mb-2">扫描原理</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 逐行输出低电平</li>
+                                        <li>• 读取列状态判断</li>
+                                        <li>• row×4+col=键值</li>
+                                    </ul>
+                                </div>
+                                <div className="border-l-4 border-amber-500 pl-4">
+                                    <h4 className="font-bold text-amber-700 mb-2">GPIO 配置</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 行线=推挽输出</li>
+                                        <li>• 列线=上拉输入</li>
+                                        <li>• BSRR 原子操作</li>
+                                    </ul>
+                                </div>
+                                <div className="border-l-4 border-amber-500 pl-4">
+                                    <h4 className="font-bold text-amber-700 mb-2">高级功能</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 20ms 软件去抖</li>
+                                        <li>• 长按/连发检测</li>
+                                        <li>• 键值编码映射</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 控制按钮 */}
+                        <div className="flex justify-center gap-4">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-bold ${
+                                    currentStep === 0
+                                        ? 'bg-gray-200 text-gray-400'
+                                        : 'bg-amber-500 text-white hover:bg-amber-600'
+                                }`}
+                            >
+                                上一步
+                            </button>
+
+                            {!isPlaying && !isComplete && (
+                                <button
+                                    onClick={handleStart}
+                                    className="px-6 py-3 bg-amber-500 text-white rounded-lg font-bold hover:bg-amber-600"
+                                >
+                                    开始讲解
+                                </button>
+                            )}
+
+                            {isPlaying && (
+                                <button
+                                    onClick={handleNext}
+                                    className="px-6 py-3 bg-amber-500 text-white rounded-lg font-bold hover:bg-amber-600"
+                                >
+                                    下一步
+                                </button>
+                            )}
+
+                            {isComplete && (
+                                <button
+                                    onClick={handleReset}
+                                    className="px-6 py-3 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600"
+                                >
+                                    重新学习
+                                </button>
+                            )}
+
+                            <button
+                                onClick={handleReset}
+                                className="px-6 py-3 bg-gray-500 text-white rounded-lg font-bold hover:bg-gray-600"
+                            >
+                                重置
+                            </button>
+                        </div>
+
+                        {/* 完成提示 */}
+                        {isComplete && (
+                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                                <div className="bg-white rounded-lg p-8 max-w-md text-center scaleIn">
+                                    <div className="text-6xl mb-4">🎉</div>
+                                    <h2 className="text-2xl font-bold text-amber-700 mb-4">学习完成!</h2>
+                                    <p className="text-gray-600 mb-6">
+                                        已掌握 STM32 矩阵键盘检测的核心知识
+                                    </p>
+                                    <button
+                                        onClick={handleReset}
+                                        className="px-6 py-3 bg-amber-500 text-white rounded-lg font-bold hover:bg-amber-600"
+                                    >
+                                        重新学习
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

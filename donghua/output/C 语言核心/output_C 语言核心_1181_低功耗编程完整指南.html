@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1181 - 低功耗编程完整指南 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: transparent; } 50% { background-color: rgba(251,191,36,0.2); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes sleepAnim { 0%, 100% { background-color: rgba(59,130,246,0.3); } 50% { background-color: rgba(59,130,246,0.5); } }
+        @keyframes stopAnim { 0%, 100% { background-color: rgba(168,85,247,0.3); } 50% { background-color: rgba(168,85,247,0.5); } }
+        @keyframes standbyAnim { 0%, 100% { background-color: rgba(239,68,68,0.3); } 50% { background-color: rgba(239,68,68,0.5); } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-sleep { animation: sleepAnim 2s infinite; }
+        .animate-stop { animation: stopAnim 2s infinite; }
+        .animate-standby { animation: standbyAnim 2s infinite; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: 'from-blue-500 to-cyan-600',
+            light: 'from-blue-50 to-cyan-50',
+            text: 'text-blue-600',
+            bg: 'bg-blue-50',
+            border: 'border-blue-200',
+            hover: 'hover:bg-blue-100'
+        };
+
+        const CODE_EXAMPLES = [
+            {
+                title: "低功耗模式总览",
+                code: `// STM32 低功耗模式 (Cortex-M4)
+
+// 1. 睡眠模式 (Sleep Mode)
+// - CPU 停止，外设运行
+// - 唤醒：任意中断
+// - 电流：~10mA
+// - 唤醒时间：即时
+void enterSleep(void) {
+    __WFI();  // Wait For Interrupt
+}
+
+// 2. 停止模式 (Stop Mode)
+// - CPU+ 外设停止，SRAM 保持
+// - 唤醒：EXTI 中断
+// - 电流：~100μA
+// - 唤醒时间：~50μs
+void enterStop(void) {
+    PWR->CR |= PWR_CR_LPDS;  // 低压调节
+    SCB->SCR &= ~SCB_SCR_SLEEPDEEP;
+    __WFI();
+}
+
+// 3. 待机模式 (Standby Mode)
+// - 仅备份域运行
+// - 唤醒：WKUP 引脚/NRST
+// - 电流：~2μA
+// - 唤醒时间：~2ms (相当于复位)
+void enterStandby(void) {
+    PWR->CR |= PWR_CR_PDDS | PWR_CR_CWUF;
+    SCB->SCR |= SCB_SCR_SLEEPDEEP;
+    __WFI();
+}`,
+                highlight: "__WFI",
+                explanation: "三种低功耗模式：睡眠模式电流最大但唤醒最快，停止模式折中，待机电流最小但唤醒相当于复位。__WFI 指令进入低功耗。"
+            },
+            {
+                title: "运行模式降频",
+                code: `// 降低系统时钟降低功耗
+// 功耗 ∝ 频率 × 电压²
+
+void enterLowPowerRun(void) {
+    // 1. 切换到 HSI (内部振荡器)
+    RCC->CFGR |= RCC_CFGR_SW_HSI;
+    while (!(RCC->CFGR & RCC_CFGR_SWS_HSI));
+
+    // 2. 关闭 PLL
+    RCC->CR &= ~RCC_CR_PLLON;
+
+    // 3. 降低 AHB 分频
+    RCC->CFGR |= RCC_CFGR_HPRE_DIV4;  // 4 分频
+
+    // 4. 降低电压 (如果支持)
+    PWR->CR |= PWR_CR_VOS_1;  // Scale 2
+
+    // 系统降频至 4MHz，功耗降低 75%
+}
+
+void exitLowPowerRun(void) {
+    // 恢复全速运行
+    RCC->CR |= RCC_CR_PLLON;
+    while (!(RCC->CR & RCC_CR_PLLRDY));
+    RCC->CFGR |= RCC_CFGR_SW_PLL;
+    while (!(RCC->CFGR & RCC_CFGR_SWS_PLL));
+}`,
+                highlight: "降频",
+                explanation: "运行模式下降频可以显著降低功耗。功耗与频率成正比，与电压平方成正比。切换到内部 HSI 并降低分频比，可以将功耗降低 75% 以上。"
+            },
+            {
+                title: "外设时钟管理",
+                code: `// 禁用未使用外设的时钟
+void disableUnusedPeripherals(void) {
+    // AHB1 外设
+    RCC->AHB1ENR &= ~(
+        RCC_AHB1ENR_DMA2EN |   // DMA2
+        RCC_AHB1ENR_DMA1EN |   // DMA1
+        RCC_AHB1ENR_CRCEN      // CRC
+    );
+
+    // APB1 外设
+    RCC->APB1ENR &= ~(
+        RCC_APB1ENR_USART2EN | // USART2
+        RCC_APB1ENR_USART3EN | // USART3
+        RCC_APB1ENR_SPI2EN |   // SPI2
+        RCC_APB1ENR_I2C1EN |   // I2C
+        RCC_APB1ENR_TIM2EN |   // TIM2
+        RCC_APB1ENR_TIM3EN     // TIM3
+    );
+
+    // APB2 外设
+    RCC->APB2ENR &= ~(
+        RCC_APB2ENR_SPI1EN |   // SPI1
+        RCC_APB2ENR_USART1EN   // USART1
+    );
+
+    // 估算：每禁用 1 个外设，节省 50-200μA
+}`,
+                highlight: "时钟禁用",
+                explanation: "禁用未使用外设的时钟可以节省电流。每个外设时钟消耗 50-200μA。在初始化时明确禁用所有不需要的外设，只保留必要的外设时钟。"
+            },
+            {
+                title: "GPIO 低功耗配置",
+                code: `void GPIO_LowPower_Config(void) {
+    // ❌ 错误：浮空输入会漏电
+    // GPIOA->CRL = 0x44444444;  // 浮空输入
+
+    // ✅ 正确：模拟输入或固定输出
+    for (int i = 0; i < 8; i++) {
+        GPIOA->CRL &= ~(0xF << (i * 4));
+        GPIOA->CRL |= (0x0 << (i * 4));  // 模拟输入
+    }
+
+    // 未使用引脚：输出低电平
+    GPIOB->MODER &= ~(0x3 << (9 * 2));
+    GPIOB->MODER |= (0x1 << (9 * 2));  // 输出
+    GPIOB->ODR &= ~(1 << 9);           // 输出 0
+
+    // 按键引脚：上拉输入，唤醒用
+    GPIOA->PUPDR &= ~(0x3 << (0 * 2));
+    GPIOA->PUPDR |= (0x1 << (0 * 2));  // 上拉
+
+    // 估算：每个浮空引脚漏电 10-50μA
+}`,
+                highlight: "模拟输入",
+                explanation: "GPIO 配置不当会导致漏电。浮空输入引脚可能漏电 10-50μA。未使用的引脚应配置为模拟输入或输出固定电平。按键等唤醒引脚配置为上拉输入。"
+            },
+            {
+                title: "唤醒源配置",
+                code: `// EXTI 唤醒配置 (停止/待机模式)
+void EXTI_Wakeup_Config(void) {
+    // 1. 使能 SYSCFG 时钟
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+
+    // 2. 配置 EXTI 线路 (PA0)
+    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI0;
+    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI0_PA;
+
+    // 3. 配置上升沿触发
+    EXTI->RTSR |= EXTI_RTSR_TR0;
+
+    // 4. 使能中断
+    EXTI->IMR |= EXTI_IMR_MR0;
+
+    // 5. NVIC 配置
+    NVIC_EnableIRQ(EXTI0_IRQn);
+}
+
+// 待机模式 WKUP 引脚
+void WKUP_Enable(void) {
+    PWR->CSR |= PWR_CSR_EWUP;  // 使能 WKUP
+}
+
+// 唤醒后检测
+if (PWR->CSR & PWR_CSR_WUF) {
+    // 从待机唤醒
+    PWR->CR |= PWR_CR_CWUF;  // 清除标志
+}`,
+                highlight: "EXTI",
+                explanation: "EXTI 外部中断可以作为停止和待机模式的唤醒源。配置 EXTI 线路、触发边沿、使能中断。待机模式还可以使用 WKUP 专用唤醒引脚。"
+            },
+            {
+                title: "低功耗应用架构",
+                code: `// 事件驱动低功耗架构
+volatile uint32_t g_sleepTimer = 0;
+
+int main(void) {
+    System_Init();
+    Sensor_Init();
+    RF_Init();
+
+    while (1) {
+        if (g_sleepTimer > 0) {
+            // 进入低功耗
+            enterStopMode();
+            // 唤醒后继续
+            g_sleepTimer--;
+        }
+
+        // 传感器读数 (事件触发)
+        if (sensorDataReady()) {
+            processSensorData();
+            g_sleepTimer = 100;  // 10 秒后休眠
+        }
+
+        // RF 通信 (事件触发)
+        if (rfPacketReceived()) {
+            processRFPacket();
+            g_sleepTimer = 100;
+        }
+
+        // 无事件时休眠
+        if (g_sleepTimer == 0) {
+            enterStopMode();  // CPU 停止，等待唤醒
+        }
+    }
+}
+
+// 典型占空比：1% 运行，99% 休眠
+// 平均电流：10mA×1% + 100μA×99% = 199μA`,
+                highlight: "事件驱动",
+                explanation: "事件驱动架构让 MCU 大部分时间处于休眠状态。只在传感器数据就绪或 RF 数据包到达时唤醒处理。典型占空比 1% 运行、99% 休眠，平均电流仅 199μA。"
+            },
+            {
+                title: "电池寿命计算",
+                code: `// 电池寿命估算
+// 公式：寿命 (小时) = 容量 (mAh) / 平均电流 (mA)
+
+// 示例：CR2032 纽扣电池 (220mAh)
+// 应用参数:
+#define RUN_CURRENT_mA    10      // 运行电流
+#define SLEEP_CURRENT_uA  100     // 休眠电流
+#define DUTY_CYCLE        0.01    // 1% 占空比
+
+// 计算平均电流
+float avgCurrent_mA =
+    RUN_CURRENT_mA * DUTY_CYCLE +
+    SLEEP_CURRENT_uA / 1000.0 * (1 - DUTY_CYCLE);
+// = 10 × 0.01 + 0.1 × 0.99 = 0.199 mA
+
+// 计算电池寿命
+float batteryLife_hours = 220 / avgCurrent_mA;
+// = 220 / 0.199 = 1105 小时 ≈ 46 天
+
+// 优化对比:
+// 不优化：100% 运行 = 220/10 = 22 小时
+// 优化后：1% 运行 = 1105 小时
+// 提升：50 倍!`,
+                highlight: "50 倍",
+                explanation: "电池寿命计算公式是容量除以平均电流。通过低功耗设计将占空比降至 1%，CR2032 电池寿命从 22 小时提升至 1105 小时，达到 50 倍提升。"
+            },
+            {
+                title: "低功耗最佳实践",
+                code: `// ✅ 低功耗检查清单:
+
+// 1. 系统时钟
+// □ 空闲时降频或切换到 HSI
+// □ 关闭未使用的 PLL
+
+// 2. 外设时钟
+// □ 禁用所有未使用外设时钟
+// □ 按需使能，用完即关
+
+// 3. GPIO 配置
+// □ 未用引脚：模拟输入或输出 0
+// □ 唤醒引脚：上拉输入 + EXTI
+
+// 4. 内部外设
+// □ 关闭 ADC/DAC 参考电压
+// □ 禁用 BOR(如果电压稳定)
+// □ 关闭 Flash 预取
+
+// 5. 软件架构
+// □ 事件驱动，避免轮询
+// □ 尽可能短的唤醒时间
+// □ 批处理减少唤醒次数
+
+// 6. 调试
+// □ 测量实际电流验证
+// □ 使用能量 profiler 工具
+// □ 检查所有 GPIO 状态
+
+// 目标：平均电流 < 100μA`,
+                highlight: "检查清单",
+                explanation: "低功耗最佳实践涵盖时钟管理、GPIO 配置、外设控制、软件架构和调试验证。目标是将平均电流降至 100μA 以下，实现数年电池寿命。"
+            }
+        ];
+
+        function App() {
+            const [step, setStep] = React.useState(0);
+            const [voiceEndTimer, setVoiceEndTimer] = React.useState(null);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                speakCurrentStep();
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, []);
+
+            const speakCurrentStep = () => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                }
+
+                const currentExample = CODE_EXAMPLES[step];
+                const explanations = [
+                    "三种低功耗模式各有特点：睡眠模式电流最大但唤醒最快适合短时等待，停止模式电流和唤醒时间折中，待机电流最小但唤醒相当于复位适合长期休眠。",
+                    "运行模式下降频可以显著降低功耗。功耗与频率成正比，与电压平方成正比。切换到内部 HSI 并降低分频比，可以将功耗降低 75% 以上。",
+                    "禁用未使用外设的时钟可以节省电流。每个外设时钟消耗 50 到 200 微安。在初始化时明确禁用所有不需要的外设，只保留必要的外设时钟。",
+                    "GPIO 配置不当会导致漏电。浮空输入引脚可能漏电 10 到 50 微安。未使用的引脚应配置为模拟输入或输出固定电平。按键等唤醒引脚配置为上拉输入。",
+                    "EXTI 外部中断可以作为停止和待机模式的唤醒源。配置 EXTI 线路、触发边沿、使能中断。待机模式还可以使用 WKUP 专用唤醒引脚。",
+                    "事件驱动架构让微控制器大部分时间处于休眠状态。只在传感器数据就绪或射频数据包到达时唤醒处理。典型占空比 1% 运行、99% 休眠。",
+                    "电池寿命计算公式是容量除以平均电流。通过低功耗设计将占空比降至 1%，CR2032 纽扣电池寿命从 22 小时提升至 1105 小时，达到 50 倍提升。",
+                    "低功耗最佳实践涵盖系统时钟管理、GPIO 配置、外设控制、软件架构和调试验证。目标是将平均电流降至 100 微安以下，实现数年电池寿命。"
+                ];
+
+                const text = `第${step + 1}步：${currentExample.title}。${explanations[step]}`;
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                const voices = speechSynthesis.getVoices();
+                const xiaoxiaoVoice = voices.find(voice =>
+                    voice.name.includes('Xiaoxiao') ||
+                    voice.name.includes('zh-CN')
+                );
+                if (xiaoxiaoVoice) {
+                    utterance.voice = xiaoxiaoVoice;
+                }
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            React.useEffect(() => {
+                speakCurrentStep();
+            }, [step]);
+
+            const renderPowerModes = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-blue-800 mb-4">低功耗模式对比</h4>
+                        <div className="space-y-3">
+                            <div className="p-3 bg-blue-100 rounded border-l-4 border-blue-500">
+                                <div className="flex justify-between">
+                                    <span className="font-bold text-blue-800">睡眠模式</span>
+                                    <span className="text-sm text-blue-600">~10mA</span>
+                                </div>
+                                <div className="text-xs text-blue-600 mt-1">CPU 停，外设运行，唤醒即时</div>
+                            </div>
+                            <div className="p-3 bg-purple-100 rounded border-l-4 border-purple-500 animate-pulse">
+                                <div className="flex justify-between">
+                                    <span className="font-bold text-purple-800">停止模式</span>
+                                    <span className="text-sm text-purple-600">~100μA</span>
+                                </div>
+                                <div className="text-xs text-purple-600 mt-1">CPU+ 外设停，唤醒 50μs</div>
+                            </div>
+                            <div className="p-3 bg-red-100 rounded border-l-4 border-red-500">
+                                <div className="flex justify-between">
+                                    <span className="font-bold text-red-800">待机模式</span>
+                                    <span className="text-sm text-red-600">~2μA</span>
+                                </div>
+                                <div className="text-xs text-red-600 mt-1">仅备份域，唤醒 2ms= 复位</div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderCurrentCompare = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-blue-800 mb-4">电流对比图</h4>
+                        <div className="space-y-4">
+                            <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-red-700">运行模式</span>
+                                    <span className="text-red-600">10mA</span>
+                                </div>
+                                <div className="h-8 bg-red-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-red-500" style={{width: '100%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-purple-700">停止模式</span>
+                                    <span className="text-purple-600">100μA (0.1mA)</span>
+                                </div>
+                                <div className="h-8 bg-purple-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-purple-500" style={{width: '1%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-blue-700">待机模式</span>
+                                    <span className="text-blue-600">2μA (0.002mA)</span>
+                                </div>
+                                <div className="h-8 bg-blue-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-blue-500" style={{width: '0.02%'}}></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderBatteryLife = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-blue-800 mb-4">电池寿命对比</h4>
+                        <div className="space-y-4">
+                            <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-red-700">不优化 (100% 运行)</span>
+                                    <span className="text-red-600">22 小时</span>
+                                </div>
+                                <div className="h-12 bg-red-100 rounded flex items-center px-4">
+                                    <div className="h-full bg-red-400 rounded" style={{width: '20%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-green-700">低功耗优化 (1% 占空比)</span>
+                                    <span className="text-green-600">1105 小时 (46 天)</span>
+                                </div>
+                                <div className="h-12 bg-green-100 rounded flex items-center px-4">
+                                    <div className="h-full bg-green-400 rounded" style={{width: '100%'}}></div>
+                                </div>
+                            </div>
+                            <div className="p-3 bg-yellow-50 rounded border border-yellow-200">
+                                <p className="text-sm text-yellow-800">
+                                    <span className="font-bold">提升倍数:</span> 50 倍!
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderGpioConfig = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-blue-800 mb-4">GPIO 配置对比</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="p-3 bg-red-50 rounded border-2 border-red-300">
+                                <h5 className="font-bold text-red-700 mb-2">❌ 错误</h5>
+                                <div className="text-xs space-y-1">
+                                    <div className="bg-white p-2 rounded font-mono">浮空输入</div>
+                                    <div className="text-red-600">漏电 10-50μA/引脚</div>
+                                </div>
+                            </div>
+                            <div className="p-3 bg-green-50 rounded border-2 border-green-300">
+                                <h5 className="font-bold text-green-700 mb-2">✅ 正确</h5>
+                                <div className="text-xs space-y-1">
+                                    <div className="bg-white p-2 rounded font-mono">模拟输入</div>
+                                    <div className="text-green-600">漏电极小</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 via-cyan-50 to-green-50 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="text-center mb-6">
+                            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent mb-2">
+                                1181 - 低功耗编程完整指南
+                            </h1>
+                            <p className="text-lg text-gray-700">C 语言核心 - 睡眠/停止/待机/ 电池寿命计算</p>
+                            <div className="flex justify-center gap-2 mt-4">
+                                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">低功耗模式</span>
+                                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">时钟管理</span>
+                                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">电池寿命</span>
+                                <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm">事件驱动</span>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-blue-500">
+                                    <h3 className="text-xl font-bold text-blue-700 mb-3">代码示例</h3>
+                                    <div className="bg-gray-50 rounded p-3 font-mono text-sm overflow-x-auto">
+                                        <pre className="text-gray-800 whitespace-pre-wrap">
+                                            {CODE_EXAMPLES[step].code}
+                                        </pre>
+                                    </div>
+                                    <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                        <p className="text-sm text-yellow-800">
+                                            <span className="font-bold">亮点:</span> {CODE_EXAMPLES[step].highlight}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-cyan-500">
+                                    <h3 className="text-xl font-bold text-cyan-700 mb-3">可视化演示</h3>
+                                    {step === 0 && renderPowerModes()}
+                                    {step === 1 && renderCurrentCompare()}
+                                    {step === 2 && (
+                                        <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-blue-800 mb-4">外设时钟功耗</h4>
+                                            <div className="space-y-2">
+                                                {['DMA', 'USART', 'SPI', 'I2C', 'TIM', 'ADC'].map((p, i) => (
+                                                    <div key={i} className="flex items-center gap-2">
+                                                        <div className="w-12 text-xs text-gray-600">{p}</div>
+                                                        <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden">
+                                                            <div className="h-full bg-blue-400" style={{width: `${20 + i * 10}%`}}></div>
+                                                        </div>
+                                                        <span className="text-xs text-gray-600">{50 + i * 30}μA</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 3 && renderGpioConfig()}
+                                    {step === 4 && (
+                                        <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-blue-800 mb-4">唤醒源</h4>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="p-3 bg-blue-100 rounded">
+                                                    <div className="font-bold text-blue-700">EXTI0-15</div>
+                                                    <div className="text-xs text-blue-600">外部中断线</div>
+                                                </div>
+                                                <div className="p-3 bg-green-100 rounded">
+                                                    <div className="font-bold text-green-700">WKUP</div>
+                                                    <div className="text-xs text-green-600">专用唤醒引脚</div>
+                                                </div>
+                                                <div className="p-3 bg-yellow-100 rounded">
+                                                    <div className="font-bold text-yellow-700">PVD</div>
+                                                    <div className="text-xs text-yellow-600">电压检测</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-100 rounded">
+                                                    <div className="font-bold text-purple-700">RTC</div>
+                                                    <div className="text-xs text-purple-600">闹钟事件</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 5 && (
+                                        <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-blue-800 mb-4">事件驱动架构</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-green-100 rounded">
+                                                    <div className="flex justify-between">
+                                                        <span className="font-bold text-green-800">运行状态</span>
+                                                        <span className="text-sm">1%</span>
+                                                    </div>
+                                                    <div className="h-4 bg-green-200 rounded-full mt-1 overflow-hidden">
+                                                        <div className="h-full bg-green-500" style={{width: '100%'}}></div>
+                                                    </div>
+                                                </div>
+                                                <div className="text-center text-gray-400">↓ 事件触发</div>
+                                                <div className="p-3 bg-blue-100 rounded">
+                                                    <div className="flex justify-between">
+                                                        <span className="font-bold text-blue-800">休眠状态</span>
+                                                        <span className="text-sm">99%</span>
+                                                    </div>
+                                                    <div className="h-4 bg-blue-200 rounded-full mt-1 overflow-hidden">
+                                                        <div className="h-full bg-blue-500" style={{width: '100%'}}></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 6 && renderBatteryLife()}
+                                    {step === 7 && (
+                                        <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-blue-800 mb-4">低功耗检查清单</h4>
+                                            <div className="space-y-2">
+                                                {['系统时钟管理', '外设时钟禁用', 'GPIO 正确配置', '内部外设关闭', '事件驱动架构', '实际电流测量'].map((item, i) => (
+                                                    <div key={i} className="flex items-center gap-2 p-2 bg-white rounded border-l-4 border-blue-400">
+                                                        <span className="text-blue-500">□</span>
+                                                        <span className="text-sm">{item}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-purple-500">
+                                    <h3 className="text-xl font-bold text-purple-700 mb-3">关键要点</h3>
+                                    <div className="space-y-3">
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 0 ? 'bg-blue-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-blue-600">模式:</span> 睡眠/停止/待机
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 1 ? 'bg-cyan-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-cyan-600">降频:</span> ∝频率×电压²
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 2 ? 'bg-green-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-green-600">外设:</span> 50-200μA/ 个
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 3 ? 'bg-yellow-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-yellow-600">GPIO:</span> 模拟输入
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 4 ? 'bg-purple-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-purple-600">唤醒:</span> EXTI/WKUP
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 5 ? 'bg-pink-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-pink-600">架构:</span> 1% 运行/99% 休眠
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 6 ? 'bg-indigo-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-indigo-600">寿命:</span> 50 倍提升
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 7 ? 'bg-teal-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-teal-600">目标:</span> <100μA
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 p-3 bg-purple-50 rounded border border-purple-200">
+                                        <p className="text-sm text-purple-800">
+                                            {CODE_EXAMPLES[step].explanation}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-r from-blue-500 to-cyan-600 rounded-lg shadow-lg p-4 text-white">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm">进度</span>
+                                        <span className="text-sm font-bold">{step + 1} / {CODE_EXAMPLES.length}</span>
+                                    </div>
+                                    <div className="w-full bg-white bg-opacity-30 rounded-full h-2">
+                                        <div
+                                            className="bg-white rounded-full h-2 transition-all duration-500"
+                                            style={{ width: `${((step + 1) / CODE_EXAMPLES.length) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <footer className="text-center mt-8 text-gray-600">
+                            <p className="text-sm">C 语言核心 · 低功耗编程完整指南 · 电池供电设备必备技能</p>
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1132 - 指定初始化器 Designated Initializer | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .highlight { box-shadow: 0 0 20px rgba(34, 197, 94, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(34, 197, 94, 0.2); border-left: 3px solid #22c55e; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#22c55e', primaryLight: '#4ade80',
+      secondary: '#16a34a', secondaryLight: '#4ade80',
+      accent: '#14b8a6', accentLight: '#2dd4bf',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== 指定初始化器 Designated Initializer (C99) =====
+// 按字段名初始化，无需按顺序
+
+// 1. 结构体指定初始化
+typedef struct { int x, y, z; } Vec3;
+
+Vec3 v1 = {.x = 1, .y = 2, .z = 3};  // 按名初始化
+Vec3 v2 = {.z = 3, .x = 1};          // y=0(默认)
+Vec3 v3 = {.y = 5};                  // x=0, z=0
+
+// 2. 数组指定初始化
+int arr[10] = {[0] = 1, [9] = 100};  // 只初始化首尾
+// arr[0]=1, arr[1-8]=0, arr[9]=100
+
+// 3. 结合复合字面量
+void draw(Vec3 v);
+draw((Vec3){.x = 10, .y = 20});      // z=0(默认)
+
+// 4. 嵌套结构体
+typedef struct { Vec3 pos; int color; } Sprite;
+Sprite s = {.pos = {.x = 0, .y = 0}, .color = 0xFF0000};
+
+// 5. 实际应用：配置结构体
+typedef struct {
+  int baudrate;
+  int parity;
+  int stop_bits;
+} UART_Config;
+
+UART_Config cfg = {.baudrate = 115200, .stop_bits = 1};  // parity=0`;
+
+    const VOICE_TEXT_MAP = {
+      1: "第一千一百三十二题，指定初始化器 Designated Initializer。",
+      2: "指定初始化器是 C99 引入的特性，允许按字段名初始化结构体或数组，无需按声明顺序。",
+      3: "结构体指定初始化使用点号加字段名语法，可以只初始化需要的字段，其余自动补零。",
+      4: "数组指定初始化使用方括号加索引语法，可以跳着初始化，未指定的元素为零。",
+      5: "指定初始化器可以和复合字面量结合，在函数调用时直接传递部分初始化的临时对象。",
+      6: "嵌套结构体支持多层指定初始化，每层都使用点号语法访问对应字段。",
+      7: "实际应用是配置结构体初始化，只设置需要的字段，保持代码清晰和自文档化。",
+      8: "优点：代码自文档化、无需记忆字段顺序、部分初始化更方便、重构时更安全。"
+    };
+
+    const MAX_STEPS = 8;
+
+    function App() {
+      const [step, setStep] = useState(1);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+      const [voiceRate, setVoiceRate] = useState(1);
+      const voiceEndTimerRef = useRef(null);
+
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if (voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if (!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if (voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate]);
+
+      useEffect(() => {
+        if (isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+
+      const handleStepChange = (newStep) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsVoicePlaying(false);
+        setStep(newStep);
+      };
+
+      const togglePlay = () => {
+        if (step >= MAX_STEPS) {
+          handleStepChange(1);
+          setTimeout(() => setIsPlaying(true), 100);
+        } else {
+          setIsPlaying(!isPlaying);
+        }
+      };
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="bg-gradient-to-r from-green-900/50 via-emerald-900/50 to-teal-900/50 rounded-xl p-6 mb-4 border border-green-700/50">
+            <h1 className="text-3xl font-bold text-green-400 mb-2">1132 - 指定初始化器</h1>
+            <p className="text-green-300 text-sm">C99 按名初始化 / 字段语法 / 自文档化</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-green-700/30">
+              <h2 className="text-lg font-semibold text-green-400 mb-3">代码展示</h2>
+              <pre className="text-xs text-gray-300 overflow-x-auto bg-gray-900/50 p-3 rounded-lg font-mono leading-relaxed">
+                {CODE.split('\n').map((line, i) => (
+                  <div key={i} className={`code-line ${
+                    (step === 2 && i >= 4 && i <= 4) ||
+                    (step === 3 && i >= 7 && i <= 9) ||
+                    (step === 4 && i >= 12 && i <= 14) ||
+                    (step === 5 && i >= 17 && i <= 18) ||
+                    (step === 6 && i >= 21 && i <= 22) ||
+                    (step === 7 && i >= 25 && i <= 29)
+                    ? 'active' : ''
+                  }`}>{line || '\u00A0'}</div>
+                ))}
+              </pre>
+            </div>
+
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-green-700/30">
+              <h2 className="text-lg font-semibold text-green-400 mb-3">可视化演示</h2>
+              <div className="space-y-4">
+                {step === 1 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-green-600/20 to-emerald-600/20 rounded-lg border border-green-500/30">
+                    <p className="text-green-300 text-sm font-medium mb-2">💡 指定初始化器</p>
+                    <p className="text-xs text-gray-400">指定初始化器是 C99 引入的特性，允许按字段名初始化结构体或数组，无需按声明顺序，代码更清晰、更安全。</p>
+                  </div>
+                )}
+                {step === 2 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-green-600/20 to-emerald-600/20 rounded-lg border border-green-500/30">
+                    <p className="text-green-300 text-sm font-medium mb-2">语法格式</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div className="text-green-400">.field_name = value</div>
+                        <div className="text-green-400 mt-1">[index] = value</div>
+                      </div>
+                      <div className="text-green-400 text-center text-xs">
+                        结构体用点号，数组用方括号<br/>
+                        只初始化需要的字段/元素
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 3 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-green-600/20 to-emerald-600/20 rounded-lg border border-green-500/30">
+                    <p className="text-green-300 text-sm font-medium mb-2">结构体指定初始化</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono text-xs">
+                        <div>Vec3 v1 = {`.x = 1, .y = 2, .z = 3`};</div>
+                        <div className="text-green-400">Vec3 v2 = {`.z = 3, .x = 1`};</div>
+                        <div className="text-gray-500">// y=0 (默认)</div>
+                        <div className="text-green-400">Vec3 v3 = {`.y = 5`};</div>
+                        <div className="text-gray-500">// x=0, z=0</div>
+                      </div>
+                      <div className="text-green-400 text-center text-xs">
+                        无需按顺序！未指定的字段自动补零
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 4 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-green-600/20 to-emerald-600/20 rounded-lg border border-green-500/30">
+                    <p className="text-green-300 text-sm font-medium mb-2">数组指定初始化</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div className="text-green-400">int arr[10] = {[0] = 1, [9] = 100};</div>
+                      </div>
+                      <div className="flex items-center gap-0">
+                        <div className="w-12 h-8 bg-green-600/50 border border-green-400 flex items-center justify-center text-xs">1</div>
+                        {[...Array(8)].map((_, i) => (
+                          <div key={i} className="w-12 h-8 bg-gray-700/30 border border-gray-500 flex items-center justify-center text-xs text-gray-500">0</div>
+                        ))}
+                        <div className="w-12 h-8 bg-emerald-600/50 border border-emerald-400 flex items-center justify-center text-xs">100</div>
+                      </div>
+                      <div className="text-green-400 text-center text-xs">
+                        arr[0]=1, arr[1-8]=0, arr[9]=100
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 5 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-green-600/20 to-emerald-600/20 rounded-lg border border-green-500/30">
+                    <p className="text-green-300 text-sm font-medium mb-2">结合复合字面量</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div>void draw(Vec3 v);</div>
+                        <div className="text-green-400">draw((Vec3){.x = 10, .y = 20});</div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                          <div className="text-green-400 text-xs">x</div>
+                          <div className="text-gray-400 text-xs">= 10</div>
+                        </div>
+                        <div className="p-2 bg-emerald-900/20 rounded border border-emerald-500/30">
+                          <div className="text-emerald-400 text-xs">y</div>
+                          <div className="text-gray-400 text-xs">= 20</div>
+                        </div>
+                        <div className="p-2 bg-teal-900/20 rounded border border-teal-500/30">
+                          <div className="text-teal-400 text-xs">z</div>
+                          <div className="text-gray-400 text-xs">= 0 (默认)</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 6 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-green-600/20 to-emerald-600/20 rounded-lg border border-green-500/30">
+                    <p className="text-green-300 text-sm font-medium mb-2">嵌套结构体</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded text-xs">
+                        <div>typedef struct {'{'}</div>
+                        <div>&nbsp;&nbsp;Vec3 pos;</div>
+                        <div>&nbsp;&nbsp;int color;</div>
+                        <div>{'}'} Sprite;</div>
+                      </div>
+                      <div className="p-2 bg-green-900/20 rounded border border-green-500/30 font-mono text-xs">
+                        <div>Sprite s = {'{'}</div>
+                        <div>&nbsp;&nbsp;.pos = {'{'}</div>
+                        <div>&nbsp;&nbsp;&nbsp;&nbsp;.x = 0,</div>
+                        <div>&nbsp;&nbsp;&nbsp;&nbsp;.y = 0</div>
+                        <div>&nbsp;&nbsp;{'}'},</div>
+                        <div>&nbsp;&nbsp;.color = 0xFF0000</div>
+                        <div>{'}'};</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 7 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-green-600/20 to-emerald-600/20 rounded-lg border border-green-500/30">
+                    <p className="text-green-300 text-sm font-medium mb-2">配置结构体应用</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono text-xs">
+                        <div>typedef struct {'{'}</div>
+                        <div>&nbsp;&nbsp;int baudrate;</div>
+                        <div>&nbsp;&nbsp;int parity;</div>
+                        <div>&nbsp;&nbsp;int stop_bits;</div>
+                        <div>{'}'} UART_Config;</div>
+                      </div>
+                      <div className="p-2 bg-green-900/20 rounded border border-green-500/30 font-mono text-xs">
+                        <div>UART_Config cfg = {'{'}</div>
+                        <div className="text-green-400">&nbsp;&nbsp;.baudrate = 115200,</div>
+                        <div className="text-green-400">&nbsp;&nbsp;.stop_bits = 1</div>
+                        <div>{'}'}; <span className="text-gray-500">// parity=0</span></div>
+                      </div>
+                      <div className="text-green-400 text-center text-xs">
+                        只设置需要的字段，代码自文档化!
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 8 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-green-900/20 rounded-lg border border-green-500/30">
+                      <p className="text-green-300 text-xs font-medium mb-2">📋 优点总结</p>
+                      <ul className="text-xs text-gray-400 space-y-2">
+                        <li>• <span className="text-green-400">自文档化</span>: 字段名即注释，无需额外说明</li>
+                        <li>• <span className="text-emerald-400">无需记忆顺序</span>: 按名访问，不依赖字段排列</li>
+                        <li>• <span className="text-teal-400">部分初始化</span>: 只设置需要的字段，其余补零</li>
+                        <li>• <span className="text-cyan-400">重构安全</span>: 字段重命名时编译器会检查</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-green-700/30">
+                <h2 className="text-lg font-semibold text-green-400 mb-3">关键点说明</h2>
+                <div className="space-y-2 text-sm">
+                  <div className={`p-2 rounded transition-colors ${step >= 2 ? 'bg-green-900/30 text-green-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">①</span> 按字段名初始化，无需按顺序
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 4 ? 'bg-green-900/30 text-green-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">②</span> 未指定的字段/元素自动补零
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 6 ? 'bg-green-900/30 text-green-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">③</span> 支持嵌套结构体和复合字面量
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-green-700/30">
+                <h2 className="text-lg font-semibold text-green-400 mb-3">对比学习</h2>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-gray-900/20 rounded border border-gray-500/30">
+                    <p className="text-gray-400 font-medium">传统方式</p>
+                    <pre className="text-gray-500 font-mono text-xs">Vec3 v = {1, 2, 3}; // 必须按顺序</pre>
+                  </div>
+                  <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                    <p className="text-green-300 font-medium">指定初始化器</p>
+                    <pre className="text-gray-400 font-mono text-xs">Vec3 v = {.z=3, .x=1}; // y=0, 顺序任意!</pre>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-green-700/30">
+                <h2 className="text-lg font-semibold text-green-400 mb-3">标准支持</h2>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                    <p className="text-green-300 font-medium">C99/C11/C17</p>
+                    <p className="text-gray-400">标准支持</p>
+                  </div>
+                  <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30">
+                    <p className="text-blue-300 font-medium">C++20</p>
+                    <p className="text-gray-400">部分支持 (designated initializers)</p>
+                  </div>
+                  <div className="p-2 bg-purple-900/20 rounded border border-purple-500/30">
+                    <p className="text-purple-300 font-medium">GCC/Clang</p>
+                    <p className="text-gray-400">作为扩展支持 (C89 模式)</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-gray-800/80 rounded-xl p-4 border border-green-700/30">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <button onClick={togglePlay} className={`px-4 py-2 rounded-lg font-medium transition-colors ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} text-white`}>
+                  {step >= MAX_STEPS ? '🔄 重新播放' : isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                </button>
+                <button onClick={() => handleStepChange(Math.max(1, step - 1))} disabled={step <= 1} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  ◀ 上一步
+                </button>
+                <span className="text-green-400 font-medium px-3">步骤 {step} / {MAX_STEPS}</span>
+                <button onClick={() => handleStepChange(Math.min(MAX_STEPS, step + 1))} disabled={step >= MAX_STEPS} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  下一步 ▶
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-green-300">
+                  语速：
+                  <input type="range" min="0.5" max="1.5" step="0.1" value={voiceRate} onChange={(e) => setVoiceRate(parseFloat(e.target.value))} className="ml-2 w-24" />
+                  <span className="ml-2 text-green-400">{voiceRate.toFixed(1)}x</span>
+                </label>
+                {isVoicePlaying && <span className="text-green-400 animate-pulse">🔊 语音播放中...</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

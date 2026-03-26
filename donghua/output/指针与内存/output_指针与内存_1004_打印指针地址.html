@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>打印指针地址 - 指针与内存 - 1004 - 指针地址和解引用</title>
+<meta name="question-meta" content="type:output|id:1004|chapter:指针与内存"/>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+@property --glow-angle{syntax:'<angle>';initial-value:0deg;inherits:false}
+:root{--anim-speed:5000ms}
+*{scrollbar-width:thin;scrollbar-color:#2a2a3a #0d1117}
+*::-webkit-scrollbar{width:5px;height:5px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:#2a2a3a;border-radius:3px}
+body{background:#080c14;color:#c9d1d9;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;overflow:hidden;height:100vh;margin:0}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.anim-fade-in{animation:fadeInUp .5s ease-out forwards}
+@keyframes bubbleUp{0%{opacity:0;transform:translateY(16px) scale(.96)}60%{opacity:1;transform:translateY(-2px) scale(1.01)}100%{opacity:1;transform:translateY(0) scale(1)}}
+.anim-bubble-up{animation:bubbleUp .45s cubic-bezier(.25,.46,.45,.94) forwards}
+@keyframes pushUp{from{transform:translateY(5px);opacity:.6}to{transform:translateY(0);opacity:1}}
+.anim-push-up{animation:pushUp .3s ease-out forwards}
+@keyframes newMsgGlow{0%,100%{box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}50%{box-shadow:inset 0 0 0 1px rgba(255,255,255,.09)}}
+@keyframes scanLight{0%{left:-60%;opacity:0}15%{opacity:.7}85%{opacity:.7}100%{left:160%;opacity:0}}
+@keyframes boxPop{0%{transform:scale(.72) translateY(5px);opacity:0}65%{transform:scale(1.02) translateY(-1px);opacity:1}100%{transform:scale(1) translateY(0);opacity:1}}
+@keyframes valueChange{0%{color:#facc15;transform:scale(1.08)}40%{color:#facc15}100%{color:inherit;transform:scale(1)}}
+.anim-value-changed{animation:valueChange .6s ease-out forwards}
+@keyframes glowSpin{to{--glow-angle:360deg}}
+@keyframes orbGlow{0%,100%{box-shadow:0 0 6px var(--orb-color),0 0 14px var(--orb-color);opacity:.88}50%{box-shadow:0 0 10px var(--orb-color),0 0 22px var(--orb-color);opacity:1}}
+@keyframes orbTrailFade{0%,100%{opacity:.2}50%{opacity:.42}}
+@keyframes arrowFloat{0%,100%{transform:translateX(0)}50%{transform:translateX(4px)}}
+@keyframes breathe{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes cursorBlink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes dangerGlow{0%,100%{box-shadow:0 0 5px rgba(239,68,68,.12)}50%{box-shadow:0 0 16px rgba(239,68,68,.28),0 0 30px rgba(239,68,68,.08)}}
+.code-line-flow{transition:transform .55s cubic-bezier(.34,1.2,.64,1),background-color .35s ease,box-shadow .4s ease,opacity .45s ease,border-color .35s ease;transform-origin:left center;position:relative;overflow:hidden;border-radius:6px;margin:1px 8px 1px 2px;border:1px solid transparent}
+.code-line-flow.is-current{transform:scale(1.05) translateX(8px);z-index:20;border-color:rgba(250,204,21,.14);box-shadow:0 3px 20px rgba(0,0,0,.3),inset 0 0 24px rgba(250,204,21,.02)}
+.code-line-flow.is-current::after{content:'';position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(90deg,transparent,rgba(250,204,21,.05),transparent);animation:scanLight 4.5s ease-in-out infinite;pointer-events:none}
+.code-line-flow.is-current-danger{transform:scale(1.05) translateX(8px);z-index:20;border-color:rgba(239,68,68,.18);box-shadow:0 3px 20px rgba(0,0,0,.3),inset 0 0 24px rgba(239,68,68,.03);animation:dangerGlow 3s ease-in-out infinite}
+.code-line-flow.is-current-danger::after{content:'';position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(90deg,transparent,rgba(239,68,68,.05),transparent);animation:scanLight 3.5s ease-in-out infinite;pointer-events:none}
+.code-line-flow.is-executed{opacity:.27;transform:scale(.975)}
+.ctrl-btn{padding:7px 14px;border-radius:10px;font-size:13px;font-weight:600;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.035);backdrop-filter:blur(12px);color:#8b949e;cursor:pointer;transition:all .25s cubic-bezier(.34,1.3,.64,1);display:inline-flex;align-items:center;justify-content:center;gap:5px;user-select:none;outline:none;position:relative;overflow:hidden}
+.ctrl-btn:hover{transform:translateY(-2px) scale(1.04);border-color:rgba(255,255,255,.11);box-shadow:0 6px 22px rgba(0,0,0,.32);color:#e6edf3}
+.ctrl-btn:active{transform:translateY(0) scale(.97);transition-duration:.08s}
+.ctrl-btn:disabled{opacity:.22;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+.ctrl-btn.btn-play{background:linear-gradient(135deg,#10b981,#059669);border-color:rgba(16,185,129,.35);color:#fff;box-shadow:0 2px 12px rgba(16,185,129,.18)}
+.ctrl-btn.btn-play:hover{box-shadow:0 5px 22px rgba(16,185,129,.32)}
+.ctrl-btn.btn-pause{background:linear-gradient(135deg,#f59e0b,#d97706);border-color:rgba(245,158,11,.35);color:#fff}
+.ctrl-btn.btn-reset{background:linear-gradient(135deg,rgba(99,102,241,.11),rgba(99,102,241,.04));border-color:rgba(99,102,241,.17)}
+.ctrl-btn.btn-reset:hover{border-color:rgba(99,102,241,.32);color:#a5b4fc}
+.ctrl-btn.btn-fs{width:34px;height:34px;padding:0}
+.ctrl-btn.btn-fs.active{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:rgba(59,130,246,.4);color:#fff}
+.ctrl-btn.btn-voice{background:linear-gradient(135deg,rgba(168,85,247,.11),rgba(168,85,247,.04));border-color:rgba(168,85,247,.17)}
+.ctrl-btn.btn-voice:hover{border-color:rgba(168,85,247,.32);color:#c084fc}
+.ctrl-btn.btn-voice.active{background:linear-gradient(135deg,#a855f7,#9333ea);border-color:rgba(168,85,247,.35);color:#fff}
+.glass-panel{background:linear-gradient(145deg,rgba(20,25,32,.96),rgba(16,21,28,.90));backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.052);border-radius:14px}
+.var-card{transition:all .5s cubic-bezier(.34,1.2,.64,1);position:relative;border-radius:12px}
+.var-card::before{content:'';position:absolute;inset:-1.5px;border-radius:inherit;background:conic-gradient(from var(--glow-angle),transparent 0deg,var(--card-glow,rgba(250,204,21,.3)) 60deg,transparent 120deg,transparent 180deg,var(--card-glow,rgba(250,204,21,.3)) 240deg,transparent 300deg,transparent 360deg);opacity:0;transition:opacity .6s ease;z-index:-1;animation:glowSpin 7s linear infinite}
+.var-card.is-active::before{opacity:.5}
+.exec-orb{transition:top .55s cubic-bezier(.34,1.2,.64,1),background .3s ease,box-shadow .3s ease;z-index:30;pointer-events:none}
+.exec-orb-trail{transition:top .72s cubic-bezier(.34,1.0,.64,1),height .6s ease;z-index:29;pointer-events:none}
+input[type=range]{-webkit-appearance:none;height:3px;border-radius:2px;background:rgba(255,255,255,.1);outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:rgba(255,255,255,.85);cursor:pointer;box-shadow:0 0 5px rgba(0,0,0,.25);transition:transform .2s}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.22)}
+.memory-box{border:2px solid #3b82f6;border-radius:8px;padding:12px;background:rgba(59,130,246,0.08);transition:all 0.3s}
+.memory-box.pointer{border-color:#a855f7;background:rgba(168,85,247,0.08)}
+.arrow{color:#f59e0b;font-size:20px;animation:arrowFloat 2s ease-in-out infinite}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useCallback,useMemo}=React;
+
+// ════════════════════════════════════════════════════════════════
+//  固化图标库
+// ════════════════════════════════════════════════════════════════
+const I={
+  code:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>,
+  memory:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>,
+  pointer:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3l14 9-7 1-3 7z"/></svg>,
+  stack:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="2" width="16" height="6" rx="1"/><rect x="4" y="10" width="16" height="6" rx="1"/><rect x="4" y="18" width="16" height="4" rx="1"/></svg>,
+  bolt:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
+  rocket:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/></svg>,
+  check:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+  alert:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+  info:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>,
+  skull:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4a7 7 0 0 1 7 7c0 2.5-1.3 4.7-3.2 6H8.2A7 7 0 0 1 5 11a7 7 0 0 1 7-7z"/><path d="M9 21v-3h6v3"/><path d="M9 18h6"/><circle cx="9.5" cy="10" r="1.2" fill={c} stroke="none"/><circle cx="14.5" cy="10" r="1.2" fill={c} stroke="none"/></svg>,
+  lightbulb:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18h6M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>,
+  target:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
+  terminal:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
+  play:(s=14,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><polygon points="5,3 19,12 5,21"/></svg>,
+  pause:(s=14,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill={c}><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>,
+  prev:(s=14,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>,
+  next:(s=14,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>,
+  refresh:(s=14,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>,
+  expand:(s=15,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>,
+  dot:(s=8,c='#10b981')=><svg width={s} height={s} viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill={c}/></svg>,
+  voice:(s=16,c='currentColor')=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4zM15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>,
+};
+const ICON_MAP={info:I.info,check:I.check,alert:I.alert,bolt:I.bolt,rocket:I.rocket,lightbulb:I.lightbulb,memory:I.memory,pointer:I.pointer,skull:I.skull,stack:I.stack,target:I.target,terminal:I.terminal,voice:I.voice,code:I.code};
+
+// ════════════════════════════════════════════════════════════════
+//  固化颜色系统（仅 6 色）
+// ════════════════════════════════════════════════════════════════
+const COLOR_MAP={
+  green: {bg:'rgba(34,197,94,0.07)',border:'rgba(34,197,94,0.45)',text:'text-green-300',badge:'text-green-400 border-green-500/25 bg-green-500/14',ic:'#4ade80'},
+  red:   {bg:'rgba(239,68,68,0.07)',border:'rgba(239,68,68,0.45)',text:'text-red-300',badge:'text-red-400 border-red-500/25 bg-red-500/14',ic:'#f87171'},
+  yellow:{bg:'rgba(250,204,21,0.07)',border:'rgba(250,204,21,0.45)',text:'text-yellow-300',badge:'text-yellow-400 border-yellow-500/25 bg-yellow-500/14',ic:'#fde047'},
+  purple:{bg:'rgba(168,85,247,0.07)',border:'rgba(168,85,247,0.45)',text:'text-purple-300',badge:'text-purple-400 border-purple-500/25 bg-purple-500/14',ic:'#c084fc'},
+  blue:  {bg:'rgba(59,130,246,0.07)',border:'rgba(59,130,246,0.45)',text:'text-blue-300',badge:'text-blue-400 border-blue-500/25 bg-blue-500/14',ic:'#93c5fd'},
+  orange:{bg:'rgba(249,115,22,0.07)',border:'rgba(249,115,22,0.45)',text:'text-orange-300',badge:'text-orange-400 border-orange-500/25 bg-orange-500/14',ic:'#fdba74'},
+};
+
+// ════════════════════════════════════════════════════════════════
+//  VarCard 组件
+// ════════════════════════════════════════════════════════════════
+function VarCard({name,type,value,addr,glowColor,accentCls,badgeCls,isActive,isNew}){
+  const prevRef=useRef(value);
+  const[changed,setChanged]=useState(false);
+  useEffect(()=>{
+    if(value!==null&&value!==undefined&&prevRef.current!==value){
+      prevRef.current=value;setChanged(true);
+      const t=setTimeout(()=>setChanged(false),640);
+      return()=>clearTimeout(t);
+    }
+  },[value]);
+  return(
+    <div className={`var-card ${isActive?'is-active':''} p-3 relative`}
+      style={{'--card-glow':glowColor,background:'rgba(255,255,255,0.026)',
+        border:'1px solid rgba(255,255,255,0.068)',
+        animation:isNew?'boxPop 0.45s cubic-bezier(0.34,1.3,0.64,1) forwards':'none',
+        borderRadius:12,minWidth:82}}>
+      <div className={`absolute -top-2.5 left-2.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeCls}`}>{type}</div>
+      <div className={`text-[11px] mt-1 mb-0.5 ${accentCls}`}>{name}</div>
+      <div className={`text-[22px] font-bold leading-none text-white ${changed?'anim-value-changed':''}`}>{value??'—'}</div>
+      <div className="text-[10px] text-gray-700 mt-1.5 font-mono tracking-tight">{addr}</div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+//  主应用
+// ════════════════════════════════════════════════════════════════
+function App(){
+  const TITLE     = "打印指针地址";
+  const FILE_NAME = "pointer.c";
+  const MAX_STEPS = 7;
+  const PROG_NAME = "pointer";
+
+  const[step,setStep]=useState(0);
+  const[isPlaying,setIsPlaying]=useState(false);
+  const[speed,setSpeed]=useState(3200);
+  const[isFS,setIsFS]=useState(false);
+  const[executedLines,setExecutedLines]=useState([]);
+  const[highlightVar,setHighlightVar]=useState(null);
+  const[isDangerLine,setIsDangerLine]=useState(false);
+  const[prevLine,setPrevLine]=useState(-1);
+  const[linePositions,setLinePositions]=useState(new Map());
+  const[output,setOutput]=useState([]);
+  const[isVoicePlaying,setIsVoicePlaying]=useState(false);
+  const[voiceRate,setVoiceRate]=useState(1.0);
+
+  const codeContainerRef=useRef(null);
+  const lineRefs=useRef(new Map());
+  const msgScrollRef=useRef(null);
+  const voiceEndTimerRef=useRef(null);
+
+  // 业务状态
+  const sensorValueRef=useRef(null);
+  const ptrRef=useRef(null);
+  const[showArrow,setShowArrow]=useState(false);
+
+  const LINE_MAP={
+    0:-1,
+    1:1,
+    2:5,
+    3:6,
+    4:7,
+    5:8,
+    6:9,
+    7:10
+  };
+  const currentLine=LINE_MAP[step]??-1;
+
+  useEffect(()=>{
+    const calc=()=>{
+      const box=codeContainerRef.current;if(!box)return;
+      const br=box.getBoundingClientRect();const m=new Map();
+      lineRefs.current.forEach((el,n)=>{if(el){const r=el.getBoundingClientRect();m.set(n,r.top-br.top+r.height/2);}});
+      setLinePositions(m);
+    };
+    calc();const t=setTimeout(calc,120);
+    window.addEventListener('resize',calc);
+    return()=>{clearTimeout(t);window.removeEventListener('resize',calc);};
+  },[step]);
+
+  useEffect(()=>{const t=setTimeout(()=>setPrevLine(currentLine),650);return()=>clearTimeout(t);},[currentLine]);
+  useEffect(()=>{if(msgScrollRef.current)msgScrollRef.current.scrollTop=0;},[step]);
+  useEffect(()=>{document.documentElement.style.setProperty('--anim-speed',`${speed*1.5}ms`);},[speed]);
+
+  // 语音驱动自动播放
+  const playVoice=useCallback(()=>{
+    window.speechSynthesis.cancel();
+    if(voiceEndTimerRef.current){clearTimeout(voiceEndTimerRef.current);}
+    const text=VOICE_TEXT_MAP[step]||"";
+    if(!text){
+      voiceEndTimerRef.current=setTimeout(()=>{
+        setStep(p=>Math.min(MAX_STEPS,p+1));
+      },1500);
+      return;
+    }
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang="zh-CN";u.rate=voiceRate;
+    u.onend=()=>{
+      setIsVoicePlaying(false);
+      voiceEndTimerRef.current=setTimeout(()=>{
+        setStep(p=>Math.min(MAX_STEPS,p+1));
+      },800);
+    };
+    u.onerror=()=>{
+      setIsVoicePlaying(false);
+      voiceEndTimerRef.current=setTimeout(()=>{
+        setStep(p=>Math.min(MAX_STEPS,p+1));
+      },800);
+    };
+    const voices=window.speechSynthesis.getVoices();
+    const v=voices.find(v=>v.name.includes('Xiaoxiao'))||voices.find(v=>v.lang.startsWith('zh-CN'))||null;
+    if(v)u.voice=v;
+    window.speechSynthesis.speak(u);
+    setIsVoicePlaying(true);
+  },[step,voiceRate,MAX_STEPS]);
+
+  useEffect(()=>{
+    if(isPlaying&&step<MAX_STEPS){
+      playVoice();
+    }
+  },[isPlaying,step,playVoice,MAX_STEPS]);
+
+  const stopVoice=useCallback(()=>{
+    window.speechSynthesis.cancel();
+    if(voiceEndTimerRef.current){clearTimeout(voiceEndTimerRef.current);}
+    setIsVoicePlaying(false);
+  },[]);
+
+  function toggleVoice(){
+    if(window.speechSynthesis.speaking&&!window.speechSynthesis.paused){
+      window.speechSynthesis.pause();
+      setIsVoicePlaying(false);
+    }else if(window.speechSynthesis.paused){
+      window.speechSynthesis.resume();
+      setIsVoicePlaying(true);
+    }else{
+      playVoice();
+    }
+  }
+
+  useEffect(()=>{stopVoice();},[step,stopVoice]);
+  useEffect(()=>{window.speechSynthesis.onvoiceschanged=()=>window.speechSynthesis.getVoices();return()=>stopVoice();},[stopVoice]);
+
+  // 状态机
+  useEffect(()=>{
+    setHighlightVar(null);setIsDangerLine(false);
+    setExecutedLines([]);setOutput([]);
+    sensorValueRef.current=null;
+    ptrRef.current=null;
+    setShowArrow(false);
+
+    switch(step){
+      case 0:break;
+      case 1:
+        setExecutedLines([]);
+        break;
+      case 2:
+        sensorValueRef.current=12345;
+        setExecutedLines([1,2,3,4,5]);
+        setHighlightVar('sensor_value');
+        break;
+      case 3:
+        ptrRef.current='0x7fff5a8c';
+        setExecutedLines([1,2,3,4,5,6]);
+        setHighlightVar('ptr');
+        setShowArrow(true);
+        break;
+      case 4:
+        setExecutedLines([1,2,3,4,5,6,7]);
+        setOutput([{type:'success',text:'Value: 12345'}]);
+        break;
+      case 5:
+        setExecutedLines([1,2,3,4,5,6,7,8]);
+        setOutput(prev=>[...prev,{type:'success',text:`Address: ${ptrRef.current}`}]);
+        break;
+      case 6:
+        setExecutedLines([1,2,3,4,5,6,7,8,9]);
+        setOutput(prev=>[...prev,{type:'success',text:'Via ptr: 12345'}]);
+        break;
+      case 7:
+        setExecutedLines([1,2,3,4,5,6,7,8,9,10]);
+        break;
+    }
+  },[step]);
+
+  const goNext=useCallback(()=>setStep(p=>Math.min(MAX_STEPS,p+1)),[MAX_STEPS]);
+  const goPrev=useCallback(()=>setStep(p=>Math.max(0,p-1)),[]);
+  const goReset=useCallback(()=>{setStep(0);setIsPlaying(false);stopVoice();},[stopVoice]);
+
+  useEffect(()=>{
+    if(isPlaying&&step<MAX_STEPS){const t=setTimeout(goNext,speed);return()=>clearTimeout(t);}
+    if(step>=MAX_STEPS)setIsPlaying(false);
+  },[isPlaying,step,speed,goNext,MAX_STEPS]);
+
+  useEffect(()=>{
+    const onKey=e=>{
+      if(e.target.tagName==='INPUT')return;
+      if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();goNext();}
+      if(e.key==='ArrowLeft'){e.preventDefault();goPrev();}
+      if(e.key==='Enter')setIsPlaying(p=>!p);
+      if(e.key==='r'||e.key==='R')goReset();
+      if(e.key==='f'||e.key==='F')setIsFS(p=>!p);
+    };
+    window.addEventListener('keydown',onKey);
+    return()=>window.removeEventListener('keydown',onKey);
+  },[goNext,goPrev,goReset]);
+
+  const VOICE_TEXT_MAP={
+    0:"欢迎来到代码可视化讲解，点击播放开始学习",
+    1:"程序开始，包含标准输入输出库 stdio.h 和标准整数类型库 stdint.h",
+    2:"声明 uint32_t 变量 sensor_value 并赋值为 12345，占用 4 字节内存",
+    3:"定义指针 ptr，类型是 uint32_t 星号，存储 sensor_value 的地址，&是取地址运算符",
+    4:"使用百分号 u 输出 sensor_value 的值，12345",
+    5:"使用百分号 p 输出指针地址，(void) 星号是标准转换方式，地址形如 0x7fff5a8c",
+    6:"使用星号 ptr 解引用，通过指针访问指向的值，结果是 12345",
+    7:"程序正常结束返回 0，表示执行成功"
+  };
+
+  const explanations=useMemo(()=>{
+    const d=[];
+    if(step>=1) d.push({id:'s1',icon:'info',text:'进入 main 函数',color:'blue',step:1});
+    if(step>=2) d.push({id:'s2',icon:'memory',text:'uint32_t sensor_value = 12345',color:'yellow',step:2});
+    if(step>=3) d.push({id:'s3',icon:'pointer',text:'uint32_t* ptr = &sensor_value',color:'purple',step:3});
+    if(step>=4) d.push({id:'s4',icon:'terminal',text:'printf 输出值：12345',color:'green',step:4});
+    if(step>=5) d.push({id:'s5',icon:'target',text:'printf 输出地址：0x7fff5a8c',color:'orange',step:5});
+    if(step>=6) d.push({id:'s6',icon:'check',text:'*ptr 解引用 = 12345',color:'green',step:6});
+    if(step>=7) d.push({id:'s7',icon:'rocket',text:'程序执行完毕',color:'purple',step:7});
+    return d;
+  },[step]);
+  const revExplanations=useMemo(()=>[...explanations].reverse(),[explanations]);
+  const pct=Math.round((step/MAX_STEPS)*100);
+
+  return(
+    <div className={`flex flex-col h-screen ${isFS?'fixed inset-0 z-50':''}`} style={{background:'#080c14'}}>
+      {/* 顶部控制栏 */}
+      <div className="flex-shrink-0 px-4 py-2.5 flex items-center gap-3 border-b border-white/[0.05]"
+        style={{background:'rgba(10,14,20,0.95)',backdropFilter:'blur(12px)'}}>
+        <div className="flex items-center gap-2 mr-2">
+          {I.code(16,'#a78bfa')}
+          <span className="text-[13px] font-bold text-gray-200 tracking-wide">{TITLE}</span>
+        </div>
+        <div className="flex-1 flex items-center gap-2.5">
+          <div className="flex-1 h-[3px] rounded-full overflow-hidden" style={{background:'rgba(255,255,255,0.07)'}}>
+            <div className="h-full rounded-full transition-all duration-500"
+              style={{width:`${pct}%`,background:'linear-gradient(90deg,#6366f1,#8b5cf6,#a78bfa)'}}/>
+          </div>
+          <span className="text-[11px] font-mono text-gray-600 w-12 text-right">{step}/{MAX_STEPS}</span>
+        </div>
+        <div className="flex items-center gap-2 border-l border-white/[0.05] pl-3">
+          <button className={`ctrl-btn btn-voice ${isVoicePlaying?'active':''}`}
+            onClick={toggleVoice} disabled={step===0}>
+            {isVoicePlaying?I.pause(12):I.voice(14)} {isVoicePlaying?'暂停':'讲解'}
+          </button>
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-600">
+            <span>语速</span>
+            <input type="range" min="0.5" max="2.0" step="0.1" value={voiceRate}
+              onChange={e=>setVoiceRate(+e.target.value)} className="w-16"/>
+            <span className="w-7">{voiceRate.toFixed(1)}x</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-600 border-l border-white/[0.05] pl-3">
+          <span>速度</span>
+          <input type="range" min="800" max="5000" step="200" value={speed}
+            onChange={e=>setSpeed(+e.target.value)} className="w-16"/>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button className="ctrl-btn" onClick={goPrev} disabled={step===0}>{I.prev()}</button>
+          <button className={`ctrl-btn ${isPlaying?'btn-pause':'btn-play'}`}
+            onClick={()=>setIsPlaying(p=>!p)} disabled={step===MAX_STEPS}>
+            {isPlaying?I.pause():I.play()}{isPlaying?'暂停':'播放'}
+          </button>
+          <button className="ctrl-btn" onClick={goNext} disabled={step===MAX_STEPS}>{I.next()}</button>
+          <button className="ctrl-btn btn-reset" onClick={goReset}>{I.refresh()} 重置</button>
+          <button className={`ctrl-btn btn-fs ${isFS?'active':''}`} onClick={()=>setIsFS(p=>!p)}>{I.expand()}</button>
+        </div>
+      </div>
+
+      {/* 三栏主内容 */}
+      <div className="flex-1 flex gap-3 p-3 min-h-0">
+
+        {/* 左栏：代码面板 */}
+        <div className="glass-panel flex flex-col w-[340px] flex-shrink-0 overflow-hidden">
+          <div className="px-3 py-2 flex items-center gap-2 border-b border-white/[0.05]"
+            style={{background:'rgba(255,255,255,0.014)'}}>
+            {I.dot(7,'#f97316')}{I.dot(7,'#eab308')}{I.dot(7,'#22c55e')}
+            <span className="text-[11px] text-gray-500 font-medium">{FILE_NAME}</span>
+          </div>
+          <div className="flex-1 overflow-auto py-2 relative" ref={codeContainerRef}>
+            {currentLine>0&&linePositions.has(currentLine)&&(()=>{
+              const cy=linePositions.get(currentLine)??0;
+              const py=linePositions.get(prevLine)??cy;
+              return(<>
+                <div className="exec-orb-trail absolute left-[17px] w-[6px] rounded-full"
+                  style={{top:Math.min(cy,py)-4,height:Math.abs(cy-py)+8,
+                    background:'linear-gradient(180deg,transparent,rgba(250,204,21,0.11),transparent)',
+                    animation:'orbTrailFade 3.5s ease-in-out infinite'}}/>
+                <div className="exec-orb absolute w-[10px] h-[10px] rounded-full"
+                  style={{'--orb-color':'#facc15',left:14,top:cy,transform:'translateY(-50%)',
+                    background:'radial-gradient(circle at 35% 35%,#fef08a,#eab308)',
+                    animation:'orbGlow 3.5s ease-in-out infinite'}}/>
+              </>);
+            })()}
+
+            <CodeLine num={1}><span className="text-purple-400">#include</span>{' '}<span className="text-green-300">&lt;stdio.h&gt;</span></CodeLine>
+            <CodeLine num={2}><span className="text-purple-400">#include</span>{' '}<span className="text-green-300">&lt;stdint.h&gt;</span></CodeLine>
+            <CodeLine num={3}>{' '}</CodeLine>
+            <CodeLine num={4}><span className="text-blue-400">int</span>{' '}<span className="text-yellow-300">main</span>(<span className="text-blue-400">void</span>) {'{'}</CodeLine>
+            <CodeLine num={5}><span className="text-blue-400">uint32_t</span>{' '}sensor_value{' '}<span className="text-pink-400">=</span>{' '}<span className="text-orange-300">12345</span>{';'}</CodeLine>
+            <CodeLine num={6}><span className="text-blue-400">uint32_t</span>{' '}<span className="text-pink-400">*</span>ptr{' '}<span className="text-pink-400">=</span>{' '}<span className="text-pink-400">&</span>sensor_value{';'}</CodeLine>
+            <CodeLine num={7}><span className="text-yellow-300">printf</span>(<span className="text-green-300">"Value: %u\\n"</span>,sensor_value){';'}</CodeLine>
+            <CodeLine num={8}><span className="text-yellow-300">printf</span>(<span className="text-green-300">"Address: %p\\n"</span>,{'}'}<span className="text-blue-400">void</span><span className="text-pink-400">*</span>{')'}ptr{')'}{';'}</CodeLine>
+            <CodeLine num={9}><span className="text-yellow-300">printf</span>(<span className="text-green-300">"Via ptr: %u\\n"</span>,<span className="text-pink-400">*</span>ptr){';'}</CodeLine>
+            <CodeLine num={10}><span className="text-blue-400">return</span>{' '}<span className="text-orange-300">0</span>{';'}</CodeLine>
+            <CodeLine num={11}>{'}'}</CodeLine>
+
+          </div>
+        </div>
+
+        {/* 中栏：内存可视化 */}
+        <div className="glass-panel flex flex-col flex-1 overflow-hidden">
+          <div className="px-3 py-2 flex items-center gap-2 border-b border-white/[0.05]"
+            style={{background:'rgba(255,255,255,0.014)'}}>
+            {I.memory(13,'#8b949e')}
+            <span className="text-[11px] text-gray-500 font-medium">内存可视化</span>
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center gap-5 p-4 overflow-auto">
+
+            {step>=2&&(
+              <div className="space-y-4 w-full max-w-md">
+                <div className="memory-box p-4">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <div className="text-[11px] text-gray-400 mb-1">sensor_value</div>
+                      <div className="text-[10px] text-gray-600 font-mono">uint32_t @ 0x7fff5a8c</div>
+                    </div>
+                    <div className="text-xl font-bold text-orange-400">{sensorValueRef.current??'—'}</div>
+                  </div>
+                </div>
+
+                {step>=3&&(
+                  <>
+                    <div className="memory-box pointer p-4">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <div className="text-[11px] text-gray-400 mb-1">ptr</div>
+                          <div className="text-[10px] text-gray-600 font-mono">uint32_t* (指针)</div>
+                        </div>
+                        <div className="text-lg font-bold text-green-400 font-mono">{ptrRef.current??'—'}</div>
+                      </div>
+                    </div>
+                    {showArrow&&(
+                      <div className="text-center py-2">
+                        <span className="text-2xl arrow">⬇️ ptr 指向 sensor_value</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {step===0&&(
+              <div className="text-center text-gray-700 text-[12px]">
+                <div style={{opacity:0.3}} className="mb-2">{I.rocket(28,'#6b7280')}</div>
+                点击播放开始代码执行可视化
+              </div>
+            )}
+
+          </div>
+        </div>
+
+        {/* 右栏：讲解面板 */}
+        <div className="glass-panel flex flex-col w-[260px] flex-shrink-0 overflow-hidden">
+          <div className="px-3 py-2 flex items-center gap-2 border-b border-white/[0.05]"
+            style={{background:'rgba(255,255,255,0.014)'}}>
+            {I.info(13,'#8b949e')}
+            <span className="text-[11px] text-gray-500 font-medium">步骤讲解</span>
+          </div>
+          <div className="flex-1 overflow-auto px-3 pb-3 pt-2" ref={msgScrollRef}>
+            {step===0?(
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-700">
+                <div style={{opacity:0.35}}>{I.rocket(32,'#6b7280')}</div>
+                <div className="text-[12px] text-center leading-relaxed">
+                  点击 <span className="text-green-400 font-semibold">播放</span> 开始
+                  <br/><span className="text-[10px] text-gray-600">空格/→ 步进 &nbsp; ← 后退 &nbsp; Enter 播放</span>
+                </div>
+              </div>
+            ):(
+              <div className="space-y-1.5">
+                {revExplanations.map((item,idx)=>{
+                  const c=COLOR_MAP[item.color];const isTop=idx===0;const isNew=item.step===step;
+                  return(
+                    <div key={item.id}
+                      className={`flex items-start gap-2.5 px-3 py-2.5 rounded-xl ${isNew?'anim-bubble-up':'anim-push-up'}`}
+                      style={{background:isTop?`linear-gradient(135deg,${c.bg},${c.bg.replace('0.07','0.12')})`:c.bg,
+                        borderLeft:`2.5px solid ${c.border}`,
+                        opacity:isTop?1:Math.max(0.36,1-idx*0.09),
+                        animation:isTop?'newMsgGlow 4s ease-in-out infinite':undefined}}>
+                      <span className="flex-shrink-0 mt-0.5" style={{opacity:isTop?1:0.6}}>
+                        {(ICON_MAP[item.icon]||I.info)(isTop?15:13,c.ic)}
+                      </span>
+                      <span className={`${c.text} text-[11.5px] leading-relaxed flex-1 ${isTop?'font-semibold':''}`}>{item.text}</span>
+                      {isTop&&<span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-bold flex-shrink-0 ${c.badge}`}>NEW</span>}
+                      <span className="text-[9.5px] text-gray-700 font-mono flex-shrink-0 ml-0.5">#{item.step}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 底部终端 */}
+      <div className="h-[100px] flex-shrink-0 border-t border-white/[0.044]"
+        style={{background:'rgba(4,8,14,0.85)'}}>
+        <div className="px-3 py-1.5 flex items-center gap-2 border-b border-white/[0.038]"
+          style={{background:'rgba(255,255,255,0.014)'}}>
+          {I.dot(7,'#22c55e')}
+          <span className="text-[11px] text-gray-500 font-medium tracking-wide">Terminal</span>
+        </div>
+        <div className="px-3 pt-2 text-[12.5px] h-[58px] overflow-auto">
+          <div className="text-gray-600 mb-0.5">$ ./{PROG_NAME}</div>
+          {output.map((line,i)=>(
+            <div key={`${step}-${i}`} className="anim-fade-in" style={{animationDelay:`${i*55}ms`}}>
+              {line.type==='error'?(
+                <div className="flex items-center gap-2 text-red-400">
+                  <span>{line.text}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/22 bg-red-500/9 inline-flex items-center gap-1">{I.alert(10,'#f87171')} 错误</span>
+                </div>
+              ):(
+                <div className="flex items-center gap-2 text-green-400">
+                  <span>{line.text}</span>
+                  <span className="text-[10px] px-1 py-0.5 rounded border border-green-500/18 bg-green-500/7 inline-flex items-center">{I.check(10,'#4ade80')}</span>
+                </div>
+              )}
+            </div>
+          ))}
+          <span className="inline-block w-[7px] h-[14px] bg-green-500/75 align-middle ml-0.5"
+            style={{animation:'cursorBlink 1.12s step-end infinite'}}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const CodeLine=({num,children})=>{
+  const{currentLine,isDangerLine,executedLines}=React.useContext(AppContext)||{};
+  const isCur=num===currentLine;const isExec=executedLines?.includes(num);const isDL=isCur&&isDangerLine;
+  let cls='code-line-flow flex items-center min-h-[30px]';
+  if(isDL)cls+=' is-current-danger';else if(isCur)cls+=' is-current';else if(isExec)cls+=' is-executed';
+  const bg=isCur?(isDL?'linear-gradient(90deg,rgba(239,68,68,0.11),rgba(239,68,68,0.03) 55%,transparent)':'linear-gradient(90deg,rgba(250,204,21,0.08),rgba(250,204,21,0.025) 55%,transparent)'):undefined;
+  return(
+    <div className={cls} style={{background:bg}}>
+      {isCur&&<div className={`absolute left-0 top-1 bottom-1 w-[2.5px] rounded-full ${isDL?'bg-red-400':'bg-yellow-400'}`}
+        style={{boxShadow:isDL?'0 0 6px #ef4444':'0 0 6px #facc15',animation:'breathe 3s ease-in-out infinite'}}/>}
+      <div className="w-8 flex-shrink-0 flex justify-center">
+        {isCur&&<svg width="9" height="11" viewBox="0 0 9 11" style={{animation:'arrowFloat 3s ease-in-out infinite'}}>
+          <polygon points="0,0 9,5.5 0,11" fill={isDL?'#f87171':'#facc15'}/>
+        </svg>}
+      </div>
+      <div className={`w-7 text-right pr-3 flex-shrink-0 select-none text-[12px] transition-colors duration-300 ${isCur?(isDL?'text-red-400 font-bold':'text-yellow-400 font-bold'):'text-gray-700'}`}>{num}</div>
+      <div className="flex-1 text-[13px] py-1.5 pr-4 leading-relaxed">{children}</div>
+    </div>
+  );
+};
+
+const AppContext=React.createContext(null);
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

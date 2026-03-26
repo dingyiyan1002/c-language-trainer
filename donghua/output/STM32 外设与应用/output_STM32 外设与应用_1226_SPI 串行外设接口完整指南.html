@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 SPI 串行外设接口完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(40px); } }
+        @keyframes clock { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(180deg); } }
+        @keyframes mosi { 0% { transform: translateY(0); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+        @keyframes miso { 0% { transform: translateY(0); } 50% { transform: translateY(5px); } 100% { transform: translateY(0); } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1s linear infinite; }
+        .animate-clock { animation: clock 0.5s linear infinite; }
+        .animate-mosi { animation: mosi 1s ease-in-out infinite; }
+        .animate-miso { animation: miso 1s ease-in-out infinite; }
+
+        .spi-line { transition: all 0.3s ease; }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#10b981',
+            secondary: '#34d399',
+            accent: '#6ee7b7',
+            highlight: '#a7f3d0',
+            text: '#d1fae5',
+            bg: '#065f46'
+        };
+
+        const STEPS = [
+            { title: "SPI 基础架构", subtitle: "4 线制全双工通信" },
+            { title: "主机与从机", subtitle: "Master/Slave 模式" },
+            { title: "时钟极性与相位", subtitle: "CPOL/CPHA 四种模式" },
+            { title: "数据帧格式", subtitle: "8 位/16 位数据长度" },
+            { title: "主机发送数据", subtitle: "Master 发送，Slave 接收" },
+            { title: "主机接收数据", subtitle: "Master 接收，Slave 发送" },
+            { title: "DMA 传输", subtitle: "高效大批量传输" },
+            { title: "应用实例", subtitle: "Flash/显示屏/SD 卡" }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [spiMode, setSpiMode] = React.useState(0);
+            const [txData, setTxData] = React.useState([]);
+            const [rxData, setRxData] = React.useState([]);
+            const [isTransferring, setIsTransferring] = React.useState(false);
+            const [clockPolarity, setClockPolarity] = React.useState(0);
+            const [clockPhase, setClockPhase] = React.useState(0);
+            const [dataBits, setDataBits] = React.useState(8);
+            const [clockState, setClockState] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const transferData = (data) => {
+                setIsTransferring(true);
+                const bytes = data.split('').map(c => c.charCodeAt(0));
+                setTxData(bytes);
+
+                bytes.forEach((byte, i) => {
+                    setTimeout(() => {
+                        // Simulate clock pulses for each bit
+                        for (let bit = 0; bit < 8; bit++) {
+                            setTimeout(() => {
+                                setClockState(true);
+                                setTimeout(() => setClockState(false), 50);
+                            }, bit * 100);
+                        }
+                        // RX simulation (loopback for demo)
+                        setRxData(prev => [...prev, byte]);
+
+                        if (i === bytes.length - 1) {
+                            setTimeout(() => setIsTransferring(false), 800);
+                        }
+                    }, i * 200);
+                });
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    setTimeout(() => {
+                        const narration = [
+                            "SPI 是同步串行接口，4 根信号线：SCK(时钟)、MOSI(主出从入)、MISO(主入从出)、CS(片选)。全双工通信，主机控制时钟，数据在时钟边沿采样。",
+                            "主机产生时钟控制通信，从机响应主机。主机拉低从机的 CS 片选线启动通信。多从机系统每个从机需要独立 CS 线，由主机 GPIO 控制。",
+                            "CPOL 控制时钟极性 (空闲电平),CPHA 控制采样相位。模式 0(CPOL=0,CPHA=0): 空闲低，上升沿采样；模式 1: 空闲低，下降沿采样；模式 2: 空闲高，上升沿采样；模式 3: 空闲高，下降沿采样。",
+                            "数据帧长度可配置 8 位或 16 位。DS 位控制数据大小。MSB 先行传输。NSS 软件管理时可用作 GPIO 控制片选，硬件管理时自动处理。",
+                            "主机发送：写 DR 寄存器启动传输，数据从 MOSI 移出，同时从 MISO 移入从机数据。TXE 标志表示可写下一个数据，RXNE 表示收到数据。",
+                            "主机接收：发送空字节 (0x00 或 0xFF) 读取从机数据。SPI 是全双工，发送同时接收。读取 DR 先写后读，确保时钟已产生。",
+                            "DMA 传输：SPI_TX 和 SPI_RX 各用一个 DMA 通道。发送 DMA 从内存读数据到 SPI_DR，接收 DMA 从 SPI_DR 写到内存。适合大批量数据如显示屏刷新。",
+                            "应用实例：SPI Flash(W25Q 系列) 读写字节命令；OLED 显示屏 (SSD1306) 发送命令/数据；SD 卡 (SPI 模式) 块读写；外部 ADC/DAC 芯片。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const getModeDescription = (mode) => {
+                const modes = [
+                    'CPOL=0,CPHA=0: 空闲低，上升沿采样',
+                    'CPOL=0,CPHA=1: 空闲低，下降沿采样',
+                    'CPOL=1,CPHA=0: 空闲高，上升沿采样',
+                    'CPOL=1,CPHA=1: 空闲高，下降沿采样'
+                ];
+                return modes[mode];
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-emerald-900 to-teal-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 SPI 串行外设接口完整指南</h1>
+                            <p className="text-emerald-200 text-lg">时钟极性、主从模式与 DMA 传输</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-emerald-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-emerald-700 text-emerald-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-emerald-500/30">
+                                <h3 className="text-xl font-bold text-emerald-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// SPI 信号线定义
+// SCK  - Serial Clock (时钟)
+// MOSI - Master Out Slave In (主出从入)
+// MISO - Master In Slave Out (主入从出)
+// CS   - Chip Select (片选，低有效)
+
+// 引脚定义 (SPI1)
+// SCK  = PA5
+// MISO = PA6
+// MOSI = PA7
+// CS   = PA4 (GPIO 控制)`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 主机模式配置
+void SPI_Master_Init(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+
+    // PA5/6/7 复用推挽 (AF5 = SPI1)
+    GPIOA->AFRL |= (0x5 << 20) | (0x5 << 24) | (0x5 << 28);
+    GPIOA->MODER |= (0x2 << 10) | (0x2 << 12) | (0x2 << 14);
+
+    // CS 推挽输出
+    GPIOA->MODER |= (0x1 << 8);
+    GPIOA->BSRR = (1 << 4);  // CS=H (未选中)
+
+    // 主机模式，CPOL=0,CPHA=0
+    SPI1->CR1 = SPI_CR1_MSTR | SPI_CR1_SSM | SPI_CR1_SSI;
+    SPI1->CR2 |= SPI_CR2_FRXTH;  // 8 位数据
+    SPI1->CR1 |= SPI_CR1_SPE;  // 使能 SPI
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 4 种 SPI 模式
+// CR2: CPOL (时钟极性), CPHA (时钟相位)
+
+// 模式 0: CPOL=0, CPHA=0 (最常用)
+SPI1->CR1 &= ~(SPI_CR1_CPOL | SPI_CR1_CPHA);
+
+// 模式 1: CPOL=0, CPHA=1
+SPI1->CR1 &= ~SPI_CR1_CPOL;
+SPI1->CR1 |= SPI_CR1_CPHA;
+
+// 模式 2: CPOL=1, CPHA=0
+SPI1->CR1 |= SPI_CR1_CPOL;
+SPI1->CR1 &= ~SPI_CR1_CPHA;
+
+// 模式 3: CPOL=1, CPHA=1
+SPI1->CR1 |= SPI_CR1_CPOL | SPI_CR1_CPHA;`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 数据帧配置
+// 8 位数据模式
+SPI1->CR2 |= SPI_CR2_FRXTH;  // FIFO 阈值 1/4
+SPI1->CR1 &= ~SPI_CR1_DFF;   // 8 位数据
+
+// 16 位数据模式
+// SPI1->CR2 &= ~SPI_CR2_FRXTH;
+// SPI1->CR1 |= SPI_CR1_DFF;  // 16 位数据
+
+// NSS 软件管理 (GPIO 控制 CS)
+SPI1->CR1 |= SPI_CR1_SSM | SPI_CR1_SSI;
+
+// 片选控制
+#define CS_LOW()  GPIOA->BSRR = (1 << (4+16))
+#define CS_HIGH() GPIOA->BSRR = (1 << 4)`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 主机发送数据
+uint8_t SPI_Transfer(uint8_t data) {
+    // 等待 TXE (发送缓冲区空)
+    while (!(SPI1->SR & SPI_SR_TXE));
+
+    // 写数据 (启动传输)
+    *((volatile uint8_t*)&SPI1->DR) = data;
+
+    // 等待 RXNE (接收缓冲区非空)
+    while (!(SPI1->SR & SPI_SR_RXNE));
+
+    // 等待 BSY 清除 (传输完成)
+    while (SPI1->SR & SPI_SR_BSY);
+
+    // 读取返回数据
+    return *((volatile uint8_t*)&SPI1->DR);
+}
+
+// 发送字节
+CS_LOW();
+SPI_Transfer(0x55);
+CS_HIGH();`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// 主机接收数据 (从从机读取)
+uint8_t SPI_Read(void) {
+    // 发送 0xFF 产生时钟，读取从机数据
+    return SPI_Transfer(0xFF);
+}
+
+// 读取多字节
+void SPI_ReadBuffer(uint8_t* buf, uint16_t len) {
+    CS_LOW();
+    for (uint16_t i = 0; i < len; i++) {
+        buf[i] = SPI_Read();
+    }
+    CS_HIGH();
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// DMA 传输配置
+void SPI_DMA_Init(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
+
+    // SPI1_RX: DMA2_Stream0
+    DMA2_Stream0->PAR = (uint32_t)&SPI1->DR;
+    DMA2_Stream0->M0AR = (uint32_t)rx_buffer;
+    DMA2_Stream0->NDTR = BUF_SIZE;
+    DMA2_Stream0->CR = DMA_SxCR_DIR_1 | DMA_SxCR_MINC | DMA_SxCR_EN;
+
+    // SPI1_TX: DMA2_Stream3
+    DMA2_Stream3->PAR = (uint32_t)&SPI1->DR;
+    DMA2_Stream3->M0AR = (uint32_t)tx_buffer;
+    DMA2_Stream3->NDTR = BUF_SIZE;
+    DMA2_Stream3->CR = DMA_SxCR_DIR_0 | DMA_SxCR_MINC | DMA_SxCR_EN;
+
+    // SPI 使能 DMA
+    SPI1->CR2 |= SPI_CR2_TXDMAEN | SPI_CR2_RXDMAEN;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-emerald-300 overflow-x-auto">
+                                            <code>{`// W25Q Flash 读写示例
+void W25Q_WriteEnable(void) {
+    CS_LOW();
+    SPI_Transfer(0x06);  // 写使能命令
+    CS_HIGH();
+}
+
+void W25Q_ReadStatus(void) {
+    CS_LOW();
+    SPI_Transfer(0x05);  // 读状态寄存器
+    uint8_t status = SPI_Read();
+    CS_HIGH();
+}
+
+// OLED 显示数据
+void OLED_WriteCommand(uint8_t cmd) {
+    CS_LOW();
+    SPI_Transfer(0x00);  // 命令模式
+    SPI_Transfer(cmd);
+    CS_HIGH();
+}`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => transferData('Hello')}
+                                            disabled={isTransferring}
+                                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition disabled:opacity-50"
+                                        >
+                                            ▶️ 发送测试
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setTxData([]);
+                                                setRxData([]);
+                                                setIsTransferring(false);
+                                            }}
+                                            className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            🔄 清空
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-emerald-500/30">
+                                <h3 className="text-xl font-bold text-emerald-400 mb-4">🔬 SPI 通信可视化</h3>
+                                <div className="space-y-4">
+                                    {/* 模式选择 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-emerald-300 mb-3">SPI 模式</h4>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {[0, 1, 2, 3].map((mode) => (
+                                                <button
+                                                    key={mode}
+                                                    onClick={() => {
+                                                        setSpiMode(mode);
+                                                        setClockPolarity(Math.floor(mode / 2));
+                                                        setClockPhase(mode % 2);
+                                                    }}
+                                                    className={`p-2 rounded text-xs transition ${
+                                                        spiMode === mode
+                                                            ? 'bg-emerald-600 text-white'
+                                                            : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                                                    }`}
+                                                >
+                                                    模式 {mode}
+                                                    <div className="text-xs mt-1 opacity-75">
+                                                        {mode === 0 ? '空闲低，上升沿' :
+                                                         mode === 1 ? '空闲低，下降沿' :
+                                                         mode === 2 ? '空闲高，上升沿' : '空闲高，下降沿'}
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* 信号线状态 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-emerald-300 mb-3">信号线状态</h4>
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-300">SCK 时钟</span>
+                                                <div className={`w-8 h-8 rounded flex items-center justify-center transition-all ${
+                                                    clockState ? 'bg-green-500' : 'bg-gray-600'
+                                                }`}>
+                                                    {clockState ? 'H' : 'L'}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-300">MOSI 主出</span>
+                                                <div className="w-24 bg-gray-700 rounded h-4 overflow-hidden">
+                                                    <div className="h-full bg-green-500 animate-mosi"></div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-300">MISO 从出</span>
+                                                <div className="w-24 bg-gray-700 rounded h-4 overflow-hidden">
+                                                    <div className="h-full bg-blue-500 animate-miso"></div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-300">CS 片选</span>
+                                                <div className={`w-8 h-8 rounded flex items-center justify-center ${
+                                                    isTransferring ? 'bg-red-500' : 'bg-gray-600'
+                                                }`}>
+                                                    {isTransferring ? 'L' : 'H'}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 数据缓冲区 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-emerald-300 mb-3">数据缓冲</h4>
+                                        <div className="space-y-2">
+                                            <div>
+                                                <span className="text-gray-400 text-sm">TX: </span>
+                                                <div className="flex gap-1 mt-1">
+                                                    {txData.map((byte, i) => (
+                                                        <div key={i} className="w-8 h-8 bg-green-600 rounded flex items-center justify-center text-white text-xs font-mono">
+                                                            {byte.toString(16).toUpperCase().padStart(2, '0')}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <span className="text-gray-400 text-sm">RX: </span>
+                                                <div className="flex gap-1 mt-1">
+                                                    {rxData.map((byte, i) => (
+                                                        <div key={i} className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center text-white text-xs font-mono">
+                                                            {byte.toString(16).toUpperCase().padStart(2, '0')}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            placeholder="输入要发送的数据"
+                                            className="w-full mt-3 bg-gray-700 text-white px-3 py-2 rounded"
+                                            onChange={(e) => transferData(e.target.value)}
+                                        />
+                                    </div>
+
+                                    {/* 传输状态 */}
+                                    <div className={`p-3 rounded-lg text-center transition-all ${
+                                        isTransferring ? 'bg-green-800/50 border border-green-500' : 'bg-gray-800'
+                                    }`}>
+                                        <span className={`font-bold ${
+                                            isTransferring ? 'text-green-400' : 'text-gray-500'
+                                        }`}>
+                                            {isTransferring ? '🔄 传输中...' : '⏸️ 空闲'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-emerald-500/30">
+                                <h3 className="text-xl font-bold text-emerald-400 mb-4">📖 配置指南</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    {currentStep === 0 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 SPI 架构</h4>
+                                            <p>同步全双工 4 线制：SCK(时钟)、MOSI(主出从入)、MISO(主入从出)、CS(片选)。主机产生时钟，数据同时收发。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 主从模式</h4>
+                                            <p>CR1_MSTR=1 为主机，产生时钟；=0 为从机，响应时钟。CS 片选低有效，多从机需独立 CS 线，由 GPIO 控制。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 CPOL/CPHA</h4>
+                                            <p>CPOL=时钟空闲电平 (0=低，1=高)。CPHA=采样边沿 (0=第一边沿，1=第二边沿)。4 种组合对应 4 种 SPI 模式，需与从机匹配。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 数据帧</h4>
+                                            <p>CR1_DFF 控制数据长度 (8/16 位)。FRXTH 设置 FIFO 阈值。MSB 先行。NSS 可软件 (GPIO) 或硬件管理。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 发送数据</h4>
+                                            <p>写 DR 启动传输，等待 TXE 可写下一个，RXNE 表示收到数据，BSY 清除表示传输完成。先拉低 CS 再传输。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 接收数据</h4>
+                                            <p>发送空字节 (0xFF) 产生时钟读取从机数据。SPI 全双工，发同时收。读取前确保时钟已产生 (写后读)。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 DMA 传输</h4>
+                                            <p>TX/RX 各用一个 DMA 通道，自动搬运数据。适合大数据量如 Flash 读写、显示屏刷新。显著降低 CPU 负载。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <div>
+                                            <h4 className="font-bold text-emerald-300 mb-2">📌 应用实例</h4>
+                                            <p>W25Q Flash：读/写使能、块擦除、字节读写。OLED：命令/数据模式。SD 卡：SPI 模式块传输。</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-emerald-600 hover:bg-emerald-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-emerald-500/30">
+                            <h2 className="text-2xl font-bold text-emerald-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

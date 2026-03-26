@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 DAC 数模转换器完整指南</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes wave { 0% { transform: translateY(0); } 25% { transform: translateY(-10px); } 50% { transform: translateY(0); } 75% { transform: translateY(10px); } 100% { transform: translateY(0); } }
+        @keyframes staircase { 0% { height: 10%; } 25% { height: 40%; } 50% { height: 70%; } 75% { height: 40%; } 100% { height: 10%; } }
+        @keyframes smooth { 0% { transform: translateY(0); } 25% { transform: translateY(-30px); } 50% { transform: translateY(-60px); } 75% { transform: translateY(-30px); } 100% { transform: translateY(0); } }
+        @keyframes triangle { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes noise { 0% { opacity: 1; } 10% { opacity: 0.8; } 20% { opacity: 1; } 30% { opacity: 0.7; } 40% { opacity: 1; } 50% { opacity: 0.9; } 60% { opacity: 1; } 70% { opacity: 0.8; } 80% { opacity: 1; } 90% { opacity: 0.7; } 100% { opacity: 1; } }
+        .pulse { animation: pulse 1s infinite; }
+        .blink { animation: blink 0.5s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .wave { animation: wave 2s ease-in-out infinite; }
+        .staircase { animation: staircase 2s steps(4) infinite; }
+        .smooth { animation: smooth 2s ease-in-out infinite; }
+        .triangle { animation: triangle 3s linear infinite; }
+        .noise { animation: noise 0.5s infinite; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ========== 可配置参数 ==========
+        const STEPS = [
+            { title: "DAC 基础架构", code: `// DAC: Digital-to-Analog Converter 数模转换器
+// 功能：将数字信号转换为模拟电压
+// 应用：波形生成、音频输出、参考电压
+
+// STM32 DAC 特性:
+// - 2 个独立通道 (DAC1_OUT1/OUT2)
+// - 12 位分辨率 (4096 级)
+// - 8 位数据对齐模式
+// - 双缓冲输出
+// - 内部/外部触发
+// - DMA 传输支持
+// - 输出范围：0~3.3V (VDDA)` },
+            { title: "DAC 工作原理", code: `// DAC 转换原理
+// 数字值 (0-4095) → 模拟电压 (0-VREF)
+// Vout = VREF × (DOR / 4095)
+
+// DAC 内部结构:
+// 1. 数据寄存器 (DHRx)
+// 2. 数据保持寄存器 (DHR)
+// 3. 数据输出寄存器 (DOR)
+// 4. 模拟输出缓冲器
+
+// 输出电压计算:
+// Vout = 3.3V × (数字值 / 4095)
+// 例如：DOR = 2048 → Vout ≈ 1.65V (半电压)` },
+            { title: "DAC 通道与引脚", code: `// DAC 通道映射 (以 STM32F4 为例)
+// DAC1_CH1 → PA4 (DAC_OUT1)
+// DAC1_CH2 → PA5 (DAC_OUT2)
+
+// 通道选择:
+// - 通道 1: 独立工作
+// - 通道 2: 独立工作
+// - 双通道：同步输出
+
+//  GPIO 配置:
+void DAC_GPIO_Init(void) {
+    // 使能 GPIOA 和 DAC 时钟
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+
+    // 配置 PA4 为模拟模式
+    GPIOA->MODER |= GPIO_MODER_MODER4_1;
+    GPIOA->MODER &= ~GPIO_MODER_MODER4_0;
+
+    // 配置 PA5 为模拟模式 (通道 2)
+    GPIOA->MODER |= GPIO_MODER_MODER5_1;
+    GPIOA->MODER &= ~GPIO_MODER_MODER5_0;
+}` },
+            { title: "DAC 基本配置", code: `// DAC 通道 1 基本配置 (软件触发)
+void DAC_Channel1_Init(void) {
+    // 1. 禁用 DAC (配置前)
+    DAC->CR &= ~DAC_CR_EN1;
+
+    // 2. 使能通道 1
+    DAC->CR |= DAC_CR_EN1;
+
+    // 3. 配置输出缓冲 (使能)
+    DAC->CR &= ~DAC_CR_BOFF1;
+
+    // 4. 软件触发 (不使用外部触发)
+    DAC->CR &= ~DAC_CR_TEN1;
+
+    // 5. 设置输出值 (12 位右对齐)
+    // 中间值 2048 → 约 1.65V
+    DAC->DHR12R1 = 2048;
+}
+
+// 设置输出电压
+void DAC_SetVoltage(uint16_t voltage_mv) {
+    // 3.3V = 3300mV 对应 4095
+    uint16_t dac_value = (voltage_mv * 4095) / 3300;
+    DAC->DHR12R1 = dac_value;
+}` },
+            { title: "DAC 触发模式", code: `// DAC 触发源选择 (TSELx 位)
+// 000: 软件触发 (SWTRIG)
+// 001: TIM2 TRGO
+// 010: TIM4 TRGO
+// 011: TIM5 TRGO
+// 100: TIM6 TRGO
+// 101: TIM7 TRGO
+// 110: TIM8 TRGO
+// 111: 外部中断 (EXTI9)
+
+// 定时器触发配置 (TIM6 TRGO, 1kHz 更新)
+void DAC_Timer_Trigger_Init(void) {
+    // TIM6 配置
+    RCC->APB1ENR |= RCC_APB1ENR_TIM6EN;
+    TIM6->PSC = 7199;  // 72MHz/7200 = 10kHz
+    TIM6->ARR = 9;     // 10kHz/10 = 1kHz
+    TIM6->CR2 |= TIM_CR2_MMS_1;  // TRGO = 更新事件
+    TIM6->CR1 |= TIM_CR1_CEN;
+
+    // DAC 配置使用 TIM6 TRGO
+    DAC->CR &= ~DAC_CR_TSEL1;  // 100 = TIM6 TRGO
+    DAC->CR |= DAC_CR_TSEL1_2;
+    DAC->CR |= DAC_CR_TEN1;    // 使能触发
+}` },
+            { title: "DAC DMA 传输", code: `// DAC + DMA 生成波形
+// DMA 自动将波形数据从内存传输到 DAC
+
+// 波形数据 (正弦波 32 点)
+const uint16_t sine_wave[32] = {
+    2048, 2447, 2831, 3185, 3495, 3750, 3939, 4056,
+    4095, 4056, 3939, 3750, 3495, 3185, 2831, 2447,
+    2048, 1649, 1265,  911,  601,  346,  157,   40,
+       0,   40,  157,  346,  601,  911, 1265, 1649
+};
+
+void DAC_DMA_Init(void) {
+    // DMA 配置
+    DMA1_Stream5->CR = DMA_SxCR_DIR_1;      // M2P
+    DMA1_Stream5->CR |= DMA_SxCR_MINC;      // 内存递增
+    DMA1_Stream5->CR |= DMA_SxCR_CIRC;      // 循环模式
+    DMA1_Stream5->PAR = (uint32_t)&DAC->DHR12R1;
+    DMA1_Stream5->M0AR = (uint32_t)sine_wave;
+    DMA1_Stream5->NDTR = 32;
+    DMA1_Stream5->CR |= DMA_SxCR_EN;
+
+    // DAC 使能 DMA
+    DAC->CR |= DAC_CR_DMAEN1;
+    DAC->CR |= DAC_CR_TEN1;  // 需要触发源
+}` },
+            { title: "波形生成应用", code: `// 波形生成表 (12 位 0-4095)
+// 正弦波生成公式: value = 2048 + 2047 * sin(angle)
+// 三角波：线性递增后递减
+// 方波：在 0 和 4095 之间切换
+// 锯齿波：线性递增后重置
+
+// 正弦波表生成 (Python 脚本)
+/*
+import math
+for i in range(32):
+    angle = 2 * math.pi * i / 32
+    value = int(2048 + 2047 * math.sin(angle))
+    print(f"{value}, ", end="")
+*/
+
+// 实时生成函数
+void Generate_SineWave(uint16_t* buffer, uint16_t size,
+                       uint16_t amplitude, uint16_t offset) {
+    for (uint16_t i = 0; i < size; i++) {
+        float angle = 2.0f * 3.14159f * i / size;
+        buffer[i] = offset + amplitude * sin(angle);
+    }
+}` },
+            { title: "应用实例", code: `// 完整应用：函数信号发生器
+
+// 全局变量
+volatile uint16_t wave_type = 0;  // 0=正弦，1=三角，2=方波
+volatile uint16_t frequency = 1000;  // 1kHz
+
+// 波形数据
+uint16_t wave_buffer[256];
+
+// 初始化
+void DAC_SignalGenerator_Init(void) {
+    DAC_Channel1_Init();
+    DAC_Timer_Trigger_Init();
+    Generate_Waveform(wave_type, frequency);
+    DAC_DMA_Init();
+}
+
+// 生成波形
+void Generate_Waveform(uint16_t type, uint16_t freq) {
+    for (uint16_t i = 0; i < 256; i++) {
+        switch (type) {
+            case 0:  // 正弦波
+                wave_buffer[i] = 2048 + 2047 * sin(i * 0.02454);
+                break;
+            case 1:  // 三角波
+                wave_buffer[i] = (i < 128) ? (i * 32) : ((255-i) * 32);
+                break;
+            case 2:  // 方波
+                wave_buffer[i] = (i < 128) ? 4095 : 0;
+                break;
+        }
+    }
+}
+
+// 切换波形类型
+void Set_WaveType(uint16_t type) {
+    wave_type = type;
+    Generate_Waveform(type, frequency);
+}` }
+        ];
+
+        // ========== 6 种颜色配置 ==========
+        const COLOR_MAP = {
+            primary: "#ec4899",     // pink-500 - 主色
+            secondary: "#db2777",   // pink-600 - 次要色
+            accent: "#f472b6",      // pink-400 - 强调色
+            bgStart: "#fdf2f8",     // pink-50 - 背景渐变起始
+            bgEnd: "#fce7f3",       // pink-100 - 背景渐变结束
+            code: "#831843"         // pink-900 - 代码高亮
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [isComplete, setIsComplete] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+            const [dacValue, setDacValue] = useState(2048);
+            const [wavePhase, setWavePhase] = useState(0);
+
+            // 波形动画
+            useEffect(() => {
+                if (isPlaying) {
+                    const timer = setInterval(() => {
+                        setWavePhase(prev => (prev + 1) % 32);
+                    }, 100);
+                    return () => clearInterval(timer);
+                }
+            }, [isPlaying]);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = speechSynthesis.getVoices();
+                    const preferredVoice = voices.find(voice =>
+                        voice.name.includes('Xiaoxiao') ||
+                        voice.name.includes('Chinese') ||
+                        voice.lang === 'zh-CN'
+                    );
+                    if (preferredVoice) utterance.voice = preferredVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (currentStep < STEPS.length - 1 && isPlaying) {
+                                setCurrentStep(prev => prev + 1);
+                            } else if (currentStep >= STEPS.length - 1) {
+                                setIsComplete(true);
+                                setIsPlaying(false);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (currentStep < STEPS.length - 1 && isPlaying) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            // 步骤变化时触发语音
+            useEffect(() => {
+                if (isPlaying || currentStep === 0) {
+                    speak(STEPS[currentStep].title);
+                }
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep, isPlaying]);
+
+            // 初始化语音
+            useEffect(() => {
+                if ('speechSynthesis' in window) {
+                    speechSynthesis.getVoices();
+                }
+            }, []);
+
+            const handleStart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+                setIsComplete(false);
+                speak(STEPS[0].title);
+            };
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const handleReset = () => {
+                setIsPlaying(false);
+                setCurrentStep(0);
+                setIsComplete(false);
+                window.speechSynthesis.cancel();
+            };
+
+            // DAC 动画组件
+            const DACAnimation = () => {
+                const step = currentStep;
+
+                // 步骤 1: DAC 基础架构
+                if (step === 0) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-pink-50 to-pink-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-pink-700 mb-4">DAC 数模转换器架构</h4>
+                            <div className="grid grid-cols-3 gap-4 h-full">
+                                {/* 数字输入 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">数字输入</h5>
+                                    <div className="space-y-1">
+                                        <div className="bg-pink-100 p-2 rounded text-xs">
+                                            <div className="font-bold text-pink-700">12 位数据</div>
+                                            <div className="text-gray-600">0 ~ 4095</div>
+                                        </div>
+                                        <div className="bg-pink-100 p-2 rounded text-xs">
+                                            <div className="font-bold text-pink-700">8 位对齐</div>
+                                            <div className="text-gray-600">左/右对齐</div>
+                                        </div>
+                                        <div className="bg-pink-100 p-2 rounded text-xs">
+                                            <div className="font-bold text-pink-700">双缓冲</div>
+                                            <div className="text-gray-600">DHR → DOR</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* DAC 核心 */}
+                                <div className="bg-pink-600 rounded-lg p-3 shadow text-white">
+                                    <h5 className="text-xs font-bold mb-2">DAC 核心</h5>
+                                    <div className="text-center mb-2">
+                                        <div className="text-4xl pulse">🔢→📈</div>
+                                    </div>
+                                    <div className="text-xs space-y-1">
+                                        <div>• 电阻梯形网络</div>
+                                        <div>• 电压输出缓冲</div>
+                                        <div>• 双通道独立</div>
+                                        <div>• 触发源选择</div>
+                                    </div>
+                                </div>
+
+                                {/* 模拟输出 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">模拟输出</h5>
+                                    <div className="space-y-1">
+                                        <div className="bg-green-100 p-2 rounded text-xs">
+                                            <div className="font-bold text-green-700">0 ~ VDDA</div>
+                                            <div className="text-gray-600">0 ~ 3.3V</div>
+                                        </div>
+                                        <div className="bg-blue-100 p-2 rounded text-xs">
+                                            <div className="font-bold text-blue-700">波形生成</div>
+                                            <div className="text-gray-600">正弦/三角/方波</div>
+                                        </div>
+                                        <div className="bg-purple-100 p-2 rounded text-xs">
+                                            <div className="font-bold text-purple-700">DMA 支持</div>
+                                            <div className="text-gray-600">自动更新</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 2: 工作原理
+                if (step === 1) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-pink-50 to-pink-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-pink-700 mb-4">DAC 转换原理</h4>
+
+                            {/* 转换公式 */}
+                            <div className="bg-white rounded-lg p-3 shadow mb-4">
+                                <div className="text-center text-pink-700 font-mono">
+                                    <div className="text-sm">Vout = VREF × (DOR / 4095)</div>
+                                    <div className="text-xs text-gray-500 mt-1">VREF = 3.3V, 4095 = 2^12 - 1</div>
+                                </div>
+                            </div>
+
+                            {/* 数字到模拟映射 */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">数字值范围</h5>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs">0</span>
+                                            <div className="flex-1 mx-2 bg-gradient-to-r from-pink-500 to-pink-300 h-2 rounded"></div>
+                                            <span className="text-xs">4095</span>
+                                        </div>
+                                        <div className="flex justify-between text-xs text-gray-600">
+                                            <span>0V</span>
+                                            <span>2048 → 1.65V</span>
+                                            <span>3.3V</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">计算示例</h5>
+                                    <div className="space-y-1 text-xs">
+                                        <div className="flex justify-between">
+                                            <span>DOR = 0</span>
+                                            <span className="text-green-600 font-bold">0V</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span>DOR = 1024</span>
+                                            <span className="text-green-600 font-bold">0.825V</span>
+                                        </div>
+                                        <div className="flex justify-between bg-pink-100 p-1 rounded">
+                                            <span>DOR = 2048</span>
+                                            <span className="text-green-600 font-bold">1.65V</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span>DOR = 3072</span>
+                                            <span className="text-green-600 font-bold">2.475V</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span>DOR = 4095</span>
+                                            <span className="text-green-600 font-bold">3.3V</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 3: 通道与引脚
+                if (step === 2) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-pink-50 to-pink-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-pink-700 mb-4">DAC 通道与引脚映射</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 通道映射 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">通道映射 (STM32F4)</h5>
+                                    <div className="space-y-3">
+                                        <div className="border-2 border-pink-300 rounded-lg p-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="text-xs">
+                                                    <div className="font-bold text-pink-700">DAC1_CH1</div>
+                                                    <div className="text-gray-600">通道 1</div>
+                                                </div>
+                                                <div className="text-2xl">→</div>
+                                                <div className="text-xs bg-green-100 p-2 rounded">
+                                                    <div className="font-bold text-green-700">PA4</div>
+                                                    <div className="text-gray-600">DAC_OUT1</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="border-2 border-pink-300 rounded-lg p-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="text-xs">
+                                                    <div className="font-bold text-pink-700">DAC1_CH2</div>
+                                                    <div className="text-gray-600">通道 2</div>
+                                                </div>
+                                                <div className="text-2xl">→</div>
+                                                <div className="text-xs bg-green-100 p-2 rounded">
+                                                    <div className="font-bold text-green-700">PA5</div>
+                                                    <div className="text-gray-600">DAC_OUT2</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* GPIO 配置 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">GPIO 配置要点</h5>
+                                    <div className="space-y-2 text-xs">
+                                        <div className="bg-pink-100 p-2 rounded">
+                                            <div className="font-bold text-pink-700">模式配置</div>
+                                            <div className="text-gray-600">MODER = 模拟模式 (11)</div>
+                                        </div>
+                                        <div className="bg-pink-100 p-2 rounded">
+                                            <div className="font-bold text-pink-700">无需复用</div>
+                                            <div className="text-gray-600">AFR 不需要配置</div>
+                                        </div>
+                                        <div className="bg-pink-100 p-2 rounded">
+                                            <div className="font-bold text-pink-700">无上拉/下拉</div>
+                                            <div className="text-gray-600">PUPDR = 00</div>
+                                        </div>
+                                        <div className="bg-yellow-100 p-2 rounded">
+                                            <div className="font-bold text-yellow-700">⚠️ 注意</div>
+                                            <div className="text-gray-600">必须配置为模拟模式!</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 4: 基本配置
+                if (step === 3) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-pink-50 to-pink-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-pink-700 mb-4">DAC 基本配置</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 配置流程 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-2 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-pink-500 rounded-full flex items-center justify-center text-white text-xs font-bold">1</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-pink-700">禁用 DAC</div>
+                                                <div className="text-gray-500">CR &= ~EN</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg p-2 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-pink-500 rounded-full flex items-center justify-center text-white text-xs font-bold">2</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-pink-700">使能通道</div>
+                                                <div className="text-gray-500">CR |= ENx</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg p-2 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-pink-500 rounded-full flex items-center justify-center text-white text-xs font-bold">3</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-pink-700">配置缓冲</div>
+                                                <div className="text-gray-500">CR &= ~BOFF</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg p-2 shadow">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-pink-500 rounded-full flex items-center justify-center text-white text-xs font-bold">4</div>
+                                            <div className="text-xs">
+                                                <div className="font-bold text-pink-700">设置输出</div>
+                                                <div className="text-gray-500">DHR12Rx = value</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 电压滑块 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">输出电压调节</h5>
+                                    <div className="flex flex-col items-center justify-center h-full">
+                                        <div className="text-2xl font-bold text-pink-700 font-mono">
+                                            {(dacValue / 4095 * 3300).toFixed(0)} mV
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="4095"
+                                            value={dacValue}
+                                            onChange={(e) => setDacValue(parseInt(e.target.value))}
+                                            className="w-full my-2"
+                                        />
+                                        <div className="flex justify-between text-xs text-gray-500 w-full">
+                                            <span>0V</span>
+                                            <span>DAC: {dacValue}</span>
+                                            <span>3.3V</span>
+                                        </div>
+                                        <div className="mt-2 w-full bg-gradient-to-r from-pink-100 to-pink-500 h-4 rounded">
+                                            <div
+                                                className="h-full bg-pink-700 rounded transition-all"
+                                                style={{ width: `${(dacValue / 4095) * 100}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 5: 触发模式
+                if (step === 4) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-pink-50 to-pink-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-pink-700 mb-4">DAC 触发模式</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 触发源列表 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">触发源选择 (TSEL)</h5>
+                                    <div className="space-y-1 text-xs max-h-48 overflow-auto">
+                                        <div className="flex justify-between p-1 bg-pink-100 rounded">
+                                            <span>000</span>
+                                            <span className="font-bold">软件触发</span>
+                                        </div>
+                                        <div className="flex justify-between p-1">
+                                            <span>001</span>
+                                            <span>TIM2 TRGO</span>
+                                        </div>
+                                        <div className="flex justify-between p-1">
+                                            <span>010</span>
+                                            <span>TIM4 TRGO</span>
+                                        </div>
+                                        <div className="flex justify-between p-1">
+                                            <span>011</span>
+                                            <span>TIM5 TRGO</span>
+                                        </div>
+                                        <div className="flex justify-between p-1 bg-blue-100 rounded">
+                                            <span>100</span>
+                                            <span className="font-bold">TIM6 TRGO</span>
+                                        </div>
+                                        <div className="flex justify-between p-1">
+                                            <span>101</span>
+                                            <span>TIM7 TRGO</span>
+                                        </div>
+                                        <div className="flex justify-between p-1">
+                                            <span>110</span>
+                                            <span>TIM8 TRGO</span>
+                                        </div>
+                                        <div className="flex justify-between p-1">
+                                            <span>111</span>
+                                            <span>EXTI9</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 定时器触发示意 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">TIM6 触发示例</h5>
+                                    <div className="space-y-2">
+                                        <div className="bg-blue-100 p-2 rounded text-xs">
+                                            <div className="font-bold text-blue-700">TIM6 配置</div>
+                                            <div className="text-gray-600">PSC = 7199 (10kHz)</div>
+                                            <div className="text-gray-600">ARR = 9 (1kHz)</div>
+                                            <div className="text-gray-600">TRGO = 更新</div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex-1 bg-blue-500 p-2 rounded text-white text-xs text-center">
+                                                <div className="font-bold">TIM6</div>
+                                                <div className="text-xs">1kHz TRGO</div>
+                                            </div>
+                                            <div className="text-pink-400">→</div>
+                                            <div className="flex-1 bg-pink-500 p-2 rounded text-white text-xs text-center">
+                                                <div className="font-bold">DAC</div>
+                                                <div className="text-xs">触发更新</div>
+                                            </div>
+                                        </div>
+                                        <div className="text-xs text-gray-500 text-center">
+                                            每 1ms 触发一次 DAC 更新
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 6: DMA 传输
+                if (step === 5) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-pink-50 to-pink-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-pink-700 mb-4">DAC DMA 波形生成</h4>
+
+                            <div className="grid grid-cols-3 gap-4 h-full">
+                                {/* 波形数据 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">波形缓冲区</h5>
+                                    <div className="grid grid-cols-4 gap-1">
+                                        {Array.from({ length: 16 }, (_, i) => (
+                                            <div
+                                                key={i}
+                                                className={`h-8 rounded flex items-center justify-center text-xs transition-all ${
+                                                    i === wavePhase % 16 ? 'bg-pink-500 text-white scale-110' : 'bg-pink-100 text-pink-700'
+                                                }`}
+                                            >
+                                                {i}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-1">
+                                        循环缓冲区 (32 点)
+                                    </div>
+                                </div>
+
+                                {/* DMA 传输 */}
+                                <div className="flex flex-col items-center justify-center">
+                                    <div className="bg-purple-500 text-white p-3 rounded-lg text-center mb-2">
+                                        <div className="font-bold">DMA 自动传输</div>
+                                        <div className="text-xs">循环模式</div>
+                                    </div>
+                                    <div className="w-0.5 h-12 bg-gradient-to-b from-purple-400 to-pink-400"></div>
+                                </div>
+
+                                {/* DAC 输出 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">DAC 输出</h5>
+                                    <div className="relative h-20">
+                                        {/* 正弦波示意 */}
+                                        <svg className="w-full h-full" viewBox="0 0 100 50">
+                                            <path
+                                                d="M 0 25 Q 12 0, 25 25 T 50 25 T 75 25 T 100 25"
+                                                fill="none"
+                                                stroke="#ec4899"
+                                                strokeWidth="2"
+                                                className="wave"
+                                            />
+                                        </svg>
+                                    </div>
+                                    <div className="text-xs text-gray-500 text-center">
+                                        正弦波输出
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 7: 波形生成
+                if (step === 6) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-pink-50 to-pink-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-pink-700 mb-4">波形生成类型</h4>
+
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 波形类型 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className="w-4 h-4 bg-pink-500 rounded"></div>
+                                            <h5 className="text-xs font-bold text-pink-700">正弦波 (Sine)</h5>
+                                        </div>
+                                        <div className="text-xs text-gray-600 font-mono">
+                                            value = 2048 + 2047×sin(θ)
+                                        </div>
+                                        <div className="mt-1 h-8 bg-pink-50 rounded">
+                                            <svg className="w-full h-full" viewBox="0 0 100 30">
+                                                <path d="M 0 15 Q 25 0, 50 15 T 100 15" fill="none" stroke="#ec4899" strokeWidth="2"/>
+                                            </svg>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className="w-4 h-4 bg-blue-500 rounded"></div>
+                                            <h5 className="text-xs font-bold text-blue-700">三角波 (Triangle)</h5>
+                                        </div>
+                                        <div className="text-xs text-gray-600 font-mono">
+                                            线性递增 → 线性递减
+                                        </div>
+                                        <div className="mt-1 h-8 bg-blue-50 rounded">
+                                            <svg className="w-full h-full" viewBox="0 0 100 30">
+                                                <path d="M 0 30 L 50 0 L 100 30" fill="none" stroke="#3b82f6" strokeWidth="2"/>
+                                            </svg>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className="w-4 h-4 bg-green-500 rounded"></div>
+                                            <h5 className="text-xs font-bold text-green-700">方波 (Square)</h5>
+                                        </div>
+                                        <div className="text-xs text-gray-600 font-mono">
+                                            高电平 / 低电平切换
+                                        </div>
+                                        <div className="mt-1 h-8 bg-green-50 rounded">
+                                            <svg className="w-full h-full" viewBox="0 0 100 30">
+                                                <path d="M 0 30 L 0 0 L 50 0 L 50 30 L 100 30 L 100 0" fill="none" stroke="#22c55e" strokeWidth="2"/>
+                                            </svg>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 波形对比 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">波形特性对比</h5>
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="bg-pink-100">
+                                                <th className="p-1">波形</th>
+                                                <th className="p-1">THD</th>
+                                                <th className="p-1">应用</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td className="p-1">正弦</td>
+                                                <td className="p-1 text-green-600">低</td>
+                                                <td className="p-1">音频</td>
+                                            </tr>
+                                            <tr className="bg-gray-50">
+                                                <td className="p-1">三角</td>
+                                                <td className="p-1 text-yellow-600">中</td>
+                                                <td className="p-1">PWM</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="p-1">方波</td>
+                                                <td className="p-1 text-red-600">高</td>
+                                                <td className="p-1">时钟</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <div className="mt-2 text-xs text-gray-500">
+                                        THD: 总谐波失真
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 8: 应用实例
+                if (step === 7) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-pink-50 to-pink-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-pink-700 mb-4">应用实例 - 函数信号发生器</h4>
+
+                            <div className="grid grid-cols-3 gap-4 h-full">
+                                {/* 系统架构 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">系统架构</h5>
+                                    <div className="space-y-2">
+                                        <div className="bg-pink-100 p-2 rounded text-xs">
+                                            <div className="font-bold text-pink-700">STM32 DAC</div>
+                                            <div className="text-gray-600">12 位分辨率</div>
+                                            <div className="text-gray-600">DMA 传输</div>
+                                        </div>
+                                        <div className="bg-blue-100 p-2 rounded text-xs">
+                                            <div className="font-bold text-blue-700">TIM6 触发</div>
+                                            <div className="text-gray-600">频率控制</div>
+                                        </div>
+                                        <div className="bg-green-100 p-2 rounded text-xs">
+                                            <div className="font-bold text-green-700">波形选择</div>
+                                            <div className="text-gray-600">正弦/三角/方波</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 波形切换 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">波形切换</h5>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between p-2 bg-pink-100 rounded">
+                                            <span className="text-xs">正弦波</span>
+                                            <div className="w-3 h-3 bg-pink-500 rounded-full pulse"></div>
+                                        </div>
+                                        <div className="flex items-center justify-between p-2 bg-gray-100 rounded">
+                                            <span className="text-xs">三角波</span>
+                                            <div className="w-3 h-3 bg-gray-300 rounded-full"></div>
+                                        </div>
+                                        <div className="flex items-center justify-between p-2 bg-gray-100 rounded">
+                                            <span className="text-xs">方波</span>
+                                            <div className="w-3 h-3 bg-gray-300 rounded-full"></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 输出规格 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h5 className="text-xs font-bold text-pink-700 mb-2">输出规格</h5>
+                                    <div className="space-y-1 text-xs">
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-500">幅度</span>
+                                            <span className="font-bold">0 ~ 3.3V</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-500">频率</span>
+                                            <span className="font-bold">1Hz ~ 20kHz</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-500">分辨率</span>
+                                            <span className="font-bold">12 位 (4096 级)</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-500">采样率</span>
+                                            <span className="font-bold">最高 1MHz</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                return null;
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        {/* 标题 */}
+                        <h1 className="text-3xl font-bold text-center mb-4 text-pink-700">
+                            STM32 DAC 数模转换器完整指南
+                        </h1>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full font-bold transition-all ${
+                                            index === currentStep
+                                                ? 'bg-pink-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-pink-200 text-pink-700'
+                                                : 'bg-gray-200 text-gray-500'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 主内容区 */}
+                        <div className="grid grid-cols-2 gap-6 mb-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900 rounded-lg p-4 shadow-lg">
+                                <div className="text-pink-400 font-bold mb-2">
+                                    步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                                </div>
+                                <pre className="text-green-400 text-xs overflow-auto h-64 font-mono">
+                                    <code>{STEPS[currentStep].code}</code>
+                                </pre>
+                            </div>
+
+                            {/* 动画区 */}
+                            <div className="scaleIn">
+                                <DACAnimation />
+                            </div>
+                        </div>
+
+                        {/* 讲解区 */}
+                        <div className="bg-white rounded-lg p-6 shadow-lg mb-6">
+                            <h3 className="text-xl font-bold text-pink-700 mb-4">核心知识点</h3>
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="border-l-4 border-pink-500 pl-4">
+                                    <h4 className="font-bold text-pink-700 mb-2">分辨率与精度</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 12 位 = 4096 级</li>
+                                        <li>• LSB = 3.3V / 4095 ≈ 0.8mV</li>
+                                        <li>• 8 位模式用于快速应用</li>
+                                    </ul>
+                                </div>
+                                <div className="border-l-4 border-pink-500 pl-4">
+                                    <h4 className="font-bold text-pink-700 mb-2">触发方式</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 软件触发 (手动)</li>
+                                        <li>• 定时器 TRGO (自动)</li>
+                                        <li>• DMA 循环 (波形)</li>
+                                    </ul>
+                                </div>
+                                <div className="border-l-4 border-pink-500 pl-4">
+                                    <h4 className="font-bold text-pink-700 mb-2">典型应用</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 波形发生器</li>
+                                        <li>• 音频输出</li>
+                                        <li>• 可调参考电压</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 控制按钮 */}
+                        <div className="flex justify-center gap-4">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-bold ${
+                                    currentStep === 0
+                                        ? 'bg-gray-200 text-gray-400'
+                                        : 'bg-pink-500 text-white hover:bg-pink-600'
+                                }`}
+                            >
+                                上一步
+                            </button>
+
+                            {!isPlaying && !isComplete && (
+                                <button
+                                    onClick={handleStart}
+                                    className="px-6 py-3 bg-pink-500 text-white rounded-lg font-bold hover:bg-pink-600"
+                                >
+                                    开始讲解
+                                </button>
+                            )}
+
+                            {isPlaying && (
+                                <button
+                                    onClick={handleNext}
+                                    className="px-6 py-3 bg-pink-500 text-white rounded-lg font-bold hover:bg-pink-600"
+                                >
+                                    下一步
+                                </button>
+                            )}
+
+                            {isComplete && (
+                                <button
+                                    onClick={handleReset}
+                                    className="px-6 py-3 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600"
+                                >
+                                    重新学习
+                                </button>
+                            )}
+
+                            <button
+                                onClick={handleReset}
+                                className="px-6 py-3 bg-gray-500 text-white rounded-lg font-bold hover:bg-gray-600"
+                            >
+                                重置
+                            </button>
+                        </div>
+
+                        {/* 完成提示 */}
+                        {isComplete && (
+                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                                <div className="bg-white rounded-lg p-8 max-w-md text-center scaleIn">
+                                    <div className="text-6xl mb-4">🎉</div>
+                                    <h2 className="text-2xl font-bold text-pink-700 mb-4">学习完成!</h2>
+                                    <p className="text-gray-600 mb-6">
+                                        已掌握 STM32 DAC 数模转换器的核心知识
+                                    </p>
+                                    <button
+                                        onClick={handleReset}
+                                        className="px-6 py-3 bg-pink-500 text-white rounded-lg font-bold hover:bg-pink-600"
+                                    >
+                                        重新学习
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

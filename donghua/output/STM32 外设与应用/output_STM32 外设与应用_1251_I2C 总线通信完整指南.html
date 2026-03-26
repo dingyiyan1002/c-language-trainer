@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 I2C 总线通信完整指南 - I2C 协议与多设备通信可视化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // 8 个步骤 - 语音驱动自动播放
+        const STEPS = [
+            {
+                title: "I2C 基础概念",
+                code: `// I2C 总线特性
+// - 2 线制：SDA(数据), SCL(时钟)
+// - 多主多从：支持多个主设备和从设备
+// - 地址寻址：7 位/10 位地址
+// - 速率模式:
+//   * 标准模式：100Kbps
+//   * 快速模式：400Kbps
+//   * 高速模式：3.4Mbps
+
+// STM32 I2C 外设特性
+// - 多主/从模式
+// - 7 位/10 位寻址
+// - 双数据速率 (Fast Mode Plus)
+// - SMBus/PMBus兼容
+
+// 物理层
+// - 开漏输出 + 上拉电阻
+// - 线与逻辑：任意拉低即低电平`,
+                visualization: "i2c-basic",
+                explanation: "I2C 是两线制串行总线，由 SDA(数据线) 和 SCL(时钟线) 组成。采用开漏输出，需要外接上拉电阻。支持多主多从架构，通过地址区分设备。STM32 的 I2C 支持主/从模式，7 位/10 位寻址。"
+            },
+            {
+                title: "I2C 硬件配置",
+                code: `// I2C 初始化 (400Kbps @72MHz)
+void I2C_Init(void) {
+    // 1. 使能时钟
+    RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+
+    // 2. GPIO 配置 (开漏复用)
+    // PB6: I2C1_SCL
+    // PB7: I2C1_SDA
+    GPIOB->CRL &= ~0x000000FF;
+    GPIOB->CRL |= 0x00000088;  // 开漏复用 50MHz
+
+    // 3. I2C 复位
+    RCC->APB1RSTR |= RCC_APB1RSTR_I2C1RST;
+    RCC->APB1RSTR &= ~RCC_APB1RSTR_I2C1RST;
+
+    // 4. I2C 配置 (400Kbps)
+    I2C1->CR1 |= I2C_CR1_PE;  // 使能
+    I2C1->CCR = (4 << I2C_CCR_CCR_Pos);  // 分频
+    I2C1->TRISE = 5;  // 上升时间
+
+    // 5. 使能 I2C
+    I2C1->CR1 |= I2C_CR1_PE;
+}`,
+                visualization: "i2c-hardware",
+                explanation: "I2C 需要配置 SDA 和 SCL 引脚为开漏复用模式。外部需要 4.7k-10k 上拉电阻。波特率由 CCR 寄存器决定。STM32F103 的 I2C 时钟来自 APB1(36MHz)。"
+            },
+            {
+                title: "I2C 写时序",
+                code: `// I2C 写操作 (发送数据)
+// 时序：START→地址+W→ACK→寄存器→ACK→数据→ACK→STOP
+
+void I2C_WriteByte(uint8_t devAddr, uint8_t reg, uint8_t data) {
+    // 1. 产生 START
+    I2C1->CR1 |= I2C_CR1_START;
+    while (!(I2C1->SR1 & I2C_SR1_SB));
+
+    // 2. 发送地址 (写)
+    I2C1->DR = (devAddr << 1) | 0x00;
+    while (!(I2C1->SR1 & I2C_SR1_ADDR));
+    I2C1->SR2;  // 清除 ADDR 标志
+
+    // 3. 发送寄存器地址
+    I2C1->DR = reg;
+    while (!(I2C1->SR1 & I2C_SR1_TxE));
+
+    // 4. 发送数据
+    I2C1->DR = data;
+    while (!(I2C1->SR1 & I2C_SR1_TxE));
+
+    // 5. 产生 STOP
+    I2C1->CR1 |= I2C_CR1_STOP;
+}`,
+                visualization: "i2c-write",
+                explanation: "I2C 写操作由主机发起 START 信号，然后发送从机地址 + 写方向位，等待 ACK 后发送寄存器地址，再发送数据，最后产生 STOP 信号停止传输。每个字节后都有 ACK 应答。"
+            },
+            {
+                title: "I2C 读时序",
+                code: `// I2C 读操作 (接收数据)
+// 时序：START→地址+W→ACK→寄存器→ACK→
+//       RESTART→地址+R→ACK→数据→NACK→STOP
+
+uint8_t I2C_ReadByte(uint8_t devAddr, uint8_t reg) {
+    // 1. 写寄存器地址 (同上)
+    I2C_WriteAddr(devAddr, reg);
+
+    // 2. 重复 START
+    I2C1->CR1 |= I2C_CR1_START;
+    while (!(I2C1->SR1 & I2C_SR1_SB));
+
+    // 3. 发送地址 (读)
+    I2C1->DR = (devAddr << 1) | 0x01;
+    while (!(I2C1->SR1 & I2C_SR1_ADDR));
+    I2C1->SR2;
+
+    // 4. 配置 NACK (单字节)
+    I2C1->CR1 &= ~I2C_CR1_ACK;
+
+    // 5. 读取数据
+    while (!(I2C1->SR1 & I2C_SR1_RxNe));
+    uint8_t data = I2C1->DR;
+
+    // 6. 产生 STOP
+    I2C1->CR1 |= I2C_CR1_STOP;
+
+    // 7. 恢复 ACK
+    I2C1->CR1 |= I2C_CR1_ACK;
+    return data;
+}`,
+                visualization: "i2c-read",
+                explanation: "I2C 读操作需要先写寄存器地址，然后产生 RESTART(重复起始),发送读地址，主机接收数据后发送 NACK 表示最后一个字节，最后产生 STOP。读多字节时，除最后一个字节外都回复 ACK。"
+            },
+            {
+                title: "I2C 设备地址",
+                code: `// 常见 I2C 设备地址 (7 位地址)
+
+// EEPROM
+#define AT24C02_ADDR    0x50  // 1010xxx
+#define AT24C04_ADDR    0x50
+#define AT24C08_ADDR    0x50
+
+// 传感器
+#define MPU6050_ADDR    0x68  // 110100X (X 由 AD0 决定)
+#define HMC5883L_ADDR   0x1E  // 磁力计
+#define BMP280_ADDR     0x76  // 气压计 (0x77 当 SDO=1)
+
+// RTC
+#define PCF8563_ADDR    0x51
+#define DS3231_ADDR     0x68
+
+// LCD
+#define PCF8574_ADDR    0x27  // LCD1602 转接板
+#define SSD1306_ADDR    0x3C  // 或 0x3D
+
+// 地址格式：7 位地址 + R/W 位
+// 例如：0x50 写 = 0xA0, 0x50 读 = 0xA1`,
+                visualization: "i2c-addresses",
+                explanation: "I2C 设备使用 7 位或 10 位地址。常见设备的 7 位地址如上表所示。实际传输时，地址左移 1 位后加上 R/W 位 (0 写 1 读)。某些设备的地址引脚可配置多个地址。"
+            },
+            {
+                title: "I2C 中断/DMA",
+                code: `// I2C 中断配置
+void I2C_EnableInterrupts(void) {
+    I2C1->CR2 |= I2C_CR2_ITERREN;  // 错误中断
+    I2C1->CR2 |= I2C_CR2_ITEVTEN;  // 事件中断
+    I2C1->CR2 |= I2C_CR2_ITBUFEN;  // 缓冲区中断
+    NVIC_EnableIRQ(I2C1_EV_IRQn);
+    NVIC_EnableIRQ(I2C1_ER_IRQn);
+}
+
+// I2C 事件中断处理
+void I2C1_EV_IRQHandler(void) {
+    uint32_t sr1 = I2C1->SR1;
+    uint32_t sr2 = I2C1->SR2;
+
+    if (sr1 & I2C_SR1_SB) {
+        // START 发送完成
+        I2C1->DR = currentAddr;
+    }
+    if (sr1 & I2C_SR1_ADDR) {
+        // 地址发送完成
+        I2C1->SR2;  // 清除标志
+    }
+    if (sr1 & I2C_SR1_TxE) {
+        // 发送寄存器空
+        I2C1->DR = txData[txIdx++];
+    }
+    if (sr1 & I2C_SR1_RxNe) {
+        // 接收寄存器不空
+        rxData[rxIdx++] = I2C1->DR;
+    }
+}
+
+// DMA 配置 (参考 DMA 章节)`,
+                visualization: "i2c-interrupts",
+                explanation: "I2C 支持中断驱动传输，适合小数据量。事件中断处理 START/ADDR 完成，缓冲区中断处理数据收发。大数据量建议使用 DMA 以提高效率。"
+            },
+            {
+                title: "I2C 常用器件",
+                code: `// AT24C02 EEPROM 读写
+void EEPROM_Write(uint16_t addr, uint8_t data) {
+    I2C_Start();
+    I2C_SendByte(0xA0);  // 器件地址 + 写
+    I2C_SendByte(addr);   // 存储地址
+    I2C_SendByte(data);   // 数据
+    I2C_Stop();
+    Delay_ms(10);  // 等待写入完成
+}
+
+uint8_t EEPROM_Read(uint16_t addr) {
+    I2C_Start();
+    I2C_SendByte(0xA0);
+    I2C_SendByte(addr);
+    I2C_Start();  // 重复 START
+    I2C_SendByte(0xA1);  // 读
+    uint8_t data = I2C_RecvByte();
+    I2C_Stop();
+    return data;
+}
+
+// MPU6050 加速度计读取
+void MPU6050_ReadData(int16_t *data) {
+    I2C_Start();
+    I2C_SendByte(0xD0);  // MPU6050 地址 + 写
+    I2C_SendByte(0x3B);  // 数据起始寄存器
+    I2C_Start();
+    I2C_SendByte(0xD1);  // 读
+    for (int i = 0; i < 14; i++) {
+        data[i] = I2C_RecvByte();
+    }
+    I2C_Stop();
+}`,
+                visualization: "i2c-devices",
+                explanation: "AT24C02 是常用的 2Kbit EEPROM，按字节寻址。MPU6050 是 6 轴 IMU，包含加速度计和陀螺仪。这些器件都遵循标准 I2C 时序，可直接使用通用驱动函数。"
+            },
+            {
+                title: "I2C 多主仲裁",
+                code: `// I2C 多主模式注意事项
+
+// 1. 总线冲突检测
+// 发送数据后检查 SDA 实际电平
+// 如果不匹配，说明有其他主设备在使用总线
+
+// 2. 仲裁丢失处理
+if (I2C1->SR2 & I2C_SR2_LOSTARB) {
+    // 失去仲裁，释放总线
+    I2C1->SR2;  // 清除标志
+    I2C1->CR1 &= ~I2C_CR1_PE;  // 禁用 I2C
+    I2C1->CR1 |= I2C_CR1_PE;   // 重新使能
+    // 等待总线空闲后重试
+}
+
+// 3. 总线空闲检测
+int I2C_BusFree(void) {
+    return ((I2C1->SR2 & I2C_SR2_MSL) == 0) &&
+           ((I2C1->SR2 & I2C_SR2_BUSY) == 0);
+}
+
+// 4. 重试机制
+for (int i = 0; i < 3; i++) {
+    if (I2C_BusFree() && I2C_Transmit() == SUCCESS)
+        break;
+    Delay_ms(10);
+}`,
+                visualization: "i2c-arbitration",
+                explanation: "多主 I2C 系统中，当两个主设备同时发起传输时会发生仲裁。仲裁基于 SDA 线：如果主设备发送高电平但检测到低电平，说明失去仲裁，必须释放总线。仲裁失败的主设备会自动重试。"
+            }
+        ];
+
+        // 颜色映射 - 青绿色调
+        const COLOR_MAP = {
+            primary: '#0891b2',    // cyan-600
+            secondary: '#06b6d4',  // cyan-500
+            accent: '#14b8a6',     // teal-500
+            success: '#10b981',    // emerald-500
+            warning: '#f59e0b',    // amber-500
+            danger: '#ef4444',     // red-500
+            info: '#3b82f6',       // blue-500
+            sda: '#8b5cf6',        // SDA 紫色
+            scl: '#06b6d4',        // SCL 青色
+            gradients: [
+                'from-cyan-500 to-teal-500',
+                'from-blue-500 to-indigo-500',
+                'from-emerald-500 to-green-500'
+            ]
+        };
+
+        // I2C 基础可视化
+        const I2cBasic = ({ step }) => {
+            const [sdaState, setSdaState] = useState(false);
+            const [sclState, setSclState] = useState(false);
+            const [mode, setMode] = useState('Standard');
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setSclState(prev => !prev);
+                    if (!sclState) {
+                        setSdaState(prev => !prev);
+                    }
+                }, 500);
+                return () => clearInterval(interval);
+            }, [sclState]);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        I2C 差分信号
+                    </div>
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold">SDA:</span>
+                            <div className={`h-6 flex-1 rounded transition-all ${
+                                sdaState ? 'bg-purple-500' : 'bg-gray-300'
+                            }`} />
+                            <span className="text-xs w-10">{sdaState ? 'H' : 'L'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold">SCL:</span>
+                            <div className={`h-6 flex-1 rounded transition-all ${
+                                sclState ? 'bg-cyan-500' : 'bg-gray-300'
+                            }`} />
+                            <span className="text-xs w-10">{sclState ? 'H' : 'L'}</span>
+                        </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-center text-sm mb-2">速率模式:</div>
+                        <div className="flex justify-center space-x-2">
+                            {['Standard', 'Fast', 'High'].map((m) => (
+                                <button
+                                    key={m}
+                                    onClick={() => setMode(m)}
+                                    className={`px-3 py-1 rounded text-xs ${
+                                        mode === m ? 'bg-cyan-500 text-white' : 'bg-gray-200'
+                                    }`}
+                                >
+                                    {m}: {m === 'Standard' ? '100K' : m === 'Fast' ? '400K' : '3.4M'}bps
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-purple-50 p-2 rounded">
+                            <div>📌 开漏输出</div>
+                            <div>需上拉电阻</div>
+                        </div>
+                        <div className="bg-cyan-50 p-2 rounded">
+                            <div>🔀 多主多从</div>
+                            <div>仲裁机制</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // I2C 硬件可视化
+        const I2cHardware = ({ step }) => {
+            const [initialized, setInitialized] = useState(false);
+            const [busState, setBusState] = useState('idle');
+
+            useEffect(() => {
+                setInitialized(true);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className={`p-4 rounded-lg text-center transition-all ${
+                        initialized ? 'bg-green-100' : 'bg-gray-100'
+                    }`}>
+                        <div className="text-2xl mb-2">{initialized ? '✅' : '⏳'}</div>
+                        <div className="font-semibold">I2C 初始化</div>
+                        <div className="text-sm">PB6=SCL, PB7=SDA</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs mb-2">硬件连接:</div>
+                        <div className="flex justify-center items-center space-x-4">
+                            <div className="bg-cyan-100 p-2 rounded text-xs text-center">
+                                <div>STM32</div>
+                                <div className="font-mono">PB6/SCL</div>
+                                <div className="font-mono">PB7/SDA</div>
+                            </div>
+                            <div className="text-xs">↔</div>
+                            <div className="bg-purple-100 p-2 rounded text-xs text-center">
+                                <div>从设备</div>
+                                <div className="font-mono">SCL</div>
+                                <div className="font-mono">SDA</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        <div>• 上拉电阻：4.7k-10kΩ</div>
+                        <div>• 时钟源：APB1 36MHz</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // I2C 写时序可视化
+        const I2cWrite = ({ step }) => {
+            const [phase, setPhase] = useState(0);
+            const phases = ['START', 'ADDR+W', 'ACK', 'REG', 'ACK', 'DATA', 'ACK', 'STOP'];
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setPhase(prev => (prev + 1) % phases.length);
+                }, 1000);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        I2C 写时序
+                    </div>
+                    {phases.map((p, idx) => (
+                        <div
+                            key={idx}
+                            className={`p-2 rounded-lg text-center text-sm transition-all ${
+                                idx === phase ? 'bg-cyan-100 border-2 border-cyan-500' :
+                                idx < phase ? 'bg-green-50' : 'bg-gray-100'
+                            }`}
+                        >
+                            {idx + 1}. {p}
+                            {idx < phase && <span className="ml-2 text-green-600">✅</span>}
+                        </div>
+                    ))}
+                    <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs">
+                        <div>START → 0x{((0x50 << 1) | 0).toString(16).toUpperCase()} → ACK → REG → ACK → DATA → ACK → STOP</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // I2C 读时序可视化
+        const I2cRead = ({ step }) => {
+            const [phase, setPhase] = useState(0);
+            const phases = ['START', 'ADDR+W', 'ACK', 'REG', 'ACK', 'RSTART', 'ADDR+R', 'ACK', 'DATA', 'NACK', 'STOP'];
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setPhase(prev => (prev + 1) % phases.length);
+                }, 800);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        I2C 读时序
+                    </div>
+                    <div className="space-y-1">
+                        {phases.map((p, idx) => (
+                            <div
+                                key={idx}
+                                className={`p-2 rounded-lg text-center text-sm transition-all ${
+                                    idx === phase ? 'bg-purple-100 border-2 border-purple-500' :
+                                    idx < phase ? 'bg-green-50' : 'bg-gray-100'
+                                }`}
+                            >
+                                {idx + 1}. {p}
+                                {idx < phase && <span className="ml-2 text-green-600">✅</span>}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3 font-mono text-xs">
+                        <div>START → ADDR+W → REG → RSTART → ADDR+R → DATA → NACK → STOP</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // I2C 设备地址可视化
+        const I2cAddresses = ({ step }) => {
+            const [selectedDevice, setSelectedDevice] = useState('AT24C02');
+            const devices = [
+                { name: 'AT24C02', addr: '0x50', type: 'EEPROM' },
+                { name: 'MPU6050', addr: '0x68', type: 'IMU' },
+                { name: 'BMP280', addr: '0x76', type: '气压' },
+                { name: 'SSD1306', addr: '0x3C', type: 'LCD' },
+                { name: 'PCF8563', addr: '0x51', type: 'RTC' }
+            ];
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-2">
+                        {devices.map((dev) => (
+                            <button
+                                key={dev.name}
+                                onClick={() => setSelectedDevice(dev.name)}
+                                className={`p-2 rounded text-left transition-all ${
+                                    selectedDevice === dev.name
+                                        ? 'bg-cyan-500 text-white'
+                                        : 'bg-gray-100'
+                                }`}
+                            >
+                                <div className="flex justify-between">
+                                    <span className="font-semibold">{dev.name}</span>
+                                    <span className="font-mono">{dev.addr}</span>
+                                </div>
+                                <div className="text-xs opacity-80">{dev.type}</div>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs">
+                            <div>7 位地址：{devices.find(d => d.name === selectedDevice)?.addr}</div>
+                            <div>写地址：0x{((parseInt(devices.find(d => d.name === selectedDevice)?.addr || '0x50', 16) << 1) | 0).toString(16).toUpperCase()}</div>
+                            <div>读地址：0x{((parseInt(devices.find(d => d.name === selectedDevice)?.addr || '0x50', 16) << 1) | 1).toString(16).toUpperCase()}</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // I2C 中断可视化
+        const I2cInterrupts = ({ step }) => {
+            const [events, setEvents] = useState([]);
+
+            useEffect(() => {
+                const eventTypes = ['SB', 'ADDR', 'TxE', 'RxNe', 'BTF', 'STOPF'];
+                const interval = setInterval(() => {
+                    const newEvent = {
+                        type: eventTypes[Math.floor(Math.random() * eventTypes.length)],
+                        time: Date.now()
+                    };
+                    setEvents(prev => [newEvent, ...prev.slice(0, 4)]);
+                }, 1500);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        I2C 中断事件
+                    </div>
+                    <div className="space-y-2">
+                        {events.length === 0 ? (
+                            <div className="text-center text-gray-400 py-4">等待中断...</div>
+                        ) : (
+                            events.map((evt, idx) => (
+                                <div
+                                    key={idx}
+                                    className={`p-3 rounded-lg transition-all ${
+                                        idx === 0 ? 'bg-cyan-100 border-2 border-cyan-500' : 'bg-gray-100'
+                                    }`}
+                                >
+                                    <div className="flex justify-between items-center">
+                                        <span className="font-mono text-sm">{evt.type}</span>
+                                        <span className="text-xs text-gray-500">
+                                            {new Date(evt.time).toLocaleTimeString()}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        <div>• SB: START 发送完成</div>
+                        <div>• ADDR: 地址发送完成</div>
+                        <div>• TxE/RxNe: 发送空/接收不空</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // I2C 器件可视化
+        const I2cDevices = ({ step }) => {
+            const [selectedDevice, setSelectedDevice] = useState('EEPROM');
+            const [data, setData] = useState([]);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    if (selectedDevice === 'EEPROM') {
+                        setData(prev => [Math.floor(Math.random() * 256), ...prev.slice(0, 7)]);
+                    } else if (selectedDevice === 'MPU6050') {
+                        setData(prev => [Math.floor(Math.random() * 100), Math.floor(Math.random() * 100), Math.floor(Math.random() * 100)]);
+                    }
+                }, 1000);
+                return () => clearInterval(interval);
+            }, [selectedDevice]);
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            onClick={() => setSelectedDevice('EEPROM')}
+                            className={`p-2 rounded text-xs ${
+                                selectedDevice === 'EEPROM' ? 'bg-cyan-500 text-white' : 'bg-gray-100'
+                            }`}
+                        >
+                            📀 EEPROM
+                        </button>
+                        <button
+                            onClick={() => setSelectedDevice('MPU6050')}
+                            className={`p-2 rounded text-xs ${
+                                selectedDevice === 'MPU6050' ? 'bg-cyan-500 text-white' : 'bg-gray-100'
+                            }`}
+                        >
+                            📊 MPU6050
+                        </button>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs font-semibold mb-2">
+                            {selectedDevice === 'EEPROM' ? 'EEPROM 数据:' : 'MPU6050 数据:'}
+                        </div>
+                        <div className="font-mono text-xs">
+                            {data.map((d, i) => (
+                                <span key={i} className="inline-block w-8 text-center">{d}</span>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // I2C 仲裁可视化
+        const I2cArbitration = ({ step }) => {
+            const [masters, setMasters] = useState([
+                { id: 1, state: 'idle', won: false },
+                { id: 2, state: 'idle', won: false }
+            ]);
+
+            useEffect(() => {
+                const arbitrate = async () => {
+                    setMasters(prev => prev.map(m => ({ ...m, state: 'competing', won: false })));
+                    await sleep(1000);
+                    const winner = Math.random() > 0.5 ? 0 : 1;
+                    setMasters(prev => prev.map((m, i) => ({
+                        ...m,
+                        state: i === winner ? 'transmitting' : 'lost',
+                        won: i === winner
+                    })));
+                    await sleep(2000);
+                    setMasters(prev => prev.map(m => ({ ...m, state: 'idle' })));
+                };
+                arbitrate();
+                const interval = setInterval(arbitrate, 4000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        多主仲裁
+                    </div>
+                    {masters.map((m) => (
+                        <div
+                            key={m.id}
+                            className={`p-3 rounded-lg transition-all ${
+                                m.state === 'transmitting' ? 'bg-green-100' :
+                                m.state === 'competing' ? 'bg-yellow-100' :
+                                m.state === 'lost' ? 'bg-red-100' : 'bg-gray-100'
+                            }`}
+                        >
+                            <div className="flex justify-between items-center">
+                                <span className="font-semibold">主设备 {m.id}</span>
+                                <span className="text-sm">
+                                    {m.state === 'idle' && '⏸️ 空闲'}
+                                    {m.state === 'competing' && '⚔️ 仲裁中'}
+                                    {m.state === 'transmitting' && '✅ 发送中'}
+                                    {m.state === 'lost' && '❌ 失去仲裁'}
+                                </span>
+                            </div>
+                        </div>
+                    ))}
+                    <div className="text-xs text-gray-500">
+                        <div>• 仲裁基于 SDA 线电平</div>
+                        <div>• 失败者自动重试</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 主 App 组件
+        const App = () => {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                const voices = window.speechSynthesis.getVoices();
+                const xiaoXiao = voices.find(v => v.name.includes('XiaoXiao') || v.name.includes('zh-CN'));
+                if (xiaoXiao) utterance.voice = xiaoXiao;
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                window.speechSynthesis.speak(utterance);
+            }, [isMuted]);
+
+            useEffect(() => {
+                if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                speak(STEPS[currentStep].explanation);
+                return () => { if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current); };
+            }, [currentStep, speak]);
+
+            useEffect(() => {
+                const handleKeydown = (e) => {
+                    if (e.code === 'Space') { e.preventDefault(); setIsPlaying(prev => !prev); }
+                    else if (e.code === 'ArrowRight' && currentStep < STEPS.length - 1) setCurrentStep(prev => prev + 1);
+                    else if (e.code === 'ArrowLeft' && currentStep > 0) setCurrentStep(prev => prev - 1);
+                };
+                window.addEventListener('keydown', handleKeydown);
+                return () => window.removeEventListener('keydown', handleKeydown);
+            }, [currentStep]);
+
+            const renderVisualization = () => {
+                switch (STEPS[currentStep].visualization) {
+                    case 'i2c-basic': return <I2cBasic step={STEPS[currentStep]} />;
+                    case 'i2c-hardware': return <I2cHardware step={STEPS[currentStep]} />;
+                    case 'i2c-write': return <I2cWrite step={STEPS[currentStep]} />;
+                    case 'i2c-read': return <I2cRead step={STEPS[currentStep]} />;
+                    case 'i2c-addresses': return <I2cAddresses step={STEPS[currentStep]} />;
+                    case 'i2c-interrupts': return <I2cInterrupts step={STEPS[currentStep]} />;
+                    case 'i2c-devices': return <I2cDevices step={STEPS[currentStep]} />;
+                    case 'i2c-arbitration': return <I2cArbitration step={STEPS[currentStep]} />;
+                    default: return <div>可视化组件</div>;
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <h1 className="text-3xl font-bold text-center mb-6 bg-gradient-to-r from-cyan-600 to-teal-600 bg-clip-text text-transparent">
+                            STM32 I2C 总线通信完整指南
+                        </h1>
+                        <div className="flex justify-center mb-6">
+                            <div className="flex space-x-2">
+                                {STEPS.map((_, idx) => (
+                                    <button key={idx} onClick={() => setCurrentStep(idx)}
+                                        className={`w-3 h-3 rounded-full transition-all ${
+                                            idx === currentStep ? 'bg-cyan-600 scale-125' :
+                                            idx < currentStep ? 'bg-cyan-400' : 'bg-gray-300'
+                                        }`} />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-cyan-600 flex items-center">
+                                    <span className="mr-2">💻</span>{STEPS[currentStep].title}
+                                </h2>
+                                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-teal-600 flex items-center">
+                                    <span className="mr-2">🎨</span>可视化演示
+                                </h2>
+                                <div className="h-96 overflow-auto">{renderVisualization()}</div>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-blue-600 flex items-center">
+                                    <span className="mr-2">📖</span>说明
+                                </h2>
+                                <p className="text-gray-700 leading-relaxed">{STEPS[currentStep].explanation}</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-center mt-6 space-x-4">
+                            <button onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0 ? 'bg-gray-200 text-gray-400' : 'bg-cyan-600 text-white hover:bg-cyan-700'
+                                }`}>⏮ 上一步</button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isPlaying ? 'bg-yellow-500 text-white' : 'bg-green-500 text-white'
+                                }`}>{isPlaying ? '⏸ 暂停' : '▶ 播放'}</button>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isMuted ? 'bg-red-500 text-white' : 'bg-cyan-500 text-white'
+                                }`}>{isMuted ? '🔇 取消静音' : '🔊 静音'}</button>
+                            <button onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1 ? 'bg-gray-200 text-gray-400' : 'bg-cyan-600 text-white hover:bg-cyan-700'
+                                }`}>下一步 ⏭</button>
+                        </div>
+                        <div className="text-center mt-4 text-sm text-gray-500">快捷键：空格 播放/暂停 | ← → 切换步骤</div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

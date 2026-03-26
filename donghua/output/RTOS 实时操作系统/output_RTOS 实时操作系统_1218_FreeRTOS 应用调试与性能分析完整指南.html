@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreeRTOS 应用调试与性能分析完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(20px); } }
+        @keyframes highlight { 0%, 100% { background-color: #f59e0b; } 50% { background-color: #fbbf24; } }
+        @keyframes debug { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+        @keyframes analyze { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+        @keyframes trace { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s ease-in-out infinite; }
+        .animate-highlight { animation: highlight 2s ease-in-out infinite; }
+        .animate-debug { animation: debug 1s ease-in-out infinite; }
+        .animate-analyze { animation: analyze 2s ease-in-out infinite; }
+        .animate-trace { animation: trace 3s linear infinite; }
+
+        .trace-line { transition: all 0.3s ease; }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#f59e0b',
+            secondary: '#fbbf24',
+            accent: '#fcd34d',
+            highlight: '#fde68a',
+            text: '#fef3c7',
+            bg: '#92400e'
+        };
+
+        const STEPS = [
+            { title: "调试基础配置", subtitle: "开启调试宏与断言" },
+            { title: "栈溢出检测", subtitle: "configCHECK_FOR_STACK_OVERFLOW" },
+            { title: "堆内存调试", subtitle: "内存泄漏检测与追踪" },
+            { title: "任务状态查询", subtitle: "uxTaskGetSystemState 分析" },
+            { title: "运行时统计", subtitle: "CPU 使用率与执行时间" },
+            { title: "追踪工具", subtitle: "Percepio tracealyzer 使用" },
+            { title: "常见问题排查", subtitle: "死锁、优先级反转、内存泄漏" },
+            { title: "性能优化", subtitle: " profiling 与瓶颈分析" }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [debugEnabled, setDebugEnabled] = React.useState(false);
+            const [stackOverflow, setStackOverflow] = React.useState(false);
+            const [memoryLeak, setMemoryLeak] = React.useState(false);
+            const [taskStates, setTaskStates] = React.useState([]);
+            const [cpuUsage, setCpuUsage] = React.useState(0);
+            const [traceActive, setTraceActive] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const simulateDebug = (step) => {
+                setDebugEnabled(false);
+                setStackOverflow(false);
+                setMemoryLeak(false);
+                setTraceActive(false);
+
+                switch(step) {
+                    case 0:
+                        setDebugEnabled(true);
+                        break;
+                    case 1:
+                        setDebugEnabled(true);
+                        setTimeout(() => setStackOverflow(true), 800);
+                        break;
+                    case 2:
+                        setDebugEnabled(true);
+                        setTimeout(() => setMemoryLeak(true), 800);
+                        break;
+                    case 3:
+                        const states = [
+                            { name: 'Task1', state: 'Running', priority: 3, stack: 80 },
+                            { name: 'Task2', state: 'Ready', priority: 2, stack: 60 },
+                            { name: 'Task3', state: 'Blocked', priority: 1, stack: 90 },
+                            { name: 'Idle', state: 'Ready', priority: 0, stack: 95 }
+                        ];
+                        setTaskStates(states);
+                        break;
+                    case 4:
+                        setCpuUsage(75);
+                        break;
+                    case 5:
+                        setTraceActive(true);
+                        break;
+                    case 6:
+                        setDebugEnabled(true);
+                        setStackOverflow(true);
+                        setMemoryLeak(true);
+                        break;
+                    case 7:
+                        setCpuUsage(45);
+                        break;
+                }
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    simulateDebug(currentStep);
+                    setTimeout(() => {
+                        const narration = [
+                            "调试配置是 RTOS 开发的第一步。开启 configUSE_TRACE_FACILITY、configCHECK_FOR_STACK_OVERFLOW 等宏，启用运行时检查和状态追踪功能。",
+                            "栈溢出是最常见的 RTOS 错误。启用 configCHECK_FOR_STACK_OVERFLOW=2 可检测栈边界溢出， hook 函数 vApplicationStackOverflowHook 会被调用。",
+                            "内存泄漏检测通过追踪每次 pvPortMalloc 和 vPortFree 调用。使用 heap_4 或 heap_5 时，可检测未释放的内存块。",
+                            "uxTaskGetSystemState 获取所有任务状态快照。包含任务名、状态、优先级、栈水位线。用于调试和性能分析。",
+                            "运行时统计需要 configGENERATE_RUN_TIME_STATS 启用。记录每个任务的执行时间，计算 CPU 使用率分布。",
+                            "Percepio tracealyzer 是强大的 RTOS 追踪工具。记录任务切换、IPC 操作、中断等事件，可视化分析系统行为。",
+                            "常见问题包括：死锁 (互斥量嵌套获取)、优先级反转 (使用优先级继承互斥量)、内存泄漏 (忘记释放)、栈溢出 (栈大小不足)。",
+                            "性能优化流程：启用统计→收集数据→识别瓶颈→优化代码→验证效果。重点关注高 CPU 占用任务和频繁切换。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            React.useEffect(() => {
+                if (!isPlaying) {
+                    simulateDebug(currentStep);
+                }
+            }, [currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const getStateColor = (state) => {
+                switch(state) {
+                    case 'Running': return 'bg-green-500';
+                    case 'Ready': return 'bg-yellow-500';
+                    case 'Blocked': return 'bg-blue-500';
+                    case 'Suspended': return 'bg-gray-500';
+                    default: return 'bg-gray-500';
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-amber-900 to-orange-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">FreeRTOS 应用调试与性能分析完整指南</h1>
+                            <p className="text-amber-200 text-lg">调试配置、问题排查与性能优化</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-amber-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-amber-700 text-amber-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-amber-500/30">
+                                <h3 className="text-xl font-bold text-amber-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// FreeRTOSConfig.h 调试配置
+#define configUSE_TRACE_FACILITY 1
+#define configCHECK_FOR_STACK_OVERFLOW 2
+#define configUSE_STATS_FORMATTING_FUNCTIONS 1
+#define configGENERATE_RUN_TIME_STATS 1
+#define configASSERT(x) if((x)==0) while(1)
+
+// 调试宏说明：
+// USE_TRACE_FACILITY - 启用任务状态查询
+// CHECK_FOR_STACK_OVERFLOW - 栈溢出检测 (1/2)
+// STATS_FORMATTING_FUNCTIONS - 统计格式化输出
+// GENERATE_RUN_TIME_STATS - 运行时统计
+// configASSERT - 断言检查`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 栈溢出检测
+// configCHECK_FOR_STACK_OVERFLOW = 2 (推荐)
+
+void vApplicationStackOverflowHook(
+    TaskHandle_t xTask, char* pcTaskName) {
+    // 栈溢出时调用
+    printf("栈溢出：%s\\n", pcTaskName);
+
+    // 调试：查看任务栈配置
+    // 解决：增加栈大小
+    // xTaskCreate(func, "Task", 512, ...);  // 增加栈
+
+    configASSERT(0);  // 触发断言，进入调试
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 内存泄漏检测
+// 在 heap_4.c 中添加调试支持
+static uint32_t allocCount = 0;
+static uint32_t freeCount = 0;
+
+void* pvPortMalloc(size_t xSize) {
+    allocCount++;
+    // ... 原有分配代码
+}
+
+void vPortFree(void* pv) {
+    freeCount++;
+    // ... 原有释放代码
+}
+
+// 检查泄漏
+void checkMemoryLeak(void) {
+    printf("泄漏块数：%lu\\n", allocCount - freeCount);
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 任务状态查询
+TaskStatus_t* taskStatus;
+uint32_t taskCount;
+
+void printTaskStatus(void) {
+    taskCount = uxTaskGetNumberOfTasks();
+    taskStatus = pvPortMalloc(taskCount * sizeof(TaskStatus_t));
+
+    taskCount = uxTaskGetSystemState(taskStatus, taskCount);
+
+    for (int i = 0; i < taskCount; i++) {
+        printf("任务：%s, 状态：%d, 优先级:%u, 栈水位:%u\\n",
+            taskStatus[i].pcTaskName,
+            taskStatus[i].eCurrentState,
+            taskStatus[i].uxCurrentPriority,
+            taskStatus[i].usStackHighWaterMark);
+    }
+    vPortFree(taskStatus);
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 运行时统计
+volatile uint32_t freeRunTimeStatsTicks = 0;
+
+// 提供时钟源 (在 SysTick ISR 中递增)
+void SysTick_Handler(void) {
+    freeRunTimeStatsTicks++;
+}
+
+// 获取任务 CPU 使用率
+void printCpuUsage(void) {
+    TaskStatus_t* tasks = pvPortMalloc(uxTaskGetNumberOfTasks() * sizeof(TaskStatus_t));
+    uint32_t count = uxTaskGetSystemState(tasks, uxTaskGetNumberOfTasks());
+    uint32_t totalTime = 0;
+
+    for (int i = 0; i < count; i++) {
+        totalTime += tasks[i].ulRunTimeCounter;
+    }
+
+    for (int i = 0; i < count; i++) {
+        printf("%s: %lu%%\\n", tasks[i].pcTaskName,
+            tasks[i].ulRunTimeCounter * 100 / totalTime);
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// Percepio tracealyzer 集成
+#include "trcRecorder.h"
+
+// 初始化
+void initTrace(void) {
+    vTraceInitialize();
+    vTraceStart();
+}
+
+// 任务创建时添加追踪
+xTaskCreate(vTask1, "Task1", 256, NULL, 1, NULL);
+vTraceSetTaskName(pxTaskGetTaskHandle(NULL), "Task1");
+
+// ISR 追踪
+void EXTI0_IRQHandler(void) {
+    vTraceISR_Enter(1);  // ISR ID
+    // ... 中断处理
+    vTraceISR_Exit();
+}
+
+// 数据通过 USB 发送到主机分析`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 常见问题排查
+// 1. 死锁检测 - 任务互相等待
+void checkDeadlock(void) {
+    // 检查任务是否长时间阻塞在互斥量
+    // 解决：避免嵌套获取互斥量，使用超时
+}
+
+// 2. 优先级反转 - 低优先级占用互斥量
+// 解决：使用优先级继承互斥量
+SemaphoreHandle_t xMutex = xSemaphoreCreateMutex();
+// 自动处理优先级反转
+
+// 3. 内存泄漏 - 忘记释放
+// 解决：每次 pvPortMalloc 后确保 vPortFree`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 性能优化流程
+void optimizePerformance(void) {
+    // 1. 收集基线数据
+    printTaskStatus();
+    printCpuUsage();
+
+    // 2. 识别瓶颈
+    // - 高 CPU 占用任务
+    // - 频繁切换
+    // - 长 ISR 执行时间
+
+    // 3. 优化措施
+    // - 降低不必要任务优先级
+    // - 减少临界区长度
+    // - 优化 ISR，延迟处理到任务
+    // - 调整任务执行周期
+
+    // 4. 验证效果
+    // 重新收集数据对比
+}`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => simulateDebug(currentStep)}
+                                            className="flex-1 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            ▶️ 运行模拟
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setDebugEnabled(false);
+                                                setStackOverflow(false);
+                                                setMemoryLeak(false);
+                                                setCpuUsage(50);
+                                            }}
+                                            className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            🔄 重置
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-amber-500/30">
+                                <h3 className="text-xl font-bold text-amber-400 mb-4">🔬 可视化演示</h3>
+                                <div className="space-y-4">
+                                    {/* 调试状态 */}
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className={`p-3 rounded-lg transition-all ${
+                                            debugEnabled ? 'bg-green-800/50 border border-green-500' : 'bg-gray-800'
+                                        }`}>
+                                            <div className="text-sm text-gray-300">调试模式</div>
+                                            <div className={`text-lg font-bold ${
+                                                debugEnabled ? 'text-green-400' : 'text-gray-500'
+                                            }`}>{debugEnabled ? '✅ 开启' : '❌ 关闭'}</div>
+                                        </div>
+                                        <div className={`p-3 rounded-lg transition-all ${
+                                            traceActive ? 'bg-blue-800/50 border border-blue-500' : 'bg-gray-800'
+                                        }`}>
+                                            <div className="text-sm text-gray-300">追踪激活</div>
+                                            <div className={`text-lg font-bold ${
+                                                traceActive ? 'text-blue-400' : 'text-gray-500'
+                                            }`}>{traceActive ? '✅ 运行中' : '❌ 停止'}</div>
+                                        </div>
+                                    </div>
+
+                                    {/* 问题检测 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-amber-300 mb-3">问题检测</h4>
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-300">栈溢出</span>
+                                                <div className={`w-4 h-4 rounded-full ${
+                                                    stackOverflow ? 'bg-red-500 animate-blink' : 'bg-green-500'
+                                                }`}></div>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-300">内存泄漏</span>
+                                                <div className={`w-4 h-4 rounded-full ${
+                                                    memoryLeak ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'
+                                                }`}></div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 任务状态 */}
+                                    {taskStates.length > 0 && (
+                                        <div className="bg-gray-800 rounded-lg p-4">
+                                            <h4 className="text-lg font-bold text-amber-300 mb-3">任务状态</h4>
+                                            <div className="space-y-2">
+                                                {taskStates.map((task, i) => (
+                                                    <div key={i} className="flex items-center justify-between text-sm">
+                                                        <span className="text-gray-300">{task.name}</span>
+                                                        <div className={`px-2 py-1 rounded text-xs text-white ${getStateColor(task.state)}`}>
+                                                            {task.state}
+                                                        </div>
+                                                        <span className="text-gray-400 w-12">P{task.priority}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* CPU 使用率 */}
+                                    <div className="text-center">
+                                        <div className="text-2xl font-bold text-amber-400 mb-2">
+                                            CPU 使用率：{cpuUsage > 0 ? cpuUsage : '--'}%
+                                        </div>
+                                        <div className="w-full bg-gray-700 rounded-full h-4">
+                                            <div
+                                                className="bg-gradient-to-r from-amber-500 to-red-500 h-4 rounded-full transition-all duration-500"
+                                                style={{ width: `${cpuUsage}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+
+                                    {/* 追踪时间线 */}
+                                    {traceActive && (
+                                        <div className="bg-gray-800 rounded-lg p-4 overflow-hidden">
+                                            <h4 className="text-lg font-bold text-amber-300 mb-3">事件追踪</h4>
+                                            <div className="relative h-8">
+                                                <div className="animate-trace absolute top-0 left-0 w-full h-full">
+                                                    <div className="flex gap-4">
+                                                        {[...Array(5)].map((_, i) => (
+                                                            <div key={i} className="w-8 h-8 bg-blue-500/50 rounded-full animate-pulse" style={{ animationDelay: `${i * 0.2}s` }}></div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-amber-500/30">
+                                <h3 className="text-xl font-bold text-amber-400 mb-4">📖 原理解析</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    {currentStep === 0 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 调试配置</h4>
+                                            <p>在 FreeRTOSConfig.h 中开启调试宏：configASSERT 用于断言检查，configCHECK_FOR_STACK_OVERFLOW 检测栈溢出，configUSE_TRACE_FACILITY 启用状态查询。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 栈溢出检测</h4>
+                                            <p>模式 1 检查栈边界标记，模式 2 额外检查栈指针位置。溢出时调用 vApplicationStackOverflowHook，应增加栈大小或优化局部变量。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 内存泄漏检测</h4>
+                                            <p>追踪分配/释放次数，差值即为泄漏块数。也可使用 xPortGetFreeHeapSize 监控剩余堆内存，持续下降说明有泄漏。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 任务状态查询</h4>
+                                            <p>uxTaskGetSystemState 返回所有任务状态快照，包含任务名、状态、优先级、栈水位线。栈水位线过低说明栈大小接近不足。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 运行时统计</h4>
+                                            <p>需要配置时间基准 (如 SysTick)。每个任务的 ulRunTimeCounter 记录执行时间，可计算 CPU 使用率分布，识别性能瓶颈。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 追踪工具</h4>
+                                            <p>Percepio tracealyzer 记录任务切换、IPC、中断等事件。可视化时间线帮助理解系统行为，定位时序相关问题。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 常见问题</h4>
+                                            <p>死锁：避免嵌套获取互斥量，使用超时。优先级反转：使用互斥量 (带优先级继承)。内存泄漏：确保每次分配都有释放。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 性能优化</h4>
+                                            <p>流程：收集基线→识别瓶颈→优化→验证。关注高 CPU 占用任务、频繁切换、长 ISR。优化后重新测量确保改进。</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-amber-600 hover:bg-amber-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-amber-500/30">
+                            <h2 className="text-2xl font-bold text-amber-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

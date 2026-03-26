@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1172 - extern 关键字与多文件编程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(236, 72, 153, 0.2); } 50% { background-color: rgba(236, 72, 153, 0.5); } }
+        @keyframes linkAnim { 0%, 100% { stroke-dashoffset: 0; } 50% { stroke-dashoffset: 10; } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .animate-blink { animation: blink 1s steps(2) infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+        .animate-link { animation: linkAnim 1s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#ec4899',
+            secondary: '#db2777',
+            accent: '#f472b6',
+            highlight: '#f9a8d4',
+            bg: '#831843',
+            text: '#fce7f3'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const steps = [
+                { title: 'extern 关键字概述', voice: 'extern 关键字概述。extern 是 C 语言中用于多文件编程的存储类限定符。extern 声明变量或函数具有外部链接属性，告诉编译器该符号在其他翻译单元中定义。extern 使模块化编程成为可能，是大型项目代码组织的基础。' },
+                { title: 'extern 变量声明', voice: 'extern 变量声明。extern 变量声明不分配存储空间，只是告诉编译器变量在其他地方定义。定义分配内存，声明只是引用。一个变量可以有多个 extern 声明，但只能有一个定义。这是 C 语言多文件共享全局变量的机制。' },
+                { title: 'extern 函数声明', voice: 'extern 函数声明。所有函数默认具有外部链接，可以跨文件调用。函数声明时 extern 关键字可选，通常省略。头文件中的函数声明本质上就是 extern 声明。理解这一点有助于理解链接过程。' },
+                { title: 'extern 与 static 对比', voice: 'extern 与 static 对比。extern 扩展符号可见性，使其可跨文件访问。static 限制符号可见性，使其仅在当前文件内可见。两者作用相反，extern 用于公共接口，static 用于私有实现。' },
+                { title: '头文件最佳实践', voice: '头文件最佳实践。头文件声明 extern 变量和函数，源文件定义实际变量。使用包含防护宏防止重复包含。只头文件包含必要的头文件。避免在头文件中定义变量，防止多重定义错误。' },
+                { title: '链接模型详解', voice: 'C 语言链接模型。编译单元是独立的编译过程，每个源文件编译成目标文件。链接器将多个目标文件合并成可执行文件，解析符号引用。外部链接符号可跨单元访问，内部链接符号限制在单元内。' },
+                { title: 'extern 应用场景', voice: 'extern 应用场景。一，全局配置变量。二，共享状态标志。三，单例模式实现。四，跨文件通信。五，系统级全局变量。extern 是实现模块间数据共享的标准方式。' },
+                { title: '常见问题与解决', voice: 'extern 常见问题与解决方案。问题一，重复定义错误，解决是在头文件中只声明 extern。问题二，未定义引用，解决是确保定义存在于某个编译单元。问题三，循环依赖，解决是重构头文件包含关系或使用前向声明。' }
+            ];
+
+            useEffect(() => {
+                if (!isPlaying) return;
+                const speak = () => {
+                    if (isMuted || !steps[currentStep]) return;
+                    const utterance = new SpeechSynthesisUtterance(steps[currentStep].voice);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak();
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    window.speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, isMuted]);
+
+            const ExternVariable = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>extern 变量声明与定义</h4>
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                    <div className="text-pink-300 font-bold mb-2">config.h</div>
+                                    <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`#ifndef CONFIG_H
+#define CONFIG_H
+
+// 声明 (不分配内存)
+extern int g_systemMode;
+extern const int MAX_DEVICES;
+
+#endif`}
+                                    </pre>
+                                </div>
+                                <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                    <div className="text-cyan-300 font-bold mb-2">config.c</div>
+                                    <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`#include "config.h"
+
+// 定义 (分配内存)
+int g_systemMode = 0;
+const int MAX_DEVICES = 10;
+
+// 只能在 .c 文件中定义一次`}
+                                    </pre>
+                                </div>
+                                <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                    <div className="text-purple-300 font-bold mb-2">main.c</div>
+                                    <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`#include "config.h"
+
+void main(void) {
+    // 可以访问 extern 变量
+    g_systemMode = 1;
+    int max = MAX_DEVICES;
+}`}
+                                    </pre>
+                                </div>
+                            </div>
+                            <div className="p-3 bg-amber-900/30 rounded border border-amber-600">
+                                <div className="text-amber-300 text-sm">
+                                    💡 规则：声明可多次，定义只能一次。头文件中用 extern 声明，源文件中定义
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const ExternFunction = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>extern 函数声明</h4>
+                        <div className="space-y-4">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 函数默认就是 extern 链接
+// 以下两种声明等价:
+extern void ledOn(int id);   // 显式 extern
+void ledOn(int id);          // 隐式 extern (常用)
+
+// 函数定义 (只能在一处)
+void ledOn(int id) {
+    // 实现代码
+}`}
+                            </pre>
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''}`}>
+                                    <div className="text-pink-300 font-bold mb-2">driver.h</div>
+                                    <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`#ifndef DRIVER_H
+#define DRIVER_H
+
+void ledOn(int id);
+void ledOff(int id);
+int ledGetState(int id);
+
+#endif`}
+                                    </pre>
+                                </div>
+                                <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''}`}>
+                                    <div className="text-cyan-300 font-bold mb-2">driver.c</div>
+                                    <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`#include "driver.h"
+
+void ledOn(int id) {
+    // 实现
+}
+
+void ledOff(int id) {
+    // 实现
+}
+
+int ledGetState(int id) {
+    return 0;
+}`}
+                                    </pre>
+                                </div>
+                                <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''}`}>
+                                    <div className="text-purple-300 font-bold mb-2">main.c</div>
+                                    <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`#include "driver.h"
+
+void main(void) {
+    ledOn(1);      // 跨文件调用
+    ledOff(2);
+}`}
+                                    </pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const ExternVsStatic = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>extern vs static 对比</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className={`${currentStep >= 3 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">extern (外部链接)</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// file1.c
+int globalVar = 10;    // 可被其他文件访问
+void publicFunc(void); // 可被其他文件调用
+
+// file2.c 可以访问
+extern int globalVar;
+publicFunc();`}
+                                </pre>
+                                <div className="mt-2 text-xs text-emerald-400">
+                                    ✓ 扩展可见性，用于公共接口
+                                </div>
+                            </div>
+                            <div className={`${currentStep >= 3 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-purple-400 font-bold mb-2">static (内部链接)</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// file1.c
+static int privateVar = 0;  // 仅本文件可见
+static void helper(void);   // 仅本文件可调用
+
+// file2.c 无法访问
+// extern int privateVar;  // ✗ 链接错误`}
+                                </pre>
+                                <div className="mt-2 text-xs text-purple-400">
+                                    ✓ 限制可见性，用于私有实现
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mt-4 overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-gray-600">
+                                        <th className="text-left py-2" style={{ color: COLOR_MAP.text }}>特性</th>
+                                        <th className="text-center" style={{ color: COLOR_MAP.text }}>extern</th>
+                                        <th className="text-center" style={{ color: COLOR_MAP.text }}>static</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr className="border-b border-gray-700">
+                                        <td className="py-2">可见性</td>
+                                        <td className="text-center text-emerald-300">跨文件</td>
+                                        <td className="text-center text-purple-300">本文件内</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-700">
+                                        <td className="py-2">链接类型</td>
+                                        <td className="text-center text-emerald-300">外部链接</td>
+                                        <td className="text-center text-purple-300">内部链接</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-700">
+                                        <td className="py-2">用途</td>
+                                        <td className="text-center text-emerald-300">公共接口</td>
+                                        <td className="text-center text-purple-300">私有实现</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="py-2">多定义</td>
+                                        <td className="text-center text-red-300">✗ 导致错误</td>
+                                        <td className="text-center text-purple-300">✓ 各自独立</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const LinkageModel = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>C 语言链接模型</h4>
+                        <div className="space-y-3">
+                            <div className={`${currentStep >= 5 ? 'animate-scaleIn' : ''} p-3 bg-gray-900 rounded`}>
+                                <div className="text-pink-300 font-bold mb-2">编译单元 (Translation Unit)</div>
+                                <div className="text-xs text-gray-400 mb-2">每个 .c 文件 + 包含的头文件 = 独立编译单元</div>
+                                <pre className="text-xs font-mono text-gray-300">
+{`main.c + #include → 编译 → main.o
+driver.c + #include → 编译 → driver.o
+config.c + #include → 编译 → config.o`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 5 ? 'animate-scaleIn' : ''} p-3 bg-blue-900/30 rounded border border-blue-600`}>
+                                <div className="text-blue-300 font-bold mb-2">链接器 (Linker)</div>
+                                <div className="text-xs text-gray-400 mb-2">合并目标文件，解析符号引用</div>
+                                <pre className="text-xs font-mono text-gray-300">
+{`链接命令：gcc main.o driver.o config.o -o firmware.elf
+
+链接过程:
+1. 收集所有目标文件的符号表
+2. 解析 extern 引用 → 找到定义
+3. 报告未解析符号 (链接错误)
+4. 合并代码段和数据段
+5. 生成可执行文件`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 5 ? 'animate-scaleIn' : ''} p-3 bg-emerald-900/30 rounded border border-emerald-600`}>
+                                <div className="text-emerald-300 font-bold mb-2">符号类型</div>
+                                <div className="grid grid-cols-3 gap-2 text-xs">
+                                    <div className="bg-emerald-900/50 p-2 rounded">
+                                        <div className="font-bold">外部链接</div>
+                                        <div className="text-gray-400 mt-1">全局变量、非 static 函数</div>
+                                    </div>
+                                    <div className="bg-purple-900/50 p-2 rounded">
+                                        <div className="font-bold">内部链接</div>
+                                        <div className="text-gray-400 mt-1">static 变量、static 函数</div>
+                                    </div>
+                                    <div className="bg-blue-900/50 p-2 rounded">
+                                        <div className="font-bold">无链接</div>
+                                        <div className="text-gray-400 mt-1">局部变量、函数参数</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const HeaderBestPractices = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>头文件最佳实践</h4>
+                        <div className="space-y-3">
+                            <div className={`${currentStep >= 4 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">✓ 正确做法</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// module.h
+#ifndef MODULE_H_INCLUDED
+#define MODULE_H_INCLUDED
+
+#include <stdint.h>  // 必要的包含
+
+// extern 变量声明 (不定义!)
+extern int g_moduleState;
+extern const int MODULE_VERSION;
+
+// 函数声明
+int moduleInit(void);
+void moduleProcess(void);
+
+// 宏定义
+#define MODULE_MAX_ITEMS  100
+
+#endif // MODULE_H_INCLUDED`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 4 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-red-400 font-bold mb-2">❌ 错误做法</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// module.h - 错误示例!
+#ifndef MODULE_H
+#define MODULE_H
+
+// ✗ 在头文件中定义变量!
+int g_moduleState = 0;    // 多重定义错误!
+const int VERSION = 1;    // 多重定义错误!
+
+#endif`}
+                                </pre>
+                                <div className="mt-2 text-xs text-red-400">
+                                    ⚠️ 被多个源文件包含时，会导致"多重定义"链接错误
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const UseCases = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>extern 应用场景</h4>
+                        <div className="space-y-3">
+                            <div className={`${currentStep >= 6 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-pink-400 font-bold mb-2">全局配置变量</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// config.h
+extern uint32_t g_systemClock;
+extern const char* g_deviceName;
+
+// 所有模块可访问系统配置
+void moduleInit(void) {
+    setupClock(g_systemClock);
+}`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 6 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-cyan-400 font-bold mb-2">单例模式</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// singleton.h
+typedef struct { int data; } Singleton;
+Singleton* getInstance(void);
+
+// singleton.c
+static Singleton instance = {0};
+Singleton* getInstance(void) {
+    return &instance;  // 全局唯一实例
+}`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 6 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-purple-400 font-bold mb-2">系统状态</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// system.h
+extern volatile uint32_t g_tickCount;
+extern int g_errorCode;
+
+// 中断服务程序更新
+void SysTick_Handler(void) {
+    g_tickCount++;
+}`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const CommonIssues = () => (
+                <div className="space-y-4">
+                    <div className="bg-gradient-to-r from-pink-900/50 to-rose-900/50 rounded-lg p-6">
+                        <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>常见问题与解决方案</h3>
+                        <div className="space-y-4">
+                            <div className="bg-red-900/30 p-3 rounded border border-red-600">
+                                <div className="text-red-300 font-bold mb-1">问题 1: 多重定义错误</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`// header.h
+int globalVar = 0;  // ✗ 定义，不是声明
+
+// 链接错误：globalVar 多重定义`}
+                                </pre>
+                                <div className="text-emerald-300 text-xs mt-2">✓ 解决：使用 extern 声明，在 .c 文件中定义</div>
+                            </div>
+                            <div className="bg-red-900/30 p-3 rounded border border-red-600">
+                                <div className="text-red-300 font-bold mb-1">问题 2: 未定义引用</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`// main.c
+extern int missingVar;  // 声明了但无处定义
+
+// 链接错误：undefined reference to `missingVar``}
+                                </pre>
+                                <div className="text-emerald-300 text-xs mt-2">✓ 解决：确保在某 .c 文件中定义该变量</div>
+                            </div>
+                            <div className="bg-red-900/30 p-3 rounded border border-red-600">
+                                <div className="text-red-300 font-bold mb-1">问题 3: 循环依赖</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`// a.h 包含 b.h，b.h 包含 a.h → 循环依赖
+
+// 即使有包含防护，也可能导致类型未定义错误`}
+                                </pre>
+                                <div className="text-emerald-300 text-xs mt-2">✓ 解决：重构头文件，使用前向声明，提取公共头文件</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch(currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-6">
+                                <div className="bg-gradient-to-r from-pink-900/50 to-rose-900/50 rounded-lg p-6">
+                                    <h3 className="text-2xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>extern 关键字概述</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">▸</span>
+                                            <span>用于多文件编程的存储类限定符</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">▸</span>
+                                            <span>声明变量或函数具有外部链接</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">▸</span>
+                                            <span>符号在其他翻译单元中定义</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">▸</span>
+                                            <span>模块化编程的基础机制</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300">
+{`// extern 变量声明
+extern int globalVar;     // 声明，不分配内存
+extern const int MAX;     // extern 常量
+
+// extern 函数声明 (通常省略 extern)
+extern void func(void);   // 等价于 void func(void);
+
+// 在头文件中声明
+// 在源文件中定义`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return <ExternVariable />;
+                    case 2:
+                        return <ExternFunction />;
+                    case 3:
+                        return <ExternVsStatic />;
+                    case 4:
+                        return <HeaderBestPractices />;
+                    case 5:
+                        return <LinkageModel />;
+                    case 6:
+                        return <UseCases />;
+                    case 7:
+                        return <CommonIssues />;
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-6 flex items-center justify-between">
+                            <div>
+                                <h1 className="text-3xl font-bold" style={{ color: COLOR_MAP.primary }}>
+                                    1172 - extern 关键字与多文件编程
+                                </h1>
+                                <p className="text-gray-400 mt-1">C 语言核心 · 步骤 {currentStep + 1} / {steps.length}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setIsMuted(!isMuted)}
+                                    className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-pink-600'} hover:opacity-80`}>
+                                    {isMuted ? '🔇 静音' : '🔊 语音'}
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className={`px-4 py-2 rounded ${isPlaying ? 'bg-pink-600' : 'bg-gray-600'} hover:opacity-80`}>
+                                    {isPlaying ? '⏸ 暂停' : '▶ 继续'}
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-3 gap-6">
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>代码示例</h3>
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`// header.h
+#ifndef HEADER_H
+#define HEADER_H
+
+extern int sharedVar;
+void publicFunc(void);
+
+#endif
+
+// source.c
+#include "header.h"
+int sharedVar = 0;
+void publicFunc(void) { }
+
+// main.c
+#include "header.h"
+sharedVar = 10;
+publicFunc();`}
+                                    </pre>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>关键点</h3>
+                                    <ul className="space-y-2 text-sm text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">•</span>
+                                            <span>声明不分配内存，定义分配</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">•</span>
+                                            <span>函数默认 extern，关键字可选</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">•</span>
+                                            <span>头文件 extern 声明，源文件定义</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">•</span>
+                                            <span>extern 扩展可见性，static 限制</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div className="col-span-1">
+                                <div className="bg-gray-800 rounded-lg p-6 h-full">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>
+                                        {steps[currentStep].title}
+                                    </h3>
+                                    {renderContent()}
+                                </div>
+                            </div>
+
+                            <div className="col-span-1 space-y-4">
+                                <ExternVariable />
+                                <ExternVsStatic />
+                            </div>
+                        </div>
+
+                        <footer className="mt-8 flex justify-center gap-2">
+                            {steps.map((_, idx) => (
+                                <button key={idx} onClick={() => setCurrentStep(idx)}
+                                    className={`w-3 h-3 rounded-full transition-all ${idx === currentStep ? 'w-8' : ''}`}
+                                    style={{ backgroundColor: idx <= currentStep ? COLOR_MAP.primary : '#374151' }} />
+                            ))}
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

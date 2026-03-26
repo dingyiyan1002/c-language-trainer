@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1131 - 复合字面量 Compound Literal | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .highlight { box-shadow: 0 0 20px rgba(236, 72, 153, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(236, 72, 153, 0.2); border-left: 3px solid #ec4899; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#ec4899', primaryLight: '#f472b6',
+      secondary: '#db2777', secondaryLight: '#f472b6',
+      accent: '#14b8a6', accentLight: '#2dd4bf',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== 复合字面量 Compound Literal (C99) =====
+// 创建匿名的临时对象
+
+// 1. 基本用法
+int* ptr = (int[]){1, 2, 3, 4, 5};  // 匿名数组
+printf("%d\\n", ptr[2]);  // 3
+
+// 2. 结构体字面量
+typedef struct { int x, y, z; } Vec3;
+
+void draw_line(Vec3 start, Vec3 end) {
+  // ...
+}
+
+// 调用时直接创建临时对象
+draw_line((Vec3){0, 0, 0}, (Vec3){10, 20, 30});
+
+// 3. 指定初始化器结合
+Vec3 v = (Vec3){.y = 5, .x = 3};  // z=0(默认)
+
+// 4. 栈上临时数组
+void process() {
+  int* data = (int[]){10, 20, 30, 40, 50};
+  send_data(data, 5);
+  // 函数返回后 data 失效
+}`;
+
+    const VOICE_TEXT_MAP = {
+      1: "第一千一百三十一题，复合字面量 Compound Literal。",
+      2: "复合字面量是 C99 引入的特性，允许创建匿名的临时对象，包括数组和结构体。",
+      3: "匿名数组字面量创建栈上的临时数组，返回指向第一个元素的指针。",
+      4: "结构体字面量允许直接传递临时结构体对象，无需先声明变量。",
+      5: "复合字面量可以和指定初始化器结合，只设置需要的字段。",
+      6: "复合字面量创建的对象有自动存储期，函数返回后失效。",
+      7: "典型应用：API 调用时直接传递临时对象、回调数据、配置参数。",
+      8: "注意：不要返回指向复合字面量的指针，函数返回后对象被销毁。"
+    };
+
+    const MAX_STEPS = 8;
+
+    function App() {
+      const [step, setStep] = useState(1);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+      const [voiceRate, setVoiceRate] = useState(1);
+      const voiceEndTimerRef = useRef(null);
+
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if (voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if (!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if (voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate]);
+
+      useEffect(() => {
+        if (isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+
+      const handleStepChange = (newStep) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsVoicePlaying(false);
+        setStep(newStep);
+      };
+
+      const togglePlay = () => {
+        if (step >= MAX_STEPS) {
+          handleStepChange(1);
+          setTimeout(() => setIsPlaying(true), 100);
+        } else {
+          setIsPlaying(!isPlaying);
+        }
+      };
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="bg-gradient-to-r from-pink-900/50 via-rose-900/50 to-fuchsia-900/50 rounded-xl p-6 mb-4 border border-pink-700/50">
+            <h1 className="text-3xl font-bold text-pink-400 mb-2">1131 - 复合字面量</h1>
+            <p className="text-pink-300 text-sm">C99 匿名对象 / 临时结构体 / 临时数组</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-pink-700/30">
+              <h2 className="text-lg font-semibold text-pink-400 mb-3">代码展示</h2>
+              <pre className="text-xs text-gray-300 overflow-x-auto bg-gray-900/50 p-3 rounded-lg font-mono leading-relaxed">
+                {CODE.split('\n').map((line, i) => (
+                  <div key={i} className={`code-line ${
+                    (step === 2 && i >= 4 && i <= 4) ||
+                    (step === 3 && i >= 4 && i <= 6) ||
+                    (step === 4 && i >= 10 && i <= 15) ||
+                    (step === 5 && i >= 18 && i <= 18) ||
+                    (step === 6 && i >= 21 && i <= 24) ||
+                    (step === 7 && i >= 10 && i <= 15)
+                    ? 'active' : ''
+                  }`}>{line || '\u00A0'}</div>
+                ))}
+              </pre>
+            </div>
+
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-pink-700/30">
+              <h2 className="text-lg font-semibold text-pink-400 mb-3">可视化演示</h2>
+              <div className="space-y-4">
+                {step === 1 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-pink-600/20 to-rose-600/20 rounded-lg border border-pink-500/30">
+                    <p className="text-pink-300 text-sm font-medium mb-2">💡 复合字面量</p>
+                    <p className="text-xs text-gray-400">复合字面量是 C99 引入的特性，允许在表达式中创建匿名的临时对象，简化代码并提高可读性。</p>
+                  </div>
+                )}
+                {step === 2 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-pink-600/20 to-rose-600/20 rounded-lg border border-pink-500/30">
+                    <p className="text-pink-300 text-sm font-medium mb-2">语法格式</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div className="text-pink-400">(type-name){ initializer };</div>
+                      </div>
+                      <div className="text-pink-400 text-center text-xs">
+                        类型名加括号，后跟初始化器<br/>
+                        创建该类型的匿名临时对象
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 3 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-pink-600/20 to-rose-600/20 rounded-lg border border-pink-500/30">
+                    <p className="text-pink-300 text-sm font-medium mb-2">匿名数组字面量</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div className="text-pink-400">int* ptr = (int[]){1, 2, 3, 4, 5};</div>
+                      </div>
+                      <div className="flex items-center gap-0">
+                        <div className="w-12 h-8 bg-pink-600/50 border border-pink-400 flex items-center justify-center text-xs">1</div>
+                        <div className="w-12 h-8 bg-rose-600/50 border border-rose-400 flex items-center justify-center text-xs">2</div>
+                        <div className="w-12 h-8 bg-fuchsia-600/50 border border-fuchsia-400 flex items-center justify-center text-xs">3</div>
+                        <div className="w-12 h-8 bg-pink-600/30 border border-pink-400 flex items-center justify-center text-xs">4</div>
+                        <div className="w-12 h-8 bg-pink-600/30 border border-pink-400 flex items-center justify-center text-xs">5</div>
+                      </div>
+                      <div className="text-pink-400 text-center text-xs">
+                        栈上临时数组，ptr 指向第一个元素
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 4 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-pink-600/20 to-rose-600/20 rounded-lg border border-pink-500/30">
+                    <p className="text-pink-300 text-sm font-medium mb-2">结构体字面量</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono text-xs">
+                        <div>typedef struct {'{'} int x, y, z; {'}'} Vec3;</div>
+                        <div>void draw_line(Vec3 start, Vec3 end);</div>
+                      </div>
+                      <div className="p-2 bg-pink-900/20 rounded border border-pink-500/30 font-mono text-xs">
+                        <div className="text-pink-400">draw_line(</div>
+                        <div>&nbsp;&nbsp;(Vec3){0, 0, 0},</div>
+                        <div>&nbsp;&nbsp;(Vec3){10, 20, 30}</div>
+                        <div className="text-pink-400">);</div>
+                      </div>
+                      <div className="text-pink-400 text-center text-xs">
+                        无需先声明变量，直接传递临时对象!
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 5 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-pink-600/20 to-rose-600/20 rounded-lg border border-pink-500/30">
+                    <p className="text-pink-300 text-sm font-medium mb-2">指定初始化器</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div className="text-pink-400">Vec3 v = (Vec3){.y = 5, .x = 3};</div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-2 bg-pink-900/20 rounded border border-pink-500/30">
+                          <div className="text-pink-400 text-xs">x</div>
+                          <div className="text-green-400 text-xs">= 3</div>
+                        </div>
+                        <div className="p-2 bg-rose-900/20 rounded border border-rose-500/30">
+                          <div className="text-rose-400 text-xs">y</div>
+                          <div className="text-green-400 text-xs">= 5</div>
+                        </div>
+                        <div className="p-2 bg-fuchsia-900/20 rounded border border-fuchsia-500/30">
+                          <div className="text-fuchsia-400 text-xs">z</div>
+                          <div className="text-gray-400 text-xs">= 0 (默认)</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 6 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-pink-600/20 to-rose-600/20 rounded-lg border border-pink-500/30">
+                    <p className="text-pink-300 text-sm font-medium mb-2">存储期</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div>void process() {'{'}</div>
+                        <div className="text-pink-400">&nbsp;&nbsp;int* data = (int[]){10, 20, 30};</div>
+                        <div>&nbsp;&nbsp;send_data(data, 5);</div>
+                        <div>{'}'}</div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                          <div className="text-green-400 text-xs">函数内</div>
+                          <div className="text-gray-400 text-xs">✅ 有效</div>
+                        </div>
+                        <div className="p-2 bg-red-900/20 rounded border border-red-500/30">
+                          <div className="text-red-400 text-xs">返回后</div>
+                          <div className="text-gray-400 text-xs">❌ 失效</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 7 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-pink-900/20 rounded-lg border border-pink-500/30">
+                      <p className="text-pink-300 text-xs font-medium mb-2">📋 典型应用</p>
+                      <div className="text-xs text-gray-400 font-mono space-y-2">
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-green-400">// 1. API 调用传临时对象</div>
+                          <div>draw_rect((Rect){.x=0, .y=0, .w=100, .h=50});</div>
+                        </div>
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-green-400">// 2. 回调数据</div>
+                          <div>queue_push((Event){.type=CLICK, .x=mx, .y=my});</div>
+                        </div>
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-green-400">// 3. 配置参数</div>
+                          <div>init_system((Config){.verbose=1, .timeout=30});</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 8 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-pink-900/20 rounded-lg border border-pink-500/30">
+                      <p className="text-pink-300 text-xs font-medium mb-2">⚠️ 注意事项</p>
+                      <ul className="text-xs text-gray-400 space-y-2">
+                        <li>• <span className="text-red-400">不要返回指针</span>: 函数返回后复合字面量被销毁</li>
+                        <li>• <span className="text-orange-400">非常量对象</span>: 复合字面量是可修改的左值</li>
+                        <li>• <span className="text-blue-400">存储期</span>: 函数内是自动存储期，文件作用域是静态存储期</li>
+                        <li>• <span className="text-green-400">类型安全</span>: 编译器会检查类型匹配</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-pink-700/30">
+                <h2 className="text-lg font-semibold text-pink-400 mb-3">关键点说明</h2>
+                <div className="space-y-2 text-sm">
+                  <div className={`p-2 rounded transition-colors ${step >= 2 ? 'bg-pink-900/30 text-pink-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">①</span> 创建匿名临时对象
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 4 ? 'bg-pink-900/30 text-pink-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">②</span> 简化函数调用传参
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 6 ? 'bg-pink-900/30 text-pink-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">③</span> 注意对象生命周期
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-pink-700/30">
+                <h2 className="text-lg font-semibold text-pink-400 mb-3">对比学习</h2>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-pink-900/20 rounded border border-pink-500/30">
+                    <p className="text-pink-300 font-medium">传统方式</p>
+                    <pre className="text-gray-400 font-mono text-xs">Vec3 a = {0,0,0}; Vec3 b = {10,20,30}; draw_line(a, b);</pre>
+                  </div>
+                  <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                    <p className="text-green-300 font-medium">复合字面量</p>
+                    <pre className="text-gray-400 font-mono text-xs">draw_line((Vec3){0,0,0}, (Vec3){10,20,30});</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-gray-800/80 rounded-xl p-4 border border-pink-700/30">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <button onClick={togglePlay} className={`px-4 py-2 rounded-lg font-medium transition-colors ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-pink-600 hover:bg-pink-700'} text-white`}>
+                  {step >= MAX_STEPS ? '🔄 重新播放' : isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                </button>
+                <button onClick={() => handleStepChange(Math.max(1, step - 1))} disabled={step <= 1} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  ◀ 上一步
+                </button>
+                <span className="text-pink-400 font-medium px-3">步骤 {step} / {MAX_STEPS}</span>
+                <button onClick={() => handleStepChange(Math.min(MAX_STEPS, step + 1))} disabled={step >= MAX_STEPS} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  下一步 ▶
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-pink-300">
+                  语速：
+                  <input type="range" min="0.5" max="1.5" step="0.1" value={voiceRate} onChange={(e) => setVoiceRate(parseFloat(e.target.value))} className="ml-2 w-24" />
+                  <span className="ml-2 text-pink-400">{voiceRate.toFixed(1)}x</span>
+                </label>
+                {isVoicePlaying && <span className="text-pink-400 animate-pulse">🔊 语音播放中...</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

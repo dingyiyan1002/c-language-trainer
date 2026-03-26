@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 DMA 数据传输完整指南 - Direct Memory Access</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { stroke-dashoffset: 100; } 100% { stroke-dashoffset: 0; } }
+        @keyframes transfer { 0% { transform: translateX(0) scale(1); } 50% { transform: translateX(50px) scale(0.8); } 100% { transform: translateX(100px) scale(1); } }
+        @keyframes dmaCycle { 0%, 100% { background-color: #8b5cf6; } 50% { background-color: #a78bfa; } }
+        @keyframes dataPacket { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+        .data-transfer { animation: transfer 1s ease-in-out infinite; }
+        .dma-cycle { animation: dmaCycle 0.5s ease-in-out infinite; }
+        .packet-flow { animation: dataPacket 2s linear infinite; }
+        .active-step { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#8b5cf6', primaryLight: '#a78bfa', primaryDark: '#7c3aed',
+            secondary: '#3b82f6', success: '#22c55e', warning: '#f59e0b',
+            peripheral: '#f97316', memory: '#3b82f6', dma: '#8b5cf6', interrupt: '#ef4444',
+            gradient: 'from-violet-500 via-purple-600 to-indigo-500'
+        };
+
+        const STEPS = [
+            {
+                title: 'DMA 基础',
+                voice: 'DMA 是直接内存访问控制器，在外设和内存之间直接传输数据，无需 CPU 干预。STM32F103 有 2 个 DMA 控制器，共 12 个通道，支持最高 65535 次传输。',
+                highlights: ['DMA', '零 CPU', '12 通道', '65535 次', '高速传输']
+            },
+            {
+                title: '工作原理',
+                voice: 'DMA 传输由三个要素组成：源地址、目标地址和传输数量。DMA 控制器接管总线，逐个搬运数据，完成后产生中断通知 CPU。CPU 在传输期间可执行其他任务。',
+                highlights: ['源地址', '目标地址', '传输数', '总线接管', '中断通知']
+            },
+            {
+                title: '传输方向',
+                voice: 'DMA 支持三种传输方向：外设到内存，如 ADC 采样；内存到外设，如 DAC 输出；内存到内存，用于数据块复制。每种方向配置不同的源和目标地址。',
+                highlights: ['外设→内存', '内存→外设', '内存→内存', 'ADC 采样', 'DAC 输出']
+            },
+            {
+                title: '地址递增',
+                voice: '地址递增模式决定传输后地址是否自动增加。外设地址通常不递增，因为数据寄存器地址固定。内存地址通常递增，实现连续存储。可配置半传输和全传输中断。',
+                highlights: ['地址递增', '外设固定', '内存递增', '半传输', '全传输']
+            },
+            {
+                title: '循环模式',
+                voice: '循环模式下，DMA 传输完成后自动重新开始，形成连续数据流。适用于 ADC 连续采样、音频缓冲区填充等场景。配置Circular 位启用循环模式。',
+                highlights: ['循环模式', '自动重载', '连续流', 'ADC 采样', 'Circular']
+            },
+            {
+                title: '优先级',
+                voice: '每个 DMA 通道可配置四个优先级：低、中、高、非常高。高优先级通道可打断低优先级传输。同优先级按通道编号仲裁，编号小优先。',
+                highlights: ['4 优先级', '低中高', '抢占', '仲裁', '通道编号']
+            },
+            {
+                title: '常用外设',
+                voice: 'DMA 常用于 ADC 采样缓冲、SPI/I2S 音频流、USART 大数据收发、TIM PWM 更新。每个外设固定映射到特定 DMA 通道，查阅参考手册确认映射关系。',
+                highlights: ['ADC 缓冲', 'SPI/I2S', 'USART', 'TIM PWM', '通道映射']
+            },
+            {
+                title: '应用实例',
+                voice: '实际应用：ADC+DMA 实现 1MHz 采样，SPI+DMA 驱动 OLED 屏幕，USART+DMA 发送大数据包。注意缓存一致性问题，大传输建议使用中断确认完成。',
+                highlights: ['1MHz 采样', 'OLED 驱动', '大包发送', '缓存一致', '中断确认']
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [showTransfer, setShowTransfer] = React.useState(false);
+            const [transferProgress, setTransferProgress] = React.useState(0);
+            const [transferMode, setTransferMode] = React.useState('normal');
+            const [priority, setPriority] = React.useState('high');
+            const [dataBuffer, setDataBuffer] = React.useState(Array(16).fill(0));
+            const [transferCount, setTransferCount] = React.useState(16);
+            const [isTransferring, setIsTransferring] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                const utterance = new SpeechSynthesisUtterance(STEPS[currentStep].voice);
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang.includes('zh-CN') && v.name.includes('Xiaoxiao'))
+                    || voices.find(v => v.lang.includes('zh-CN'))
+                    || voices.find(v => v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                if (isPlaying) speechSynthesis.speak(utterance);
+
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying]);
+
+            const handlePlay = () => setIsPlaying(true);
+            const handlePause = () => {
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+            const handleRestart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+            };
+            const handleStepClick = (index) => {
+                setCurrentStep(index);
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+
+            const startTransfer = () => {
+                if (isTransferring) return;
+                setIsTransferring(true);
+                setTransferProgress(0);
+                setDataBuffer(Array(16).fill(0));
+
+                const interval = setInterval(() => {
+                    setTransferProgress(prev => {
+                        if (prev >= transferCount) {
+                            clearInterval(interval);
+                            setIsTransferring(false);
+                            if (transferMode === 'circular') {
+                                setTimeout(startTransfer, 500);
+                            }
+                            return prev;
+                        }
+                        setDataBuffer(buf => {
+                            const newBuf = [...buf];
+                            newBuf[prev] = Math.floor(Math.random() * 256);
+                            return newBuf;
+                        });
+                        return prev + 1;
+                    });
+                }, 100);
+            };
+
+            const renderTransferAnimation = () => (
+                <div className="bg-gray-800 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-4">
+                        <span className="text-sm text-gray-400">DMA 数据传输动画</span>
+                        <span className={`text-xs px-2 py-1 rounded ${isTransferring ? 'bg-green-600' : 'bg-gray-600'}`}>
+                            {isTransferring ? '传输中' : '空闲'}
+                        </span>
+                    </div>
+                    <div className="relative h-32 bg-gray-900 rounded-lg overflow-hidden">
+                        {/* 外设端 */}
+                        <div className="absolute left-4 top-1/2 transform -translate-y-1/2">
+                            <div className="bg-orange-900 rounded-lg p-3 text-center">
+                                <div className="text-xs text-gray-400">外设</div>
+                                <div className="font-bold text-orange-400">DR</div>
+                            </div>
+                        </div>
+                        {/* DMA 控制器 */}
+                        <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                            <div className={`bg-purple-900 rounded-lg p-3 text-center ${isTransferring ? 'dma-cycle' : ''}`}>
+                                <div className="text-xs text-gray-400">DMA</div>
+                                <div className="font-bold text-purple-400">控制器</div>
+                            </div>
+                        </div>
+                        {/* 内存端 */}
+                        <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
+                            <div className="bg-blue-900 rounded-lg p-3 text-center">
+                                <div className="text-xs text-gray-400">内存</div>
+                                <div className="font-bold text-blue-400">Buffer</div>
+                            </div>
+                        </div>
+                        {/* 数据流动画 */}
+                        {isTransferring && (
+                            <>
+                                <div className="absolute top-8 left-16 right-16 h-1 bg-gray-700 rounded"></div>
+                                <div className="absolute top-8 left-16 h-4 w-4 bg-green-500 rounded-full packet-flow"></div>
+                            </>
+                        )}
+                    </div>
+                    <div className="mt-4">
+                        <div className="flex justify-between text-xs text-gray-400 mb-1">
+                            <span>进度</span>
+                            <span>{transferProgress} / {transferCount}</span>
+                        </div>
+                        <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-gradient-to-r from-purple-600 to-blue-600 transition-all"
+                                style={{ width: `${(transferProgress / transferCount) * 100}%` }}
+                            ></div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch (currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">STM32 DMA 规格</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">DMA 控制器</div>
+                                            <div className="text-2xl font-bold text-purple-400">2 个</div>
+                                            <div className="text-xs text-gray-400">DMA1 + DMA2</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">通道总数</div>
+                                            <div className="text-2xl font-bold text-blue-400">12</div>
+                                            <div className="text-xs text-gray-400">DMA1(7)+DMA2(5)</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">最大传输数</div>
+                                            <div className="text-2xl font-bold text-green-400">65535</div>
+                                            <div className="text-xs text-gray-400">16 位计数器</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">优先级</div>
+                                            <div className="text-2xl font-bold text-orange-400">4 级</div>
+                                            <div className="text-xs text-gray-400">低/中/高/非常高</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-purple-900 to-indigo-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">DMA 主要优势:</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> CPU 零负载，并行执行</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 高速数据传输</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 降低中断延迟</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 精确时序控制</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 降低功耗</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">DMA 传输三要素</h3>
+                                    <div className="space-y-3">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-orange-400">1. 源地址 (Source)</span>
+                                                <span className="text-xs text-gray-400">PAR 寄存器</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mt-1">外设数据寄存器地址，如 ADC1->DR</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-blue-400">2. 目标地址 (Destination)</span>
+                                                <span className="text-xs text-gray-400">MAR 寄存器</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mt-1">内存缓冲区地址，如 adc_buffer[]</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-green-400">3. 传输数量 (Count)</span>
+                                                <span className="text-xs text-gray-400">NDTR 寄存器</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mt-1">要传输的数据个数，1-65535</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-indigo-400">传输流程</h3>
+                                    <div className="flex items-center gap-2 overflow-x-auto">
+                                        <div className="bg-purple-600 rounded px-3 py-2 text-sm font-bold">1. 配置</div>
+                                        <div className="text-purple-400">→</div>
+                                        <div className="bg-blue-600 rounded px-3 py-2 text-sm font-bold">2. 使能</div>
+                                        <div className="text-purple-400">→</div>
+                                        <div className="bg-green-600 rounded px-3 py-2 text-sm font-bold">3. 传输</div>
+                                        <div className="text-purple-400">→</div>
+                                        <div className="bg-orange-600 rounded px-3 py-2 text-sm font-bold">4. 中断</div>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 2:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">传输方向配置</h3>
+                                    <div className="space-y-3">
+                                        <div className="bg-gray-900 rounded p-3 border-2 border-orange-500">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-orange-400">外设 → 内存</span>
+                                                <span className="text-xs text-gray-400">DIR=0</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mb-2">从外设数据寄存器读取，写入内存</div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="bg-orange-900 rounded px-2 py-1 text-xs">ADC_DR</div>
+                                                <div className="text-orange-400">→</div>
+                                                <div className="bg-blue-900 rounded px-2 py-1 text-xs">adc_buffer[]</div>
+                                            </div>
+                                            <div className="mt-2 text-xs text-green-400">应用：ADC 采样、UART 接收</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3 border-2 border-blue-500">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-blue-400">内存 → 外设</span>
+                                                <span className="text-xs text-gray-400">DIR=1</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mb-2">从内存读取，写入外设数据寄存器</div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="bg-blue-900 rounded px-2 py-1 text-xs">dac_buffer[]</div>
+                                                <div className="text-blue-400">→</div>
+                                                <div className="bg-orange-900 rounded px-2 py-1 text-xs">DAC_DHR</div>
+                                            </div>
+                                            <div className="mt-2 text-xs text-green-400">应用：DAC 输出、UART 发送</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3 border-2 border-purple-500">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-purple-400">内存 → 内存</span>
+                                                <span className="text-xs text-gray-400">MEM2MEM=1</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mb-2">内存块复制，不经过外设</div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="bg-blue-900 rounded px-2 py-1 text-xs">src[]</div>
+                                                <div className="text-purple-400">→</div>
+                                                <div className="bg-blue-900 rounded px-2 py-1 text-xs">dst[]</div>
+                                            </div>
+                                            <div className="mt-2 text-xs text-green-400">应用：大数据块复制</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 3:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">地址递增模式</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-red-400">地址递增</span>
+                                                <span className="text-xs text-gray-400">INC=1</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mb-2">每次传输后地址自动 +1</div>
+                                            <div className="space-y-1">
+                                                <div className="flex gap-1">
+                                                    <div className="w-8 h-6 bg-blue-600 rounded text-xs flex items-center justify-center">0x00</div>
+                                                    <div className="w-8 h-6 bg-blue-600 rounded text-xs flex items-center justify-center">0x01</div>
+                                                    <div className="w-8 h-6 bg-blue-600 rounded text-xs flex items-center justify-center">0x02</div>
+                                                </div>
+                                            </div>
+                                            <div className="mt-2 text-xs text-green-400">适用于：内存缓冲区</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-orange-400">地址固定</span>
+                                                <span className="text-xs text-gray-400">INC=0</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mb-2">始终访问同一地址</div>
+                                            <div className="space-y-1">
+                                                <div className="flex gap-1">
+                                                    <div className="w-8 h-6 bg-orange-600 rounded text-xs flex items-center justify-center">DR</div>
+                                                    <div className="w-8 h-6 bg-orange-600 rounded text-xs flex items-center justify-center">DR</div>
+                                                    <div className="w-8 h-6 bg-orange-600 rounded text-xs flex items-center justify-center">DR</div>
+                                                </div>
+                                            </div>
+                                            <div className="mt-2 text-xs text-green-400">适用于：外设数据寄存器</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-purple-900 to-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">📌 中断配置</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• TCIE: 传输完成中断</li>
+                                        <li>• HTIE: 半传输中断 (用于双缓冲)</li>
+                                        <li>• TEIE: 传输错误中断</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 4:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">循环模式 vs 普通模式</h3>
+                                    <div className="space-y-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-blue-400">普通模式 (Normal)</span>
+                                                <span className="text-xs text-gray-400">CIRC=0</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mb-2">传输完成后停止，需要重新配置</div>
+                                            <div className="flex items-center gap-1">
+                                                {[...Array(8)].map((_, i) => (
+                                                    <div key={i} className={`w-8 h-8 rounded ${i < 5 ? 'bg-blue-600' : 'bg-gray-700'}`}></div>
+                                                ))}
+                                                <div className="text-gray-500 text-xl ml-2">→ ⏹</div>
+                                            </div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3 border-2 border-green-500">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-green-400">循环模式 (Circular)</span>
+                                                <span className="text-xs text-gray-400">CIRC=1</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mb-2">传输完成后自动重载，连续循环</div>
+                                            <div className="flex items-center gap-1">
+                                                {[...Array(8)].map((_, i) => (
+                                                    <div key={i} className="w-8 h-8 bg-green-600 rounded animate-pulse" style={{ animationDelay: `${i * 0.1}s` }}></div>
+                                                ))}
+                                                <div className="text-green-500 text-xl ml-2">↻</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-green-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-green-400">✓ 循环模式应用</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• ADC 连续采样缓冲</li>
+                                        <li>• 音频数据流处理</li>
+                                        <li>• UART 环形缓冲区</li>
+                                        <li>• 实时数据采集</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 5:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">优先级配置</h3>
+                                    <div className="space-y-2">
+                                        {[
+                                            { level: 'low', label: '低优先级', color: 'gray', pl: '00' },
+                                            { level: 'medium', label: '中优先级', color: 'blue', pl: '01' },
+                                            { level: 'high', label: '高优先级', color: 'purple', pl: '10' },
+                                            { level: 'very_high', label: '非常高', color: 'red', pl: '11' }
+                                        ].map((p) => (
+                                            <button
+                                                key={p.level}
+                                                onClick={() => setPriority(p.level)}
+                                                className={`w-full p-3 rounded-lg text-left transition-all ${
+                                                    priority === p.level
+                                                        ? `bg-${p.color}-600 ring-2 ring-white`
+                                                        : 'bg-gray-900 hover:bg-gray-800'
+                                                }`}
+                                            >
+                                                <div className="flex justify-between items-center">
+                                                    <span className="font-bold">{p.label}</span>
+                                                    <span className="text-xs text-gray-400 font-mono">PL={p.pl}</span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-purple-900 to-red-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">⚡ 优先级规则</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 高优先级可打断低优先级传输</li>
+                                        <li>• 同优先级按通道编号仲裁</li>
+                                        <li>• 编号小的通道优先</li>
+                                        <li>• DMA2 优先级高于 DMA1</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 6:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">DMA 通道映射</h3>
+                                    <div className="bg-gray-900 rounded p-4 overflow-x-auto">
+                                        <table className="w-full text-xs">
+                                            <thead>
+                                                <tr className="border-b border-gray-700">
+                                                    <th className="text-left py-2 text-purple-400">外设</th>
+                                                    <th className="text-center text-blue-400">DMA1</th>
+                                                    <th className="text-center text-indigo-400">DMA2</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr className="border-b border-gray-800">
+                                                    <td className="py-2">ADC1</td>
+                                                    <td className="text-center">通道 1</td>
+                                                    <td className="text-center text-gray-600">-</td>
+                                                </tr>
+                                                <tr className="border-b border-gray-800">
+                                                    <td className="py-2">SPI1</td>
+                                                    <td className="text-center">通道 2/3</td>
+                                                    <td className="text-center text-gray-600">-</td>
+                                                </tr>
+                                                <tr className="border-b border-gray-800">
+                                                    <td className="py-2">USART1</td>
+                                                    <td className="text-center">通道 4/5</td>
+                                                    <td className="text-center text-gray-600">-</td>
+                                                </tr>
+                                                <tr className="border-b border-gray-800">
+                                                    <td className="py-2">I2C1</td>
+                                                    <td className="text-center">通道 6/7</td>
+                                                    <td className="text-center text-gray-600">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td className="py-2">TIM2/3/4</td>
+                                                    <td className="text-center">通道 1-7</td>
+                                                    <td className="text-center text-gray-600">-</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div className="bg-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-blue-400">📋 查阅手册</h4>
+                                    <p className="text-sm text-gray-300">具体映射关系请参考 STM32F103 参考手册第 8 章 DMA 章节的通道选择表。</p>
+                                </div>
+                            </div>
+                        );
+                    case 7:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">STM32 代码实现</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// DMA 初始化 (ADC 采样)
+void DMA_ADC_Init(uint32_t *addr, uint16_t len) {
+    // 1. 使能 DMA 时钟
+    RCC->AHBENR |= RCC_AHBENR_DMA1EN;
+
+    // 2. 配置通道 1 (ADC1)
+    DMA1_Channel1->CCR = 0;  // 禁用
+
+    // 3. 设置传输参数
+    DMA1_Channel1->CPAR = (uint32_t)&ADC1->DR;  // 源地址
+    DMA1_Channel1->CMAR = (uint32_t)addr;       // 目标地址
+    DMA1_Channel1->CNDTR = len;                 // 数量
+
+    // 4. 配置：外设→内存，循环模式，优先级高
+    DMA1_Channel1->CCR = DMA_CCR_PL |          // 高优先级
+                         DMA_CCR_MSIZE_0 |      // 内存 16 位
+                         DMA_CCR_PSIZE_0 |      // 外设 16 位
+                         DMA_CCR_MINC |         // 内存递增
+                         DMA_CCR_CIRC |         // 循环模式
+                         DMA_CCR_TCIE;          // 传输完成中断
+
+    // 5. 使能通道
+    DMA1_Channel1->CCR |= DMA_CCR_EN;
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-indigo-400">中断处理函数</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// DMA1 通道 1 中断处理
+void DMA1_Channel1_IRQHandler(void) {
+    // 检查传输完成标志
+    if (DMA1->ISR & DMA_ISR_TCIF1) {
+        // 清除标志
+        DMA1->IFCR = DMA_IFCR_CGIF1;
+
+        // 处理数据 (如计算平均值、FFT 等)
+        ADC_ProcessBuffer(adc_buffer, ADC_BUFFER_SIZE);
+    }
+}
+
+// 启动 DMA 传输
+void DMA_Start(void) {
+    DMA1_Channel1->CCR |= DMA_CCR_EN;
+}
+
+// 停止 DMA 传输
+void DMA_Stop(void) {
+    DMA1_Channel1->CCR &= ~DMA_CCR_EN;
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-green-900 to-purple-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">💡 实战技巧</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 大缓冲区：使用 HSI 运行时关闭缓存</li>
+                                        <li>• 双缓冲：HTIE 半传输中断切换</li>
+                                        <li>• 错误处理：TEIE 捕获总线错误</li>
+                                        <li>• 调试：观察 CNDTR 剩余计数</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-4">
+                            <h1 className="text-2xl font-bold bg-gradient-to-r from-violet-400 via-purple-500 to-indigo-400 bg-clip-text text-transparent">
+                                STM32 DMA 数据传输完整指南
+                            </h1>
+                            <p className="text-sm text-gray-400">零 CPU 负载 · 高速传输 · 循环模式 · 优先级仲裁</p>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 justify-center">
+                            {!isPlaying ? (
+                                <button onClick={handlePlay} className="px-4 py-2 bg-green-600 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                                    <span>▶</span> 播放
+                                </button>
+                            ) : (
+                                <button onClick={handlePause} className="px-4 py-2 bg-yellow-600 rounded-lg hover:bg-yellow-700 transition-colors flex items-center gap-2">
+                                    <span>⏸</span> 暂停
+                                </button>
+                            )}
+                            <button onClick={handleRestart} className="px-4 py-2 bg-purple-600 rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2">
+                                <span>🔄</span> 重新开始
+                            </button>
+                            <button
+                                onClick={() => setShowTransfer(!showTransfer)}
+                                className={`px-4 py-2 rounded-lg transition-colors ${showTransfer ? 'bg-purple-600' : 'bg-gray-600'} hover:opacity-80`}
+                            >
+                                {showTransfer ? '隐藏动画' : '显示动画'}
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 overflow-x-auto justify-center">
+                            {STEPS.map((step, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => handleStepClick(index)}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                                        index === currentStep
+                                            ? `bg-gradient-to-r ${COLOR_MAP.gradient} text-white shadow-lg`
+                                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                    }`}
+                                >
+                                    {index + 1}. {step.title}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">代码区</h3>
+                                <div className="bg-gray-900 rounded p-3 font-mono text-xs overflow-x-auto">
+                                    <pre className="text-green-400">{`// DMA 操作函数
+void DMA_Init(void);
+void DMA_Start(void);
+void DMA_Stop(void);
+uint8_t DMA_IsComplete(void);
+void DMA_ConfigChannel(uint32_t dir,
+                       uint32_t mode,
+                       uint32_t priority);`}</pre>
+                                </div>
+                                <div className="mt-4 space-y-2">
+                                    <div className="text-xs text-gray-400 mb-2">传输模式:</div>
+                                    <label className="flex items-center gap-2 bg-gray-900 rounded p-2 cursor-pointer">
+                                        <input type="radio" checked={transferMode === 'normal'} onChange={() => setTransferMode('normal')} className="w-4 h-4"/>
+                                        <span className="text-sm">普通模式</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 bg-gray-900 rounded p-2 cursor-pointer">
+                                        <input type="radio" checked={transferMode === 'circular'} onChange={() => setTransferMode('circular')} className="w-4 h-4"/>
+                                        <span className="text-sm">循环模式</span>
+                                    </label>
+                                </div>
+                                {showTransfer && (
+                                    <div className="mt-4">
+                                        {renderTransferAnimation()}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">可视化区</h3>
+                                <div className="space-y-4">
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <span className="text-xs text-gray-400">内存缓冲区 (16 字节)</span>
+                                            <span className="text-xs text-purple-400">传输数量：{transferCount}</span>
+                                        </div>
+                                        <div className="grid grid-cols-8 gap-1">
+                                            {dataBuffer.map((byte, i) => (
+                                                <div
+                                                    key={i}
+                                                    className={`h-12 rounded flex flex-col items-center justify-center transition-all ${
+                                                        i < transferProgress
+                                                            ? 'bg-green-600'
+                                                            : i === transferProgress && isTransferring
+                                                            ? 'bg-purple-600 animate-pulse'
+                                                            : 'bg-gray-700'
+                                                    }`}
+                                                >
+                                                    <div className="text-[10px] text-gray-300">{i}</div>
+                                                    <div className="font-mono text-xs font-bold">
+                                                        {byte > 0 ? '0x' + byte.toString(16).padStart(2, '0') : '--'}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-xs text-gray-400">优先级</span>
+                                            <span className={`text-xs px-2 py-1 rounded ${
+                                                priority === 'very_high' ? 'bg-red-600' :
+                                                priority === 'high' ? 'bg-purple-600' :
+                                                priority === 'medium' ? 'bg-blue-600' : 'bg-gray-600'
+                                            }`}>
+                                                {priority === 'very_high' ? '非常高' :
+                                                 priority === 'high' ? '高' :
+                                                 priority === 'medium' ? '中' : '低'}
+                                            </span>
+                                        </div>
+                                        <div className="grid grid-cols-4 gap-1">
+                                            {['low', 'medium', 'high', 'very_high'].map((p) => (
+                                                <button
+                                                    key={p}
+                                                    onClick={() => setPriority(p)}
+                                                    className={`py-2 rounded text-xs font-bold transition-all ${
+                                                        priority === p
+                                                            ? p === 'very_high' ? 'bg-red-600' :
+                                                              p === 'high' ? 'bg-purple-600' :
+                                                              p === 'medium' ? 'bg-blue-600' : 'bg-gray-600'
+                                                            : 'bg-gray-800 hover:bg-gray-700'
+                                                    }`}
+                                                >
+                                                    {p === 'very_high' ? 'V.H' : p === 'high' ? 'HI' : p === 'medium' ? 'MED' : 'LO'}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={startTransfer}
+                                        disabled={isTransferring && transferMode === 'normal'}
+                                        className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 rounded py-3 text-sm font-bold hover:opacity-90 disabled:opacity-50"
+                                    >
+                                        {isTransferring ? (transferMode === 'circular' ? '循环传输中...' : '传输中...') : '启动 DMA 传输'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">说明区</h3>
+                                <div className="space-y-4">
+                                    <div className="bg-gradient-to-r from-violet-900 to-indigo-900 rounded-lg p-3">
+                                        <div className="font-bold text-purple-400 mb-2">步骤 {currentStep + 1}: {STEPS[currentStep].title}</div>
+                                        <div className="text-xs text-gray-300">{STEPS[currentStep].voice}</div>
+                                    </div>
+                                    {renderContent()}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="text-center mt-4 text-xs text-gray-500">
+                            STM32 DMA 数据传输完整指南 | 12 通道 | 循环模式 | 遵循 SKILL.md v3.0 标准
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

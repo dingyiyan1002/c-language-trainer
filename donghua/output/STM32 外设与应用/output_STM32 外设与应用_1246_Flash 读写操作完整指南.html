@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 Flash 读写操作完整指南 - Internal Flash Memory</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes erase { 0%, 100% { background-color: #1e3a5f; } 50% { background-color: #3b82f6; } }
+        @keyframes program { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        @keyframes verify { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .erase-anim { animation: erase 0.5s ease-in-out; }
+        .program-anim { animation: program 0.3s ease-out; }
+        .verify-anim { animation: verify 0.5s ease-in-out; }
+        .active-step { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#10b981', primaryLight: '#34d399', primaryDark: '#059669',
+            secondary: '#3b82f6', success: '#22c55e', warning: '#f59e0b',
+            flash: '#10b981', erase: '#ef4444', program: '#3b82f6', verify: '#f59e0b',
+            gradient: 'from-emerald-500 via-green-600 to-teal-500'
+        };
+
+        const STEPS = [
+            {
+                title: 'Flash 基础',
+                voice: 'STM32 内部 Flash 用于存储程序代码和数据。STM32F103 系列 Flash 容量从 32K 到 512K 字节。Flash 特点是掉电不丢失，但写入前必须先擦除。',
+                highlights: ['内部 Flash', '32K-512K', '掉电不丢失', '先擦后写', '程序存储']
+            },
+            {
+                title: '存储结构',
+                voice: 'Flash 按页组织，每页 1 千字节或 2 千字节。地址从 0x08000000 开始。Flash 可看作一个大数组，按字节、半字、字访问。',
+                highlights: ['页结构', '1KB/2KB', '0x08000000', '字节半字字', '大数组']
+            },
+            {
+                title: '编程操作',
+                voice: 'Flash 编程最小单位是半字 16 位。写入 0 的位可以编程，写入 1 的位必须先擦除。不能直接写入 1，这是 Flash 的重要特性。',
+                highlights: ['半字编程', '16 位', '只能写 0', '写 1 需擦除', '重要特性']
+            },
+            {
+                title: '擦除操作',
+                voice: '擦除将 Flash 位全部设为 1。可以按页擦除，也可以整片擦除。擦除时间较长，约 20 到 50 毫秒。擦除后才能编程写入 0。',
+                highlights: ['全 1 状态', '按页擦除', '整片擦除', '20-50ms', '擦后才能写']
+            },
+            {
+                title: '写保护',
+                voice: 'Flash 可配置写保护防止意外修改。保护以页为单位，通过选项字节配置。保护后的页无法编程或擦除，需先解除保护。',
+                highlights: ['写保护', '页单位', '选项字节', '防止意外', '解除保护']
+            },
+            {
+                title: '操作步骤',
+                voice: 'Flash 操作五步：解锁、擦除、编程、锁定、验证。解锁需要写入两个密钥。操作完成后必须锁定防止误操作。',
+                highlights: ['解锁', '擦除', '编程', '锁定', '验证']
+            },
+            {
+                title: '参数存储',
+                voice: '使用 Flash 存储参数时，建议预留空间。采用双页备份提高可靠性。添加校验和检测数据完整性。避免频繁写入延长寿命。',
+                highlights: ['预留空间', '双页备份', '校验和', '避免频繁', '延长寿命']
+            },
+            {
+                title: '应用实例',
+                voice: '实际应用：存储校准参数、运行时间计数、配置设置、设备 ID。注意 Flash 寿命约 1 万次写入，频繁数据用 EEPROM 或 FRAM。',
+                highlights: ['校准参数', '运行计数', '配置设置', '设备 ID', '1 万次寿命']
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [flashPages, setFlashPages] = React.useState(Array(16).fill().map(() => Array(8).fill(0xFF)));
+            const [selectedPage, setSelectedPage] = React.useState(0);
+            const [editAddress, setEditAddress] = React.useState(0);
+            const [editValue, setEditValue] = React.useState(0x00);
+            const [operationState, setOperationState] = React.useState('idle');
+            const [operationLog, setOperationLog] = React.useState([]);
+            const [isUnlocked, setIsUnlocked] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                const utterance = new SpeechSynthesisUtterance(STEPS[currentStep].voice);
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang.includes('zh-CN') && v.name.includes('Xiaoxiao'))
+                    || voices.find(v => v.lang.includes('zh-CN'))
+                    || voices.find(v => v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                if (isPlaying) speechSynthesis.speak(utterance);
+
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying]);
+
+            const addLog = (message) => {
+                setOperationLog(prev => [...prev.slice(-9), `[${new Date().toLocaleTimeString()}] ${message}`]);
+            };
+
+            const unlockFlash = async () => {
+                setOperationState('unlocking');
+                addLog('开始解锁 Flash...');
+                await sleep(500);
+                // 写入密钥 1
+                await sleep(300);
+                // 写入密钥 2
+                await sleep(300);
+                setIsUnlocked(true);
+                setOperationState('idle');
+                addLog('Flash 已解锁');
+            };
+
+            const lockFlash = async () => {
+                setOperationState('locking');
+                addLog('开始锁定 Flash...');
+                await sleep(500);
+                setIsUnlocked(false);
+                setOperationState('idle');
+                addLog('Flash 已锁定');
+            };
+
+            const erasePage = async () => {
+                if (!isUnlocked) {
+                    addLog('错误：Flash 未解锁');
+                    return;
+                }
+                setOperationState('erasing');
+                addLog(`擦除第${selectedPage}页...`);
+                await sleep(1000);
+                setFlashPages(prev => {
+                    const newPages = [...prev];
+                    newPages[selectedPage] = Array(8).fill(0xFF);
+                    return newPages;
+                });
+                setOperationState('idle');
+                addLog(`第${selectedPage}页擦除完成`);
+            };
+
+            const programByte = async () => {
+                if (!isUnlocked) {
+                    addLog('错误：Flash 未解锁');
+                    return;
+                }
+                setOperationState('programming');
+                addLog(`编程地址 0x${editAddress.toString(16).padStart(2, '0')}: 0x${editValue.toString(16).padStart(2, '0')}`);
+                await sleep(500);
+                setFlashPages(prev => {
+                    const newPages = [...prev];
+                    const page = Math.floor(editAddress / 8);
+                    const offset = editAddress % 8;
+                    // Flash 只能将 1 变成 0
+                    newPages[page][offset] = flashPages[page][offset] & editValue;
+                    return newPages;
+                });
+                setOperationState('idle');
+                addLog('编程完成');
+            };
+
+            const verifyData = async () => {
+                setOperationState('verifying');
+                addLog('验证 Flash 数据...');
+                await sleep(500);
+                setOperationState('idle');
+                addLog('验证通过');
+            };
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            const eraseAll = async () => {
+                if (!isUnlocked) {
+                    addLog('错误：Flash 未解锁');
+                    return;
+                }
+                setOperationState('erasing');
+                addLog('整片擦除中...');
+                await sleep(2000);
+                setFlashPages(Array(16).fill().map(() => Array(8).fill(0xFF)));
+                setOperationState('idle');
+                addLog('整片擦除完成');
+            };
+
+            const renderContent = () => {
+                switch (currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-emerald-400">STM32 Flash 规格</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">容量范围</div>
+                                            <div className="text-2xl font-bold text-emerald-400">32K-512K</div>
+                                            <div className="text-xs text-gray-400">依型号而定</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">起始地址</div>
+                                            <div className="text-2xl font-bold text-blue-400">0x08000000</div>
+                                            <div className="text-xs text-gray-400">代码区</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">页大小</div>
+                                            <div className="text-2xl font-bold text-purple-400">1KB/2KB</div>
+                                            <div className="text-xs text-gray-400">F103 为 1KB</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">写入寿命</div>
+                                            <div className="text-2xl font-bold text-orange-400">10K</div>
+                                            <div className="text-xs text-gray-400">次擦写循环</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-emerald-900 to-teal-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">Flash 主要特点:</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 掉电不丢失</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 在线编程 (IAP)</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 读保护/写保护</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 先擦除后编程</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 按页擦除</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-emerald-400">Flash 存储结构</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="flex items-center gap-2 overflow-x-auto">
+                                            <div className="text-xs text-gray-400 writing-mode-vertical">
+                                                <div className="h-32 flex items-center">地址</div>
+                                            </div>
+                                            {Array(16).fill(0).map((_, i) => (
+                                                <div key={i} className={`flex-shrink-0 w-16 text-center ${selectedPage === i ? 'ring-2 ring-emerald-500' : ''}`}>
+                                                    <div className="text-[10px] text-gray-400">页{i}</div>
+                                                    <div className="h-24 bg-gradient-to-b from-emerald-900 to-emerald-700 rounded"></div>
+                                                    <div className="text-[10px] text-emerald-400">1KB</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-blue-400 mb-1">地址映射</div>
+                                            <div className="text-xs text-gray-400 font-mono">
+                                                0x08000000: 页 0 起始<br/>
+                                                0x08000400: 页 1 起始 (1KB 页)<br/>
+                                                0x08000800: 页 2 起始
+                                            </div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-purple-400 mb-1">访问单位</div>
+                                            <div className="text-xs text-gray-400">
+                                                字节 (8 位) / 半字 (16 位) / 字 (32 位)
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-emerald-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">📍 地址计算</h4>
+                                    <div className="font-mono text-sm bg-gray-900 rounded p-3">
+                                        物理地址 = 0x08000000 + (页号 × 页大小) + 偏移
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 2:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-emerald-400">Flash 编程原理</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="text-center">
+                                                <div className="text-sm text-gray-400 mb-2">擦除后状态</div>
+                                                <div className="font-mono text-2xl text-green-400">1111 1111</div>
+                                                <div className="text-xs text-gray-400">0xFF</div>
+                                            </div>
+                                            <div className="text-center">
+                                                <div className="text-sm text-gray-400 mb-2">可编程为</div>
+                                                <div className="font-mono text-2xl text-blue-400">任意值</div>
+                                                <div className="text-xs text-gray-400">只能 1→0</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-red-900 rounded-lg p-4 border-2 border-red-500">
+                                        <h4 className="font-bold mb-2 text-red-400">⚠️ 重要特性</h4>
+                                        <ul className="space-y-1 text-sm">
+                                            <li>• Flash 位只能从 1 编程为 0</li>
+                                            <li>• 要将 0 变成 1，必须先擦除整页</li>
+                                            <li>• 不能直接写入任意值到已编程单元</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-blue-400">编程示例</h3>
+                                    <div className="space-y-2">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-xs text-gray-400 mb-1">初始状态 (已擦除)</div>
+                                            <div className="font-mono text-green-400">1111 1111 = 0xFF</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-xs text-gray-400 mb-1">编程为 0x0A</div>
+                                            <div className="font-mono text-blue-400">0000 1010 = 0x0A ✓</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-xs text-gray-400 mb-1">再编程为 0xFF (不可能)</div>
+                                            <div className="font-mono text-red-400">1111 1111 = 0xFF ✗</div>
+                                            <div className="text-xs text-gray-400 mt-1">必须先擦除!</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 3:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-emerald-400">Flash 擦除操作</h3>
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <h4 className="font-bold text-orange-400 mb-2">页擦除</h4>
+                                            <div className="text-xs text-gray-400 mb-2">擦除指定页的所有数据</div>
+                                            <div className="text-xs font-mono bg-gray-800 rounded p-2">
+                                                FLASH→CR |= PER;<br/>
+                                                FLASH→AR = 页地址;<br/>
+                                                FLASH→CR |= STRT;
+                                            </div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <h4 className="font-bold text-red-400 mb-2">整片擦除</h4>
+                                            <div className="text-xs text-gray-400 mb-2">擦除所有页</div>
+                                            <div className="text-xs font-mono bg-gray-800 rounded p-2">
+                                                FLASH→CR |= MER;<br/>
+                                                FLASH→CR |= STRT;
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-orange-900 rounded-lg p-4">
+                                        <h4 className="font-bold mb-2 text-orange-400">⏱️ 擦除时间</h4>
+                                        <ul className="space-y-1 text-sm">
+                                            <li>• 页擦除：约 20-30ms</li>
+                                            <li>• 整片擦除：约 40-50ms</li>
+                                            <li>• 期间不能访问 Flash</li>
+                                            <li>• 可使用 SRAM 代码</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-orange-900 to-red-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">擦除后状态</h4>
+                                    <p className="text-sm text-gray-300">擦除后所有位为 1，每个字节值为 0xFF。这是 Flash 的"空白"状态。</p>
+                                </div>
+                            </div>
+                        );
+                    case 4:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-emerald-400">Flash 写保护</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="flex items-center justify-center gap-2">
+                                            {Array(16).fill(0).map((_, i) => (
+                                                <div
+                                                    key={i}
+                                                    className={`w-8 h-12 rounded flex items-center justify-center text-xs font-bold cursor-pointer transition-all ${
+                                                        i % 4 === 0 ? 'bg-red-900 text-red-400' : 'bg-emerald-900 text-emerald-400'
+                                                    } ${selectedPage === i ? 'ring-2 ring-white' : ''}`}
+                                                    onClick={() => setSelectedPage(i)}
+                                                >
+                                                    P{i}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="text-center mt-3 text-xs text-gray-400">
+                                            红色 = 写保护 | 绿色 = 可写 | 点击选择页
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-blue-400 mb-1">选项字节</div>
+                                            <div className="text-xs text-gray-400">通过选项字节配置写保护，掉电保持</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-orange-400 mb-1">保护单位</div>
+                                            <div className="text-xs text-gray-400">写保护以页为单位，可保护任意页</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-red-400 mb-1">解除保护</div>
+                                            <div className="text-xs text-gray-400">需先修改选项字节，然后系统复位生效</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-blue-400">🔒 读保护</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 防止通过 SWD/JTAG 读取</li>
+                                        <li>• 分为 Level 0/1/2 三级</li>
+                                        <li>• Level 1 解除会擦除整片</li>
+                                        <li>• 保护固件知识产权</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 5:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-emerald-400">Flash 操作流程</h3>
+                                    <div className="space-y-3">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-blue-400">1. 解锁</span>
+                                                <span className="text-xs font-mono text-gray-400">KEY1+KEY2</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">写入密钥 0x45670123 和 0xCDEF89AB</div>
+                                            <div className="mt-2 text-xs font-mono bg-gray-800 rounded p-2">
+                                                FLASH→KEYR = 0x45670123;<br/>
+                                                FLASH→KEYR = 0xCDEF89AB;
+                                            </div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-orange-400">2. 擦除</span>
+                                                <span className="text-xs font-mono text-gray-400">PER/STR</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">设置页擦除位，启动擦除</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-green-400">3. 编程</span>
+                                                <span className="text-xs font-mono text-gray-400">PG+ 写入</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">设置编程位，写入半字数据</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-red-400">4. 锁定</span>
+                                                <span className="text-xs font-mono text-gray-400">LOCK=1</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">设置锁定位，防止误操作</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-yellow-400">5. 验证</span>
+                                                <span className="text-xs font-mono text-gray-400">读取比对</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">读取编程数据，验证正确性</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-red-900 rounded-lg p-4 border-2 border-red-500">
+                                    <h4 className="font-bold mb-2 text-red-400">⚠️ 必须锁定</h4>
+                                    <p className="text-sm text-gray-300">操作完成后必须锁定 Flash，防止程序跑飞误写 Flash 导致系统崩溃。</p>
+                                </div>
+                            </div>
+                        );
+                    case 6:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-emerald-400">参数存储方案</h3>
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <h4 className="font-bold text-blue-400 mb-2">单页存储</h4>
+                                            <div className="text-xs text-gray-400 mb-2">简单但风险高</div>
+                                            <div className="text-xs text-gray-400">• 直接写入</div>
+                                            <div className="text-xs text-gray-400">• 掉电可能丢失</div>
+                                            <div className="text-xs text-gray-400">• 无校验机制</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3 border-2 border-emerald-500">
+                                            <h4 className="font-bold text-emerald-400 mb-2">双页备份 ✓</h4>
+                                            <div className="text-xs text-gray-400 mb-2">可靠推荐</div>
+                                            <div className="text-xs text-gray-400">• 交替写入</div>
+                                            <div className="text-xs text-gray-400">• 掉电保护</div>
+                                            <div className="text-xs text-gray-400">• 校验和验证</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-emerald-900 to-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">📋 数据结构建议</h4>
+                                    <div className="text-xs font-mono bg-gray-900 rounded p-3">
+                                        {`typedef struct {
+    uint32_t magic;     // 魔数 0x12345678
+    uint32_t version;   // 版本号
+    uint8_t data[...];  // 参数数据
+    uint32_t crc;       // CRC32 校验
+} Param_t;`}
+                                    </div>
+                                </div>
+                                <div className="bg-orange-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-orange-400">延长寿命技巧</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 减少写入频率</li>
+                                        <li>• 使用磨损均衡</li>
+                                        <li>• 批量写入而非单次</li>
+                                        <li>• 频繁数据用 EEPROM</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 7:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-emerald-400">STM32 代码实现</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// Flash 解锁
+void FLASH_Unlock(void) {
+    FLASH->KEYR = 0x45670123;
+    FLASH->KEYR = 0xCDEF89AB;
+}
+
+// Flash 锁定
+void FLASH_Lock(void) {
+    FLASH->CR |= FLASH_CR_LOCK;
+}
+
+// 页擦除
+void FLASH_ErasePage(uint32_t addr) {
+    FLASH->CR |= FLASH_CR_PER;     // 页擦除使能
+    FLASH->AR = addr;              // 页地址
+    FLASH->CR |= FLASH_CR_STRT;    // 启动擦除
+    while (FLASH->SR & FLASH_SR_BSY); // 等待完成
+    FLASH->CR &= ~FLASH_CR_PER;
+}
+
+// 半字编程
+void FLASH_ProgramHalfWord(uint32_t addr, uint16_t data) {
+    FLASH->CR |= FLASH_CR_PG;      // 编程使能
+    *(uint16_t*)addr = data;       // 写入数据
+    while (FLASH->SR & FLASH_SR_BSY); // 等待完成
+    FLASH->CR &= ~FLASH_CR_PG;
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-blue-400">完整写入函数</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// 写入数据到 Flash
+uint8_t FLASH_Write(uint32_t addr,
+                    uint16_t *data,
+                    uint16_t len) {
+    FLASH_Unlock();
+
+    // 擦除目标页
+    FLASH_ErasePage(addr & ~0x3FF);
+
+    // 编程数据
+    for (uint16_t i = 0; i < len; i++) {
+        FLASH_ProgramHalfWord(addr + i*2, data[i]);
+    }
+
+    FLASH_Lock();
+    return 0;
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-green-900 to-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">🔧 实战技巧</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 擦除前备份关键数据</li>
+                                        <li>• 编程后验证读回</li>
+                                        <li>• 添加 CRC 校验</li>
+                                        <li>• 使用标志位区分新旧数据</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-4">
+                            <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 via-green-500 to-teal-400 bg-clip-text text-transparent">
+                                STM32 Flash 读写操作完整指南
+                            </h1>
+                            <p className="text-sm text-gray-400">页擦除 · 半字编程 · 写保护 · 参数存储</p>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 justify-center">
+                            {!isPlaying ? (
+                                <button onClick={handlePlay} className="px-4 py-2 bg-green-600 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                                    <span>▶</span> 播放
+                                </button>
+                            ) : (
+                                <button onClick={handlePause} className="px-4 py-2 bg-yellow-600 rounded-lg hover:bg-yellow-700 transition-colors flex items-center gap-2">
+                                    <span>⏸</span> 暂停
+                                </button>
+                            )}
+                            <button onClick={handleRestart} className="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2">
+                                <span>🔄</span> 重新开始
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 overflow-x-auto justify-center">
+                            {STEPS.map((step, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => handleStepClick(index)}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                                        index === currentStep
+                                            ? `bg-gradient-to-r ${COLOR_MAP.gradient} text-white shadow-lg`
+                                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                    }`}
+                                >
+                                    {index + 1}. {step.title}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">代码区</h3>
+                                <div className="bg-gray-900 rounded p-3 font-mono text-xs overflow-x-auto">
+                                    <pre className="text-green-400">{`// Flash 操作函数
+void FLASH_Unlock(void);
+void FLASH_Lock(void);
+void FLASH_ErasePage(uint32_t addr);
+void FLASH_ProgramHalfWord(
+    uint32_t addr, uint16_t data);
+uint8_t FLASH_Write(uint32_t addr,
+    uint16_t *data, uint16_t len);`}</pre>
+                                </div>
+                                <div className="mt-4">
+                                    <div className="text-xs text-gray-400 mb-2">操作状态:</div>
+                                    <div className={`text-center py-3 rounded font-bold ${
+                                        operationState === 'unlocking' ? 'bg-blue-600' :
+                                        operationState === 'erasing' ? 'bg-orange-600' :
+                                        operationState === 'programming' ? 'bg-purple-600' :
+                                        operationState === 'verifying' ? 'bg-yellow-600' :
+                                        operationState === 'locking' ? 'bg-red-600' :
+                                        'bg-gray-700'
+                                    }`}>
+                                        {operationState === 'idle' ? '空闲' :
+                                         operationState === 'unlocking' ? '解锁中...' :
+                                         operationState === 'erasing' ? '擦除中...' :
+                                         operationState === 'programming' ? '编程中...' :
+                                         operationState === 'verifying' ? '验证中...' :
+                                         '锁定中...'}
+                                    </div>
+                                </div>
+                                <div className="mt-4">
+                                    <div className="text-xs text-gray-400 mb-2">操作日志:</div>
+                                    <div className="bg-gray-900 rounded p-2 h-32 overflow-y-auto text-xs font-mono">
+                                        {operationLog.map((log, i) => (
+                                            <div key={i} className="text-gray-400">{log}</div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">可视化区</h3>
+                                <div className="space-y-4">
+                                    {/* Flash 页视图 */}
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <span className="text-xs text-gray-400">Flash 存储矩阵 (16 页 ×8 字节)</span>
+                                            <span className={`text-xs px-2 py-1 rounded ${isUnlocked ? 'bg-green-600' : 'bg-red-600'}`}>
+                                                {isUnlocked ? '已解锁' : '已锁定'}
+                                            </span>
+                                        </div>
+                                        <div className="grid grid-cols-8 gap-1 max-h-64 overflow-y-auto">
+                                            {flashPages.map((page, pageIndex) => (
+                                                page.map((byte, byteIndex) => {
+                                                    const addr = pageIndex * 8 + byteIndex;
+                                                    const isEdited = byte !== 0xFF;
+                                                    return (
+                                                        <div
+                                                            key={addr}
+                                                            className={`w-10 h-8 rounded flex flex-col items-center justify-center text-[10px] cursor-pointer transition-all ${
+                                                                selectedPage === pageIndex
+                                                                    ? 'ring-2 ring-emerald-500'
+                                                                    : ''
+                                                            } ${
+                                                                isEdited
+                                                                    ? 'bg-blue-900 text-blue-400'
+                                                                    : 'bg-gray-800 text-gray-500'
+                                                            }`}
+                                                            onClick={() => {
+                                                                setSelectedPage(pageIndex);
+                                                                setEditAddress(addr);
+                                                            }}
+                                                            title={`地址${addr}: 0x${byte.toString(16).padStart(2, '0')}`}
+                                                        >
+                                                            <span>{byte.toString(16).padStart(2, '0')}</span>
+                                                        </div>
+                                                    );
+                                                })
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* 控制按钮 */}
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {!isUnlocked ? (
+                                            <button
+                                                onClick={unlockFlash}
+                                                disabled={operationState !== 'idle'}
+                                                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 py-2 rounded text-sm font-bold"
+                                            >
+                                                解锁 Flash
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={lockFlash}
+                                                disabled={operationState !== 'idle'}
+                                                className="bg-red-600 hover:bg-red-700 disabled:opacity-50 py-2 rounded text-sm font-bold"
+                                            >
+                                                锁定 Flash
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={erasePage}
+                                            disabled={!isUnlocked || operationState !== 'idle'}
+                                            className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 py-2 rounded text-sm font-bold"
+                                        >
+                                            擦除页{selectedPage}
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={eraseAll}
+                                        disabled={!isUnlocked || operationState !== 'idle'}
+                                        className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 py-2 rounded text-sm font-bold"
+                                    >
+                                        整片擦除
+                                    </button>
+
+                                    {/* 编程输入 */}
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-xs text-gray-400">编程数据</span>
+                                            <span className="text-xs text-emerald-400">地址：0x{editAddress.toString(16).padStart(2, '0')}</span>
+                                        </div>
+                                        <div className="flex gap-2 mb-2">
+                                            <input
+                                                type="text"
+                                                value={editValue.toString(16).toUpperCase().padStart(2, '0')}
+                                                onChange={(e) => setEditValue(parseInt('0x' + e.target.value) || 0)}
+                                                className="flex-1 bg-gray-800 rounded px-2 py-1 text-sm text-blue-400 font-mono"
+                                                placeholder="00-FF"
+                                            />
+                                        </div>
+                                        <button
+                                            onClick={programByte}
+                                            disabled={!isUnlocked || operationState !== 'idle'}
+                                            className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 py-2 rounded text-sm font-bold"
+                                        >
+                                            编程写入
+                                        </button>
+                                        <button
+                                            onClick={verifyData}
+                                            disabled={operationState !== 'idle'}
+                                            className="w-full bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 py-2 rounded text-sm font-bold mt-2"
+                                        >
+                                            验证数据
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">说明区</h3>
+                                <div className="space-y-4">
+                                    <div className="bg-gradient-to-r from-emerald-900 to-teal-900 rounded-lg p-3">
+                                        <div className="font-bold text-emerald-400 mb-2">步骤 {currentStep + 1}: {STEPS[currentStep].title}</div>
+                                        <div className="text-xs text-gray-300">{STEPS[currentStep].voice}</div>
+                                    </div>
+                                    {renderContent()}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="text-center mt-4 text-xs text-gray-500">
+                            STM32 Flash 读写操作完整指南 | 页擦除 | 半字编程 | 遵循 SKILL.md v3.0 标准
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

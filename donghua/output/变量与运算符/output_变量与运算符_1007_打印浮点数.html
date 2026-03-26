@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>打印浮点数 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#0c4a6e;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#64748b;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#7c3aed;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:500px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg,#f0f9ff,#e0f2fe);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid #bae6fd;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#0ea5e9;box-shadow:0 0 20px rgba(14,165,233,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#0369a1;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .float-display{display:flex;align-items:center;gap:16px;justify-content:center;padding:16px;background:white;border-radius:10px}
+    .float-value{font-size:32px;font-weight:700;color:#0284c7;font-family:'Consolas',monospace}
+    .float-parts{display:flex;gap:4px}
+    .float-part{width:24px;height:40px;display:flex;align-items:center;justify-content:center;border:2px solid #bae6fd;border-radius:4px;font-size:14px;font-weight:700;background:linear-gradient(180deg,#e0f2fe,#bae6fd)}
+    .float-part.digit{border-color:#0ea5e9;color:#0369a1}
+    .float-part.dot{border-color:#f59e0b;background:linear-gradient(180deg:#fef3c7,#fde68a);color:#92400e}
+    .float-part.highlight{animation:floatPulse 0.6s ease}
+    @keyframes floatPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.2);box-shadow:0 4px 12px rgba(14,165,233,0.5)}}
+    .precision-visual{margin-top:16px}
+    .precision-bar{display:flex;align-items:center;gap:8px;margin-top:8px}
+    .precision-segment{height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:700;transition:all 0.4s ease}
+    .precision-segment.highlight{box-shadow:0 0 15px currentColor;transform:scaleY(1.2)}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:13px;color:#22d3ee;min-height:120px}
+    .terminal-line{margin-bottom:6px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid #f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+    @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.3);opacity:0.7}}
+    .calc-visual{background:linear-gradient(135deg,#f8fafc,#e2e8f0);border-radius:12px;padding:16px;margin-top:16px}
+    .calc-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #cbd5e1}
+    .calc-row:last-child{border-bottom:none;font-weight:700;color:#0c4a6e}
+    .format-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;margin:4px}
+    .format-badge.blue{background:#e0f2fe;color:#0369a1}
+    .format-badge.orange{background:#fef3c7;color:#92400e}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 5;
+    const PROG_NAME = "float_printf";
+    const FILE_NAME = "float_printf.c";
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',orange:'#f97316'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'',color:'#94a3b8'},
+      3:{step:1,text:'int main(void) {',color:'#3b82f6'},
+      4:{step:2,text:'    float voltage = 3.14159f;',color:'#3b82f6'},
+      5:{step:2,text:'    float current = 0.0256f;',color:'#3b82f6'},
+      6:{step:3,text:'    printf("Voltage: %.2fV\\n", voltage);',color:'#eab308'},
+      7:{step:4,text:'    printf("Current: %.4fA\\n", current);',color:'#eab308'},
+      8:{step:5,text:'    printf("Power: %.3fW\\n", voltage * current);',color:'#eab308'},
+      9:{step:5,text:'    return 0;',color:'#3b82f6'},
+      10:{step:5,text:'}',color:'#94a3b8'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，包含标准输入输出头文件',
+      2:'定义两个 float 浮点变量，voltage 存储电压值 3.14159，current 存储电流值 0.0256，f 后缀表示 float 类型',
+      3:'百分号点二 f 保留两位小数输出电压，四舍五入后显示 3.14 伏特',
+      4:'百分号点四 f 保留四位小数输出电流，显示 0.0256 安培',
+      5:'直接在 printf 中计算电压乘以电流得到功率，保留三位小数显示'
+    };
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',calc:'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-6 15H7v-2h6v2zm4-4H7v-2h10v2zm0-4H7V8h10v2z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    const FloatDisplay = ({name,type,value,precision,highlight,step}) => {
+      const str = value.toString();
+      const parts = str.split('.');
+      const intPart = parts[0];
+      const decPart = parts[1] || '';
+      return (
+        <div className={`var-card ${highlight ? 'highlight' : ''}`}>
+          <div className="var-header">
+            <span className="var-name">{name}</span>
+            <span className="var-type">{type}</span>
+          </div>
+          <div className="float-display">
+            <div className="float-value">{value}</div>
+            <div className="float-parts">
+              {[...intPart].map((d,i) => (
+                <div key={`i${i}`} className={`float-part digit ${step >= 3 && i === 0 ? 'highlight' : ''}`}>{d}</div>
+              ))}
+              <div className={`float-part dot ${step >= 3 ? 'highlight' : ''}`}>.</div>
+              {[...decPart].map((d,i) => (
+                <div key={`d${i}`} className={`float-part digit ${step >= 3 && i < precision ? 'highlight' : ''}`}>{d}</div>
+              ))}
+            </div>
+          </div>
+          <div className="precision-visual">
+            <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>精度：保留 {precision} 位小数 → %.{precision}f</div>
+            <div className="precision-bar">
+              <div className={`precision-segment ${step >= 3 ? 'highlight' : ''}`} style={{width:'60px',background:COLOR_MAP.blue}}>{intPart}.</div>
+              <div className={`precision-segment ${step >= 3 ? 'highlight' : ''}`} style={{width:`${precision * 20}px`,background:COLOR_MAP.orange}}>{decPart.substring(0,precision)}</div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const voltage = 3.14159;
+      const current = 0.0256;
+      const power = voltage * current;
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 10; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step >= 3) {
+          const lines = [];
+          lines.push(`Voltage: ${voltage.toFixed(2)}V`);
+          if(step >= 4) {
+            lines.push(`Current: ${current.toFixed(4)}A`);
+            if(step >= 5) {
+              lines.push(`Power: ${power.toFixed(3)}W`);
+            }
+          }
+          setTerminalLines(lines);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>打印浮点数 - C 语言可视化</h1>
+            <p>float 类型 | 小数精度 | %.Nf 格式符</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.blue,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                {FILE_NAME}
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8,9,10].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.calc} size={22} />
+                浮点数可视化
+              </div>
+              {step >= 2 && (
+                <FloatDisplay name="voltage" type="float" value={voltage} precision={2} highlight={step === 2} step={step} />
+              )}
+              {step >= 2 && (
+                <FloatDisplay name="current" type="float" value={current} precision={4} highlight={step === 2} step={step} />
+              )}
+              {step >= 3 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+              {step >= 5 && (
+                <div className="calc-visual">
+                  <div style={{fontSize:14,color:'#475569',fontWeight:700,marginBottom:8}}>功率计算</div>
+                  <div className="calc-row">
+                    <span>Voltage × Current</span>
+                    <span>{voltage.toFixed(2)} × {current.toFixed(4)}</span>
+                  </div>
+                  <div className="calc-row>
+                    <span>= Power</span>
+                    <span>= {power.toFixed(3)}W</span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.purple}}>float 类型</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>float 是单精度浮点数，适合嵌入式系统，比 double 节省内存</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>精度控制</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>% .Nf 格式符中，点号后的数字 N 表示保留的小数位数，自动四舍五入</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.orange}}>常用格式</strong>
+                <div style={{marginTop:8}}>
+                  <span className="format-badge blue">%.2f → 3.14</span>
+                  <span className="format-badge blue">%.4f → 0.0256</span>
+                  <span className="format-badge blue">%.3f → 0.080</span>
+                </div>
+              </div>
+              <div className={`explanation-card ${step >= 5 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>直接计算</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>printf 中可以直接进行数学运算，如 voltage * current</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

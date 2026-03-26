@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1123 - 位运算基础 | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .highlight { box-shadow: 0 0 20px rgba(251, 146, 60, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(251, 146, 60, 0.2); border-left: 3px solid #fb923c; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#fb923c', primaryLight: '#fdba74',
+      secondary: '#f97316', secondaryLight: '#fdba74',
+      accent: '#14b8a6', accentLight: '#2dd4bf',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== 位运算基础 =====
+// & 按位与  | 按位或  ^ 按位异或  ~ 按位取反
+// << 左移    >> 右移
+
+unsigned char a = 0b10101010;  // 170
+unsigned char b = 0b11001100;  // 204
+
+// 按位与：同为 1 才为 1
+a & b  // 0b10001000 = 136
+
+// 按位或：有 1 就为 1
+a | b  // 0b11101110 = 238
+
+// 按位异或：不同才为 1
+a ^ b  // 0b01100110 = 102
+
+// 按位取反：全部翻转
+~a     // 0b01010101 = 85
+
+// 左移：左边溢出，右边补 0
+a << 2  // 0b10101000 = 168 (相当于 *4)
+
+// 右移：右边溢出，左边补 0
+b >> 2  // 0b00110011 = 51 (相当于 /4)`;
+
+    const VOICE_TEXT_MAP = {
+      1: "第一千一百二十三题，位运算基础。",
+      2: "位运算直接操作二进制位，效率极高，是嵌入式编程的基础。",
+      3: "按位与 AND，两个位都为 1 时结果才为 1，用于清零或取指定位。",
+      4: "按位或 OR，两个位有任意 1 时结果为 1，用于置位或合并标志。",
+      5: "按位异或 XOR，两个位不同时为 1，用于翻转特定位或交换值。",
+      6: "按位取反 NOT，单目运算符，每个位 0 变 1、1 变 0。",
+      7: "左移相当于乘以 2 的幂，右移相当于除以 2 的幂，效率高于乘除。",
+      8: "位运算应用：寄存器配置、标志位操作、加密算法、数据压缩。"
+    };
+
+    const MAX_STEPS = 8;
+
+    function App() {
+      const [step, setStep] = useState(1);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+      const [voiceRate, setVoiceRate] = useState(1);
+      const voiceEndTimerRef = useRef(null);
+
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if (voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if (!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if (voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate]);
+
+      useEffect(() => {
+        if (isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+
+      const handleStepChange = (newStep) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsVoicePlaying(false);
+        setStep(newStep);
+      };
+
+      const togglePlay = () => {
+        if (step >= MAX_STEPS) {
+          handleStepChange(1);
+          setTimeout(() => setIsPlaying(true), 100);
+        } else {
+          setIsPlaying(!isPlaying);
+        }
+      };
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="bg-gradient-to-r from-orange-900/50 via-amber-900/50 to-yellow-900/50 rounded-xl p-6 mb-4 border border-orange-700/50">
+            <h1 className="text-3xl font-bold text-orange-400 mb-2">1123 - 位运算基础</h1>
+            <p className="text-orange-300 text-sm">按位与或异或 / 左移右移 / 嵌入式基础</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-orange-700/30">
+              <h2 className="text-lg font-semibold text-orange-400 mb-3">代码展示</h2>
+              <pre className="text-xs text-gray-300 overflow-x-auto bg-gray-900/50 p-3 rounded-lg font-mono leading-relaxed">
+                {CODE.split('\n').map((line, i) => (
+                  <div key={i} className={`code-line ${
+                    (step === 2 && i >= 5 && i <= 6) ||
+                    (step === 3 && i >= 9 && i <= 10) ||
+                    (step === 4 && i >= 13 && i <= 14) ||
+                    (step === 5 && i >= 17 && i <= 18) ||
+                    (step === 6 && i >= 21 && i <= 22) ||
+                    (step === 7 && i >= 25 && i <= 28)
+                    ? 'active' : ''
+                  }`}>{line || '\u00A0'}</div>
+                ))}
+              </pre>
+            </div>
+
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-orange-700/30">
+              <h2 className="text-lg font-semibold text-orange-400 mb-3">可视化演示</h2>
+              <div className="space-y-4">
+                {step === 1 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-orange-600/20 to-amber-600/20 rounded-lg border border-orange-500/30">
+                    <p className="text-orange-300 text-sm font-medium mb-2">💡 位运算</p>
+                    <p className="text-xs text-gray-400">位运算直接对二进制位进行操作，效率远高于算术运算，是嵌入式和底层编程的核心技能。</p>
+                  </div>
+                )}
+                {step === 2 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-orange-600/20 to-amber-600/20 rounded-lg border border-orange-500/30">
+                    <p className="text-orange-300 text-sm font-medium mb-2">二进制表示</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div>a = <span className="text-orange-400">0b10101010</span> = 170</div>
+                        <div>b = <span className="text-amber-400">0b11001100</span> = 204</div>
+                      </div>
+                      <div className="text-orange-400 text-center text-xs">
+                        0b 前缀表示二进制 (C++14/C23)
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 3 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-orange-600/20 to-amber-600/20 rounded-lg border border-orange-500/30">
+                    <p className="text-orange-300 text-sm font-medium mb-2">按位与 & (AND)</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-orange-400">  10101010</div>
+                          <div className="text-amber-400">& 11001100</div>
+                          <div className="border-t border-orange-500/30 my-1"></div>
+                          <div className="text-green-400">  10001000</div>
+                        </div>
+                        <div className="text-xs">
+                          <div className="text-gray-400">规则:</div>
+                          <div className="text-orange-300">1 & 1 = 1</div>
+                          <div className="text-gray-400">其他 = 0</div>
+                          <div className="text-blue-400 mt-1">应用:清零、取位</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 4 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-orange-600/20 to-amber-600/20 rounded-lg border border-orange-500/30">
+                    <p className="text-orange-300 text-sm font-medium mb-2">按位或 | (OR)</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-orange-400">  10101010</div>
+                          <div className="text-amber-400">| 11001100</div>
+                          <div className="border-t border-orange-500/30 my-1"></div>
+                          <div className="text-green-400">  11101110</div>
+                        </div>
+                        <div className="text-xs">
+                          <div className="text-gray-400">规则:</div>
+                          <div className="text-orange-300">0 | 0 = 0</div>
+                          <div className="text-gray-400">其他 = 1</div>
+                          <div className="text-blue-400 mt-1">应用:置位、合并</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 5 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-orange-600/20 to-amber-600/20 rounded-lg border border-orange-500/30">
+                    <p className="text-orange-300 text-sm font-medium mb-2">按位异或 ^ (XOR)</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-orange-400">  10101010</div>
+                          <div className="text-amber-400">^ 11001100</div>
+                          <div className="border-t border-orange-500/30 my-1"></div>
+                          <div className="text-green-400">  01100110</div>
+                        </div>
+                        <div className="text-xs">
+                          <div className="text-gray-400">规则:</div>
+                          <div className="text-orange-300">相同=0, 不同=1</div>
+                          <div className="text-blue-400 mt-1">应用:翻转、交换</div>
+                          <div className="text-xs text-gray-500">a^a=0, a^0=a</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 6 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-orange-600/20 to-amber-600/20 rounded-lg border border-orange-500/30">
+                    <p className="text-orange-300 text-sm font-medium mb-2">按位取反 ~ (NOT)</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded">
+                        <div>~ <span className="text-orange-400">10101010</span></div>
+                        <div className="border-t border-orange-500/30 my-1"></div>
+                        <div className="text-green-400">  01010101</div>
+                      </div>
+                      <div className="text-blue-400 text-center text-xs">
+                        单目运算符，所有位翻转<br/>
+                        ~a = -a - 1 (补码)
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 7 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-orange-900/20 rounded-lg border border-orange-500/30">
+                      <p className="text-orange-300 text-xs font-medium mb-2">移位运算</p>
+                      <div className="text-xs text-gray-400 font-mono space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="p-2 bg-gray-900/50 rounded">
+                            <div className="text-purple-400">左移 &lt;&lt;</div>
+                            <div>a &lt;&lt; 2</div>
+                            <div>10101010 → 10101000</div>
+                            <div className="text-green-400">相当于 ×4</div>
+                          </div>
+                          <div className="p-2 bg-gray-900/50 rounded">
+                            <div className="text-cyan-400">右移 &gt;&gt;</div>
+                            <div>b &gt;&gt; 2</div>
+                            <div>11001100 → 00110011</div>
+                            <div className="text-green-400">相当于 ÷4</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 8 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-orange-900/20 rounded-lg border border-orange-500/30">
+                      <p className="text-orange-300 text-xs font-medium mb-2">📋 典型应用</p>
+                      <ul className="text-xs text-gray-400 space-y-2">
+                        <li>• <span className="text-purple-400">寄存器配置</span>: LED = (1&lt;&lt;3) | (1&lt;&lt;5)</li>
+                        <li>• <span className="text-cyan-400">标志位</span>: flags |= 0x01 (置位), flags &= ~0x01 (清零)</li>
+                        <li>• <span className="text-green-400">快速乘除</span>: x &lt;&lt; 3 = x * 8</li>
+                        <li>• <span className="text-amber-400">奇偶判断</span>: if(x & 1) // 奇数</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-orange-700/30">
+                <h2 className="text-lg font-semibold text-orange-400 mb-3">关键点说明</h2>
+                <div className="space-y-2 text-sm">
+                  <div className={`p-2 rounded transition-colors ${step >= 2 ? 'bg-orange-900/30 text-orange-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">①</span> 位运算直接操作二进制，效率最高
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 7 ? 'bg-orange-900/30 text-orange-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">②</span> 移位可替代乘除 2 的幂，速度更快
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 8 ? 'bg-orange-900/30 text-orange-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">③</span> 嵌入式开发必备技能
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-orange-700/30">
+                <h2 className="text-lg font-semibold text-orange-400 mb-3">实用技巧</h2>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-orange-900/20 rounded border border-orange-500/30">
+                    <p className="text-orange-300 font-medium">判断奇偶</p>
+                    <pre className="text-gray-400 font-mono text-xs">if (x & 1) { /* 奇数 */ }</pre>
+                  </div>
+                  <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30">
+                    <p className="text-blue-300 font-medium">交换两个数 (不用临时变量)</p>
+                    <pre className="text-gray-400 font-mono text-xs">a ^= b; b ^= a; a ^= b;</pre>
+                  </div>
+                  <div className="p-2 bg-purple-900/20 rounded border border-purple-500/30">
+                    <p className="text-purple-300 font-medium">清除最低位的 1</p>
+                    <pre className="text-gray-400 font-mono text-xs">x & (x - 1)</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-gray-800/80 rounded-xl p-4 border border-orange-700/30">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <button onClick={togglePlay} className={`px-4 py-2 rounded-lg font-medium transition-colors ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-orange-600 hover:bg-orange-700'} text-white`}>
+                  {step >= MAX_STEPS ? '🔄 重新播放' : isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                </button>
+                <button onClick={() => handleStepChange(Math.max(1, step - 1))} disabled={step <= 1} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  ◀ 上一步
+                </button>
+                <span className="text-orange-400 font-medium px-3">步骤 {step} / {MAX_STEPS}</span>
+                <button onClick={() => handleStepChange(Math.min(MAX_STEPS, step + 1))} disabled={step >= MAX_STEPS} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  下一步 ▶
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-orange-300">
+                  语速：
+                  <input type="range" min="0.5" max="1.5" step="0.1" value={voiceRate} onChange={(e) => setVoiceRate(parseFloat(e.target.value))} className="ml-2 w-24" />
+                  <span className="ml-2 text-orange-400">{voiceRate.toFixed(1)}x</span>
+                </label>
+                {isVoicePlaying && <span className="text-orange-400 animate-pulse">🔊 语音播放中...</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

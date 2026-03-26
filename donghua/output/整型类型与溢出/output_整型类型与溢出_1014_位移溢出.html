@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>位移溢出 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#7f1d1d;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#7c3aed;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:500px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#fef2f2,#fee2e2);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid:#fca5a5;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#dc2626;box-shadow:0 0 20px rgba(220,38,38,0.4);transform:scale(1.02)}
+    .var-card.overflow{border-color:#f59e0b;box-shadow:0 0 25px rgba(245,158,11,0.5);animation:shake 0.5s ease}
+    @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px)}40%{transform:translateX(5px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#991b1b;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .bits-container{display:flex;flex-direction:column;gap:12px;margin-top:16px}
+    .bits-row{display:flex;align-items:center;gap:8px}
+    .bits-label{width:60px;font-size:12px;color:#64748b;font-weight:600}
+    .bits-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;flex:1}
+    .bit-cell{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid #cbd5e1;border-radius:6px;font-size:14px;font-weight:700;transition:all 0.4s ease;position:relative}
+    .bit-cell.on{background:linear-gradient(135deg,#dc2626,#b91c1c);color:white;border-color:#991b1b}
+    .bit-cell.off{background:#f8fafc;color:#94a3b8}
+    .bit-cell.overflow{background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#1e3a8a;animation:overflowFlash 0.6s ease}
+    @keyframes overflowFlash{0%{transform:scale(1)}50%{transform:scale(1.2);box-shadow:0 0 20px rgba(245,158,11,0.6)}100%{transform:scale(1)}}
+    .bit-cell.shifted{animation:shiftRight 0.8s ease}
+    @keyframes shiftRight{0%{transform:translateX(0)}50%{transform:translateX(-8px)}100%{transform:translateX(0)}}
+    .bit-index{font-size:8px;color:#94a3b8;margin-top:2px}
+    .arrow-down{font-size:24px;color:#dc2626;animation:arrowDown 1s ease infinite}
+    @keyframes arrowDown{0%,100%{transform:translateY(0)}50%{transform:translateY(8px)}}
+    .result-display{margin-top:16px;background:white;border-radius:12px;padding:16px;text-align:center}
+    .result-value{font-size:40px;font-weight:700;color:#dc2626;font-family:'Consolas',monospace}
+    .result-label{font-size:12px;color:#64748b;margin-top:4px}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:13px;color:#22d3ee;min-height:100px}
+    .terminal-line{margin-bottom:6px}
+    .terminal-line.overflow{color:#fbbf24;font-weight:700}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid #f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+    .hex-display{font-size:20px;font-weight:700;color:#dc2626;font-family:'Consolas',monospace;margin:8px 0}
+    .lost-bit{position:absolute;top:-8px;right:-8px;width:24px;height:24px;background:#fbbf24;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#1e3a8a;animation:floatUp 1s ease forwards;opacity:0}
+    @keyframes floatUp{0%{transform:translate(0,0);opacity:1}100%{transform:translate(10px,-30px);opacity:0}}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 4;
+    const PROG_NAME = "shift_overflow";
+    const FILE_NAME = "shift_overflow.c";
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',orange:'#f97316'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'#include <stdint.h>',color:'#7c3aed'},
+      3:{step:1,text:'',color:'#94a3b8'},
+      4:{step:1,text:'int main(void) {',color:'#3b82f6'},
+      5:{step:2,text:'    uint8_t value = 0x80;  // 128',color:'#3b82f6'},
+      6:{step:2,text:'    printf("Before: %u\\n", value);',color:'#eab308'},
+      7:{step:3,text:'    value = value << 1;',color:'#3b82f6'},
+      8:{step:4,text:'    printf("After:  %u\\n", value);',color:'#eab308'},
+      9:{step:4,text:'    return 0;',color:'#3b82f6'},
+      10:{step:4,text:'}',color:'#94a3b8'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，包含标准输入输出头文件和标准整数头文件',
+      2:'定义 uint8_t 变量 value 等于十六进制 80，二进制是 10000000，十进制是 128',
+      3:'value 左移 1 位，最高位的 1 被移出 8 位范围，丢失了，结果是 00000000 等于 0',
+      4:'打印移位后的结果，由于位移溢出，高位的 1 丢失，值变成 0'
+    };
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',warning:'M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [value,setVa] = useState(0);
+      const [isOverflow,setIsOverflow] = useState(false);
+      const [showLostBit,setShowLostBit] = useState(false);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const bitsBefore = [1,0,0,0,0,0,0,0];
+      const bitsAfter = [0,0,0,0,0,0,0,0];
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 10; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 2) {
+          setVa(128);
+          setIsOverflow(false);
+          setShowLostBit(false);
+          setTerminalLines(['Before: 128']);
+        } else if(step === 3) {
+          setShowLostBit(true);
+          setTimeout(() => {
+            setVa(0);
+            setIsOverflow(true);
+            setTerminalLines(['Before: 128','After:  0']);
+          }, 400);
+          setTimeout(() => {
+            setIsOverflow(false);
+            setShowLostBit(false);
+          }, 1000);
+        } else if(step === 4) {
+          setTerminalLines(['Before: 128','After:  0']);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setVa(0);
+        setIsOverflow(false);
+        setShowLostBit(false);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>位移溢出 - C 语言可视化</h1>
+            <p>左移溢出 | 高位截断 | uint8_t 位宽限制</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.red,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                {FILE_NAME}
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8,9,10].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.warning} size={22} />
+                位移溢出可视化
+              </div>
+              <div className={`var-card ${isOverflow ? 'overflow' : ''} ${step >= 2 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">value</span>
+                  <span className="var-type">uint8_t (8 位)</span>
+                </div>
+                <div className="hex-display">
+                  移位前：0x80 = 128 &nbsp;→&nbsp; 移位后：0x00 = 0
+                </div>
+                <div className="bits-container">
+                  <div className="bits-row">
+                    <div className="bits-label">移位前:</div>
+                    <div className="bits-grid">
+                      {bitsBefore.map((b,idx) => (
+                        <div key={idx} className={`bit-cell ${b ? 'on' : 'off'} ${idx === 0 && step >= 3 ? 'overflow' : ''}`} style={{position:'relative'}}>
+                          {b}
+                          <span className="bit-index">{7-idx}</span>
+                          {idx === 0 && showLostBit && <div className="lost-bit">1</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{textAlign:'center'}}><span className="arrow-down">↓</span></div>
+                  <div className="bits-row">
+                    <div className="bits-label">移位后:</div>
+                    <div className="bits-grid">
+                      {bitsAfter.map((b,idx) => (
+                        <div key={idx} className={`bit-cell ${step >= 3 ? (b ? 'on' : 'off') : 'off'} ${step >= 3 ? 'shifted' : ''}`}>
+                          {step >= 3 ? b : 0}
+                          <span className="bit-index">{7-idx}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="result-display">
+                  <div className="result-value">{value}</div>
+                  <div className="result-label">{step >= 3 ? '最高位 1 丢失，结果 = 0' : '初始值 = 128'}</div>
+                </div>
+              </div>
+              {step >= 3 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className={`terminal-line ${line.includes('0') && idx > 0 ? 'overflow' : ''}`}>{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.red}}>uint8_t 位宽</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>uint8_t 只有 8 位，范围 0-255，无法存储超过 8 位的值</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.orange}}>位移溢出</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>10000000 左移 1 位，最高位的 1 被移出 8 位范围，丢失</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>高位截断</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>移位结果超出 8 位的部分被截断丢弃，只保留低 8 位</p>
+              </div>
+              <div className={`explanation-card ${step >= 5 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.purple}}>应用场景</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>需要注意位移量，避免丢失有效数据</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

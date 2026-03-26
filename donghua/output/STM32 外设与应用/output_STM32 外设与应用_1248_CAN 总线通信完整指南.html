@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 CAN 总线通信完整指南 - CAN 协议与过滤器配置可视化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // 8 个步骤 - 语音驱动自动播放
+        const STEPS = [
+            {
+                title: "CAN 总线基础",
+                code: `// CAN 总线特性
+// - 差分信号：CAN_H, CAN_L
+// - 多主架构：任意节点可发起通信
+// - 仲裁机制：ID 越小优先级越高
+// - 波特率：常见 125K/250K/500K/1M
+
+// STM32 CAN 外设特性
+// - CAN 2.0A/B 兼容 (标准帧/扩展帧)
+// - 3 个发送邮箱
+// - 3 级 28 级 FIFO 接收
+// - 可配置滤波器组 (14/28 个)
+
+// 物理层
+// - 隐性电平 (逻辑 1): CAN_H=CAN_L=2.5V
+// - 显性电平 (逻辑 0): CAN_H=3.5V, CAN_L=1.5V`,
+                visualization: "can-bus-basic",
+                explanation: "CAN 是控制器局域网络，采用差分信号传输。多主架构允许任意节点发起通信。仲裁机制确保高优先级消息先传输。STM32 内置 CAN 控制器，支持标准帧 (11 位 ID) 和扩展帧 (29 位 ID)。"
+            },
+            {
+                title: "CAN 初始化配置",
+                code: `// CAN 初始化 (500Kbps @72MHz)
+void CAN_Init(void) {
+    // 1. 使能时钟
+    RCC->APB1ENR |= RCC_APB1ENR_CAN1EN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+
+    // 2. GPIO 配置
+    // PA11: CAN_RX (浮空输入)
+    // PA12: CAN_TX (复用推挽)
+    GPIOA->CRL &= ~0x00FF0000;
+    GPIOA->CRL |= 0x00480000;
+
+    // 3. CAN 进入初始化模式
+    CAN1->MCR |= CAN_MCR_INRQ;
+    while (!(CAN1->MSR & CAN_MSR_INAK));
+
+    // 4. 配置波特率 (500Kbps)
+    // APB1=36MHz, 预分频=4, BS1=9, BS2=8
+    CAN1->BTR = (3 << CAN_BTR_BRP_Pos) |  // 预分频 -1
+                (8 << CAN_BTR_TS1_Pos) |  // BS1=9
+                (7 << CAN_BTR_TS2_Pos);   // BS2=8
+                // 波特率=36M/(4*(1+9+8))=500K
+
+    // 5. 退出初始化模式
+    CAN1->MCR &= ~CAN_MCR_INRQ;
+    while (CAN1->MSR & CAN_MSR_INAK);
+}`,
+                visualization: "can-initialization",
+                explanation: "CAN 初始化需要配置 GPIO(PA11 _RX/PA12_TX)、进入初始化模式、设置波特率寄存器、然后退出初始化模式。波特率由 APB1 时钟、预分频器、时间段 1 和时间段 2 共同决定。"
+            },
+            {
+                title: "CAN 发送数据",
+                code: `// CAN 发送函数
+void CAN_Send(uint32_t id, uint8_t *data, uint8_t len) {
+    // 1. 申请空闲邮箱
+    uint8_t mailbox;
+    if (CAN1->TSR & CAN_TSR_TME0) mailbox = 0;
+    else if (CAN1->TSR & CAN_TSR_TME1) mailbox = 1;
+    else if (CAN1->TSR & CAN_TSR_TME2) mailbox = 2;
+    else return;  // 无空闲邮箱
+
+    // 2. 配置标识符
+    CAN1->sTxMailBox[mailbox].TIR = (id << 21) | CAN_ID_STD;
+
+    // 3. 配置数据长度
+    CAN1->sTxMailBox[mailbox].TDTR = len;
+
+    // 4. 写入数据 (最多 8 字节)
+    CAN1->sTxMailBox[mailbox].TDLR =
+        (data[3]<<24)|(data[2]<<16)|(data[1]<<8)|data[0];
+    CAN1->sTxMailBox[mailbox].TDHR =
+        (data[7]<<24)|(data[6]<<16)|(data[5]<<8)|data[4];
+
+    // 5. 请求发送
+    CAN1->sTxMailBox[mailbox].TIR |= CAN_TIR_TXRQ;
+}
+
+// 等待发送完成
+while (!(CAN1->TSR & CAN_TSR_TXOK0));`,
+                visualization: "can-transmit",
+                explanation: "CAN 发送使用 3 个邮箱之一。先检查哪个邮箱空闲，然后配置标识符、数据长度、写入数据，最后设置发送请求位。发送完成后检查 TXOK 标志。硬件自动处理仲裁和重发。"
+            },
+            {
+                title: "CAN 接收数据",
+                code: `// CAN 接收中断处理
+void USB_LP_CAN1_RX0_IRQHandler(void) {
+    // 检查 FIFO0 有消息
+    if (CAN1->RF0R & CAN_RF0R_FMP0) {
+        // 1. 读取标识符
+        uint32_t id = (CAN1->sFIFOMailBox[0].RIR >> 21);
+
+        // 2. 读取数据长度
+        uint8_t len = CAN1->sFIFOMailBox[0].RDTR & 0x0F;
+
+        // 3. 读取数据
+        uint32_t data_low = CAN1->sFIFOMailBox[0].RDLR;
+        uint32_t data_high = CAN1->sFIFOMailBox[0].RDHR;
+
+        // 4. 处理消息
+        Process_CAN_Message(id, len, data_low, data_high);
+
+        // 5. 释放 FIFO
+        CAN1->RF0R |= CAN_RF0R_RFOM0;
+    }
+}
+
+// 使能接收中断
+CAN1->IER |= CAN_IER_FMPIE0;
+NVIC_EnableIRQ(USB_LP_CAN1_RX0_IRQn);`,
+                visualization: "can-receive",
+                explanation: "CAN 接收使用 FIFO(3 级深度)。中断服务程序中读取标识符、数据长度和数据寄存器，然后释放 FIFO。建议使能中断而不是轮询，避免丢失消息。"
+            },
+            {
+                title: "CAN 滤波器配置",
+                code: `// CAN 滤波器配置 (接收 ID 过滤)
+void CAN_Filter_Init(void) {
+    // 1. 进入滤波器配置模式
+    CAN1->FMR |= CAN_FMR_FINIT;
+
+    // 2. 禁用滤波器 0
+    CAN1->FA1R &= ~(1 << 0);
+
+    // 3. 配置为掩码模式，单 32 位滤波
+    CAN1->FM1R |= (1 << 0);      // 32 位模式
+    CAN1->FS1R |= (1 << 0);      // 单滤波器
+
+    // 4. 配置 ID 掩码
+    // 只接收 ID=0x123 的消息
+    CAN1->sFilterRegister[0].FR1 = (0x123 << 21);  // ID
+    CAN1->sFilterRegister[0].FR2 = (0x7FF << 21);  // 掩码
+
+    // 5. 分配到 FIFO0
+    CAN1->FFA1R &= ~(1 << 0);
+
+    // 6. 使能滤波器
+    CAN1->FA1R |= (1 << 0);
+
+    // 7. 退出配置模式
+    CAN1->FMR &= ~CAN_FMR_FINIT;
+}`,
+                visualization: "can-filter",
+                explanation: "滤波器决定哪些 CAN 消息被接收。掩码模式允许灵活匹配：ID 寄存器设置期望值，掩码寄存器指定哪些位需要匹配。STM32F103 有 14 个滤波器组，高性能型号有 28 个。"
+            },
+            {
+                title: "CAN 中断处理",
+                code: `// CAN 中断使能
+void CAN_EnableInterrupts(void) {
+    // 发送中断
+    CAN1->IER |= CAN_IER_TMEIE;  // 邮箱空
+
+    // 接收中断
+    CAN1->IER |= CAN_IER_FMPIE0; // FIFO0 有消息
+    CAN1->IER |= CAN_IER_FFIE0;  // FIFO0 满
+    CAN1->IER |= CAN_IER_FOVIE0; // FIFO0 溢出
+
+    // 错误中断
+    CAN1->IER |= CAN_IER_EWGIE;  // 错误警告
+    CAN1->IER |= CAN_IER_EPVIE;  // 错误被动
+    CAN1->IER |= CAN_IER_BOFIE;  // 总线关闭
+    CAN1->IER |= CAN_IER_LECIE;  // 最后错误代码
+
+    NVIC_EnableIRQ(USB_LP_CAN1_RX0_IRQn);
+    NVIC_EnableIRQ(USB_HP_CAN1_TX_IRQn);
+    NVIC_EnableIRQ(CAN1_SCE_IRQn);
+}`,
+                visualization: "can-interrupts",
+                explanation: "CAN 支持多种中断：发送邮箱空、接收 FIFO 有消息/FIFO 满/FIFO 溢出、各种错误条件。合理使能中断可以及时响应总线事件。错误中断有助于诊断总线问题。"
+            },
+            {
+                title: "CAN 错误处理",
+                code: `// CAN 错误状态检查
+uint8_t CAN_GetErrorState(void) {
+    uint32_t esr = CAN1->ESR;
+
+    // 发送错误计数
+    uint8_t tec = (esr >> 16) & 0xFF;
+    // 接收错误计数
+    uint8_t rec = (esr >> 24) & 0xFF;
+
+    // 错误状态
+    if (esr & CAN_ESR_BOFF) return 3;    // 总线关闭
+    if (esr & CAN_ESR_EPVF) return 2;    // 错误被动
+    if (esr & CAN_ESR_EWGF) return 1;    // 错误警告
+    return 0;  // 正常
+}
+
+// 错误处理回调
+void CAN_Error_Callback(void) {
+    uint32_t lec = (CAN1->ESR >> 24) & 0x07;
+    switch (lec) {
+        case 1: /* 填充错误 */ break;
+        case 2: /* 形式错误 */ break;
+        case 3: /* ACK 错误 */ break;
+        case 4: /* 位隐性错误 */ break;
+        case 5: /* 位显性错误 */ break;
+        case 6: /* CRC 错误 */ break;
+    }
+    // 可尝试总线恢复
+}`,
+                visualization: "can-errors",
+                explanation: "CAN 硬件自动检测多种错误：位错误、填充错误、CRC 错误、ACK 错误等。错误计数超过阈值会进入错误警告 (128+) 或错误被动 (256+) 状态。总线关闭状态需要软件恢复。"
+            },
+            {
+                title: "CAN 应用实例",
+                code: `// CAN 总线应用：周期性发送 + 中断接收
+
+// 主循环：周期性发送
+uint32_t last_send = 0;
+while (1) {
+    if (millis() - last_send >= 100) {  // 100ms
+        uint8_t data[8];
+        data[0] = sensor_value & 0xFF;
+        data[1] = (sensor_value >> 8) & 0xFF;
+        CAN_Send(0x123, data, 8);
+        last_send = millis();
+    }
+
+    // 处理接收 (也可在中断中处理)
+    Process_CAN_Rx();
+}
+
+// 多节点 ID 分配
+#define NODE_MASTER_ID  0x100
+#define NODE_SLAVE1_ID  0x123
+#define NODE_SLAVE2_ID  0x124
+// ID 越小优先级越高`,
+                visualization: "can-application",
+                explanation: "典型 CAN 应用包括周期性数据发送和中断接收。多节点系统中合理分配 ID 确保优先级。建议使用时间戳记录消息接收时间。总线负载率应控制在 70% 以下以保证实时性。"
+            }
+        ];
+
+        // 颜色映射 - 蓝绿色调
+        const COLOR_MAP = {
+            primary: '#0891b2',    // cyan-600
+            secondary: '#06b6d4',  // cyan-500
+            accent: '#3b82f6',     // blue-500
+            success: '#10b981',    // emerald-500
+            warning: '#f59e0b',    // amber-500
+            danger: '#ef4444',     // red-500
+            info: '#6366f1',       // indigo-500
+            canH: '#ef4444',       // CAN_H 红色
+            canL: '#3b82f6',       // CAN_L 蓝色
+            gradients: [
+                'from-cyan-500 to-blue-500',
+                'from-emerald-500 to-teal-500',
+                'from-indigo-500 to-violet-500'
+            ]
+        };
+
+        // CAN 总线基础可视化
+        const CanBusBasic = ({ step }) => {
+            const [signalState, setSignalState] = useState('recessive');
+            const [bitStream, setBitStream] = useState('11001010');
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setSignalState(prev => prev === 'recessive' ? 'dominant' : 'recessive');
+                }, 1000);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        CAN 差分信号
+                    </div>
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs">CAN_H:</span>
+                            <div className={`h-4 flex-1 rounded transition-all ${
+                                signalState === 'dominant' ? 'bg-red-500' : 'bg-green-200'
+                            }`} />
+                            <span className="text-xs w-12">{signalState === 'dominant' ? '3.5V' : '2.5V'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs">CAN_L:</span>
+                            <div className={`h-4 flex-1 rounded transition-all ${
+                                signalState === 'dominant' ? 'bg-blue-500' : 'bg-green-200'
+                            }`} />
+                            <span className="text-xs w-12">{signalState === 'dominant' ? '1.5V' : '2.5V'}</span>
+                        </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-center text-sm font-bold mb-2">
+                            {signalState === 'dominant' ? '显性 (逻辑 0)' : '隐性 (逻辑 1)'}
+                        </div>
+                        <div className="flex justify-center space-x-1">
+                            {bitStream.split('').map((bit, idx) => (
+                                <div
+                                    key={idx}
+                                    className={`w-6 h-8 flex items-center justify-center text-sm font-mono rounded ${
+                                        bit === '0' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
+                                    }`}
+                                >
+                                    {bit}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-cyan-50 p-2 rounded">
+                            <div>📦 标准帧</div>
+                            <div>11 位 ID (2048 种)</div>
+                        </div>
+                        <div className="bg-blue-50 p-2 rounded">
+                            <div>📦 扩展帧</div>
+                            <div>29 位 ID</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // CAN 初始化可视化
+        const CanInitialization = ({ step }) => {
+            const [initState, setInitState] = useState('normal');
+            const [baudRate, setBaudRate] = useState(500);
+
+            const baudRates = [125, 250, 500, 1000];
+
+            const enterInitMode = () => {
+                setInitState('init');
+                setTimeout(() => {
+                    setInitState('configured');
+                    setTimeout(() => {
+                        setInitState('normal');
+                    }, 1500);
+                }, 1000);
+            };
+
+            useEffect(() => {
+                enterInitMode();
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-2">
+                        {baudRates.map((rate) => (
+                            <button
+                                key={rate}
+                                onClick={() => setBaudRate(rate)}
+                                className={`p-2 rounded text-xs transition-all ${
+                                    baudRate === rate
+                                        ? 'bg-cyan-500 text-white'
+                                        : 'bg-gray-100'
+                                }`}
+                            >
+                                {rate} Kbps
+                            </button>
+                        ))}
+                    </div>
+                    <div className={`p-4 rounded-lg text-center transition-all ${
+                        initState === 'normal' ? 'bg-green-100' :
+                        initState === 'init' ? 'bg-yellow-100' : 'bg-blue-100'
+                    }`}>
+                        <div className="text-2xl mb-2">
+                            {initState === 'normal' ? '🟢' :
+                             initState === 'init' ? '🟡' : '🔵'}
+                        </div>
+                        <div className="font-semibold">
+                            {initState === 'normal' ? '正常运行' :
+                             initState === 'init' ? '初始化模式' : '配置完成'}
+                        </div>
+                        <div className="text-sm mt-1">{baudRate} Kbps</div>
+                    </div>
+                    <div className="text-xs text-gray-600">
+                        <div>APB1: 36MHz</div>
+                        <div>预分频：{(36 / baudRate / 18 - 1).toFixed(0)}</div>
+                        <div>BS1: 9, BS2: 8</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // CAN 发送可视化
+        const CanTransmit = ({ step }) => {
+            const [mailboxes, setMailboxes] = useState([
+                { id: 0, busy: false, data: null },
+                { id: 1, busy: false, data: null },
+                { id: 2, busy: false, data: null }
+            ]);
+            const [sendCount, setSendCount] = useState(0);
+
+            const sendData = () => {
+                const emptyBox = mailboxes.find(mb => !mb.busy);
+                if (!emptyBox) return;
+
+                const newMailboxes = mailboxes.map(mb => {
+                    if (mb.id === emptyBox.id) {
+                        return { ...mb, busy: true, data: Math.floor(Math.random() * 255) };
+                    }
+                    return mb;
+                });
+                setMailboxes(newMailboxes);
+
+                setTimeout(() => {
+                    setMailboxes(prev => prev.map(mb =>
+                        mb.id === emptyBox.id ? { ...mb, busy: false, data: null } : mb
+                    ));
+                    setSendCount(prev => prev + 1);
+                }, 1500);
+            };
+
+            useEffect(() => {
+                const interval = setInterval(sendData, 2000);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        3 个发送邮箱
+                    </div>
+                    <div className="space-y-2">
+                        {mailboxes.map((mb) => (
+                            <div
+                                key={mb.id}
+                                className={`p-3 rounded-lg flex items-center justify-between transition-all ${
+                                    mb.busy ? 'bg-yellow-100' : 'bg-gray-100'
+                                }`}
+                            >
+                                <span className="text-sm font-semibold">邮箱 {mb.id}</span>
+                                <div className="flex items-center space-x-2">
+                                    {mb.busy ? (
+                                        <span className="text-xs bg-yellow-500 text-white px-2 py-1 rounded">
+                                            发送中...
+                                        </span>
+                                    ) : (
+                                        <span className="text-xs text-gray-400">空闲</span>
+                                    )}
+                                    {mb.data !== null && (
+                                        <span className="text-xs font-mono">0x{mb.data.toString(16)}</span>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="text-center text-sm">
+                        已发送：<span className="font-bold text-cyan-600">{sendCount}</span> 帧
+                    </div>
+                </div>
+            );
+        };
+
+        // CAN 接收可视化
+        const CanReceive = ({ step }) => {
+            const [fifo, setFifo] = useState([]);
+            const [receiveCount, setReceiveCount] = useState(0);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    if (fifo.length < 3) {
+                        const newMessage = {
+                            id: Math.floor(Math.random() * 0x7FF),
+                            data: Array(8).fill(0).map(() => Math.floor(Math.random() * 256)),
+                            timestamp: Date.now()
+                        };
+                        setFifo(prev => [...prev, newMessage]);
+                        setReceiveCount(prev => prev + 1);
+                    }
+                }, 2000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const releaseFifo = () => {
+                if (fifo.length > 0) {
+                    setFifo(prev => prev.slice(1));
+                }
+            };
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        3 级 FIFO 接收
+                    </div>
+                    <div className="space-y-2">
+                        {fifo.length === 0 ? (
+                            <div className="text-center text-gray-400 py-4">
+                                等待消息...
+                            </div>
+                        ) : (
+                            fifo.map((msg, idx) => (
+                                <div
+                                    key={idx}
+                                    className={`p-3 rounded-lg transition-all ${
+                                        idx === 0 ? 'bg-green-100 border-2 border-green-500' : 'bg-gray-100'
+                                    }`}
+                                >
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-xs font-mono">ID: 0x{msg.id.toString(16)}</span>
+                                        {idx === 0 && (
+                                            <button
+                                                onClick={releaseFifo}
+                                                className="text-xs bg-green-500 text-white px-2 py-1 rounded"
+                                            >
+                                                释放 FIFO
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="text-xs font-mono text-gray-600 mt-1">
+                                        {msg.data.map(b => b.toString(16).padStart(2, '0')).join(' ')}
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                    <div className="text-center text-sm">
+                        已接收：<span className="font-bold text-cyan-600">{receiveCount}</span> 帧
+                    </div>
+                </div>
+            );
+        };
+
+        // CAN 滤波器可视化
+        const CanFilter = ({ step }) => {
+            const [filterMode, setFilterMode] = useState('mask');
+            const [targetId, setTargetId] = useState(0x123);
+            const [mask, setMask] = useState(0x7FF);
+            const [incomingId, setIncomingId] = useState(0);
+            const [accepted, setAccepted] = useState(false);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    const id = Math.floor(Math.random() * 0x7FF);
+                    setIncomingId(id);
+                    const matches = (id & mask) === (targetId & mask);
+                    setAccepted(matches);
+                }, 1500);
+                return () => clearInterval(interval);
+            }, [targetId, mask]);
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            onClick={() => setFilterMode('mask')}
+                            className={`p-2 rounded text-xs ${
+                                filterMode === 'mask' ? 'bg-cyan-500 text-white' : 'bg-gray-100'
+                            }`}
+                        >
+                            掩码模式
+                        </button>
+                        <button
+                            onClick={() => setFilterMode('list')}
+                            className={`p-2 rounded text-xs ${
+                                filterMode === 'list' ? 'bg-cyan-500 text-white' : 'bg-gray-100'
+                            }`}
+                        >
+                            列表模式
+                        </button>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs mb-2">滤波器配置:</div>
+                        <div className="font-mono text-xs">
+                            <div>ID: 0x{targetId.toString(16).padStart(3, '0')}</div>
+                            <div>Mask: 0x{mask.toString(16).padStart(3, '0')}</div>
+                        </div>
+                    </div>
+                    <div className={`p-3 rounded-lg text-center transition-all ${
+                        accepted ? 'bg-green-100' : 'bg-red-100'
+                    }`}>
+                        <div className="text-sm"> incoming ID: 0x{incomingId.toString(16)}</div>
+                        <div className="text-lg font-bold mt-1">
+                            {accepted ? '✅ 接受' : '❌ 过滤'}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // CAN 中断可视化
+        const CanInterrupts = ({ step }) => {
+            const [interrupts, setInterrupts] = useState({
+                tx: false,
+                rx: false,
+                err: false
+            });
+
+            useEffect(() => {
+                const triggerInterrupt = (type) => {
+                    setInterrupts(prev => ({ ...prev, [type]: true }));
+                    setTimeout(() => {
+                        setInterrupts(prev => ({ ...prev, [type]: false }));
+                    }, 500);
+                };
+
+                const intervals = [
+                    setInterval(() => triggerInterrupt('rx'), 3000),
+                    setInterval(() => triggerInterrupt('tx'), 4000),
+                    setInterval(() => triggerInterrupt('err'), 8000)
+                ];
+                return () => intervals.forEach(clearInterval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="space-y-3">
+                        <div className={`p-3 rounded-lg flex items-center justify-between transition-all ${
+                            interrupts.tx ? 'bg-green-100 border-2 border-green-500' : 'bg-gray-100'
+                        }`}>
+                            <div>
+                                <div className="font-semibold text-sm">📤 发送中断</div>
+                                <div className="text-xs text-gray-500">TMEIE - 邮箱空</div>
+                            </div>
+                            {interrupts.tx && <div className="text-green-600 font-bold">触发!</div>}
+                        </div>
+                        <div className={`p-3 rounded-lg flex items-center justify-between transition-all ${
+                            interrupts.rx ? 'bg-blue-100 border-2 border-blue-500' : 'bg-gray-100'
+                        }`}>
+                            <div>
+                                <div className="font-semibold text-sm">📥 接收中断</div>
+                                <div className="text-xs text-gray-500">FMPIE0 - FIFO 有消息</div>
+                            </div>
+                            {interrupts.rx && <div className="text-blue-600 font-bold">触发!</div>}
+                        </div>
+                        <div className={`p-3 rounded-lg flex items-center justify-between transition-all ${
+                            interrupts.err ? 'bg-red-100 border-2 border-red-500' : 'bg-gray-100'
+                        }`}>
+                            <div>
+                                <div className="font-semibold text-sm">⚠️ 错误中断</div>
+                                <div className="text-xs text-gray-500">EWGIE/EPVIE/BOFIE</div>
+                            </div>
+                            {interrupts.err && <div className="text-red-600 font-bold">触发!</div>}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // CAN 错误可视化
+        const CanErrors = ({ step }) => {
+            const [errorState, setErrorState] = useState('normal');
+            const [tec, setTec] = useState(0);
+            const [rec, setRec] = useState(0);
+
+            useEffect(() => {
+                const simulateErrors = () => {
+                    const rand = Math.random();
+                    if (rand < 0.7) {
+                        setErrorState('normal');
+                        setTec(Math.floor(Math.random() * 50));
+                        setRec(Math.floor(Math.random() * 50));
+                    } else if (rand < 0.85) {
+                        setErrorState('warning');
+                        setTec(128 + Math.floor(Math.random() * 50));
+                        setRec(Math.floor(Math.random() * 80));
+                    } else if (rand < 0.95) {
+                        setErrorState('passive');
+                        setTec(200 + Math.floor(Math.random() * 50));
+                        setRec(128 + Math.floor(Math.random() * 50));
+                    } else {
+                        setErrorState('busoff');
+                        setTec(255);
+                        setRec(0);
+                    }
+                };
+                simulateErrors();
+                const interval = setInterval(simulateErrors, 3000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const getStateColor = () => {
+                switch (errorState) {
+                    case 'normal': return 'bg-green-100 text-green-800';
+                    case 'warning': return 'bg-yellow-100 text-yellow-800';
+                    case 'passive': return 'bg-orange-100 text-orange-800';
+                    case 'busoff': return 'bg-red-100 text-red-800';
+                }
+            };
+
+            return (
+                <div className="space-y-4">
+                    <div className={`p-4 rounded-lg text-center ${getStateColor()}`}>
+                        <div className="text-xl font-bold mb-2">
+                            {errorState === 'normal' && '✅ 正常'}
+                            {errorState === 'warning' && '⚠️ 错误警告'}
+                            {errorState === 'passive' && '🚫 错误被动'}
+                            {errorState === 'busoff' && '❌ 总线关闭'}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-gray-50 rounded-lg p-3 text-center">
+                            <div className="text-xs text-gray-500">发送错误计数 (TEC)</div>
+                            <div className={`text-2xl font-bold ${tec > 127 ? 'text-red-600' : 'text-gray-800'}`}>
+                                {tec}
+                            </div>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3 text-center">
+                            <div className="text-xs text-gray-500">接收错误计数 (REC)</div>
+                            <div className={`text-2xl font-bold ${rec > 127 ? 'text-red-600' : 'text-gray-800'}`}>
+                                {rec}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        <div>• 警告：TEC 或 REC {'>'} 127</div>
+                        <div>• 被动：TEC 或 REC {'>'} 255</div>
+                        <div>• 关闭：TEC {'>'} 255 (需软件恢复)</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // CAN 应用可视化
+        const CanApplication = ({ step }) => {
+            const [messages, setMessages] = useState([]);
+            const [nodes, setNodes] = useState([
+                { id: 0x100, name: '主节点', lastTx: null },
+                { id: 0x123, name: '从节点 1', lastTx: null },
+                { id: 0x124, name: '从节点 2', lastTx: null }
+            ]);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    const nodeIdx = Math.floor(Math.random() * nodes.length);
+                    const node = nodes[nodeIdx];
+                    const newMsg = {
+                        id: node.id,
+                        data: Math.floor(Math.random() * 255),
+                        timestamp: Date.now()
+                    };
+                    setMessages(prev => [newMsg, ...prev.slice(0, 4)]);
+                    setNodes(prev => prev.map((n, i) =>
+                        i === nodeIdx ? { ...n, lastTx: Date.now() } : n
+                    ));
+                }, 1500);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        多节点 CAN 网络
+                    </div>
+                    <div className="flex justify-center space-x-4">
+                        {nodes.map((node) => (
+                            <div
+                                key={node.id}
+                                className={`p-3 rounded-lg text-center transition-all ${
+                                    node.lastTx && Date.now() - node.lastTx < 500
+                                        ? 'bg-green-100 scale-110'
+                                        : 'bg-gray-100'
+                                }`}
+                            >
+                                <div className="text-xs font-semibold">{node.name}</div>
+                                <div className="text-xs font-mono">0x{node.id.toString(16)}</div>
+                                {node.lastTx && Date.now() - node.lastTx < 500 && (
+                                    <div className="text-xs text-green-600 font-bold">发送中</div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs font-semibold mb-2">总线消息:</div>
+                        {messages.map((msg, idx) => (
+                            <div key={idx} className="flex justify-between text-xs py-1 border-b">
+                                <span className="font-mono">0x{msg.id.toString(16)}</span>
+                                <span className="font-mono">0x{msg.data.toString(16)}</span>
+                                <span className="text-gray-400">
+                                    {new Date(msg.timestamp).toLocaleTimeString()}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // 主 App 组件
+        const App = () => {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                const voices = window.speechSynthesis.getVoices();
+                const xiaoXiao = voices.find(v => v.name.includes('XiaoXiao') || v.name.includes('zh-CN'));
+                if (xiaoXiao) utterance.voice = xiaoXiao;
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                window.speechSynthesis.speak(utterance);
+            }, [isMuted]);
+
+            useEffect(() => {
+                if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                speak(STEPS[currentStep].explanation);
+                return () => { if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current); };
+            }, [currentStep, speak]);
+
+            useEffect(() => {
+                const handleKeydown = (e) => {
+                    if (e.code === 'Space') { e.preventDefault(); setIsPlaying(prev => !prev); }
+                    else if (e.code === 'ArrowRight' && currentStep < STEPS.length - 1) setCurrentStep(prev => prev + 1);
+                    else if (e.code === 'ArrowLeft' && currentStep > 0) setCurrentStep(prev => prev - 1);
+                };
+                window.addEventListener('keydown', handleKeydown);
+                return () => window.removeEventListener('keydown', handleKeydown);
+            }, [currentStep]);
+
+            const renderVisualization = () => {
+                switch (STEPS[currentStep].visualization) {
+                    case 'can-bus-basic': return <CanBusBasic step={STEPS[currentStep]} />;
+                    case 'can-initialization': return <CanInitialization step={STEPS[currentStep]} />;
+                    case 'can-transmit': return <CanTransmit step={STEPS[currentStep]} />;
+                    case 'can-receive': return <CanReceive step={STEPS[currentStep]} />;
+                    case 'can-filter': return <CanFilter step={STEPS[currentStep]} />;
+                    case 'can-interrupts': return <CanInterrupts step={STEPS[currentStep]} />;
+                    case 'can-errors': return <CanErrors step={STEPS[currentStep]} />;
+                    case 'can-application': return <CanApplication step={STEPS[currentStep]} />;
+                    default: return <div>可视化组件</div>;
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <h1 className="text-3xl font-bold text-center mb-6 bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
+                            STM32 CAN 总线通信完整指南
+                        </h1>
+                        <div className="flex justify-center mb-6">
+                            <div className="flex space-x-2">
+                                {STEPS.map((_, idx) => (
+                                    <button key={idx} onClick={() => setCurrentStep(idx)}
+                                        className={`w-3 h-3 rounded-full transition-all ${
+                                            idx === currentStep ? 'bg-cyan-600 scale-125' :
+                                            idx < currentStep ? 'bg-cyan-400' : 'bg-gray-300'
+                                        }`} />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-cyan-600 flex items-center">
+                                    <span className="mr-2">💻</span>{STEPS[currentStep].title}
+                                </h2>
+                                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-blue-600 flex items-center">
+                                    <span className="mr-2">🎨</span>可视化演示
+                                </h2>
+                                <div className="h-96 overflow-auto">{renderVisualization()}</div>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-indigo-600 flex items-center">
+                                    <span className="mr-2">📖</span>说明
+                                </h2>
+                                <p className="text-gray-700 leading-relaxed">{STEPS[currentStep].explanation}</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-center mt-6 space-x-4">
+                            <button onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0 ? 'bg-gray-200 text-gray-400' : 'bg-cyan-600 text-white hover:bg-cyan-700'
+                                }`}>⏮ 上一步</button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isPlaying ? 'bg-yellow-500 text-white' : 'bg-green-500 text-white'
+                                }`}>{isPlaying ? '⏸ 暂停' : '▶ 播放'}</button>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isMuted ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'
+                                }`}>{isMuted ? '🔇 取消静音' : '🔊 静音'}</button>
+                            <button onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1 ? 'bg-gray-200 text-gray-400' : 'bg-cyan-600 text-white hover:bg-cyan-700'
+                                }`}>下一步 ⏭</button>
+                        </div>
+                        <div className="text-center mt-4 text-sm text-gray-500">快捷键：空格 播放/暂停 | ← → 切换步骤</div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

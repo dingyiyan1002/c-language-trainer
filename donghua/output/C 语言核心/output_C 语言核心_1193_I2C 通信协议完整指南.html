@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1193. I2C 通信协议完整指南 - 可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+        @keyframes highlight { 0%, 100% { background-color: #3b82f6; } 50% { background-color: #60a5fa; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes bitTransfer { 0% { transform: translateX(0); } 100% { transform: translateX(200px); } }
+        @keyframes ackPulse { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.5); } }
+        @keyframes startCondition { 0% { opacity: 0; transform: scale(0.5); } 100% { opacity: 1; transform: scale(1); } }
+        .pulse { animation: pulse 1.5s ease-in-out infinite; }
+        .blink { animation: blink 0.8s ease-in-out infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.4s ease-out; }
+        .flow { animation: flow 2s ease-in-out infinite; }
+        .highlight { animation: highlight 1s ease-in-out infinite; }
+        .bitTransfer { animation: bitTransfer 0.8s ease-in-out; }
+        .ackPulse { animation: ackPulse 0.4s ease-in-out; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#0ea5e9',    // Sky blue - SCL
+            secondary: '#8b5cf6',  // Violet - SDA
+            accent1: '#f43f5e',    // Rose - Start/Stop
+            accent2: '#10b981',    // Emerald - ACK
+            accent3: '#f59e0b',    // Amber - Data
+            accent4: '#64748b',    // Slate - Ground
+        };
+
+        const STEPS = [
+            {
+                title: "I2C 总线基础",
+                description: "双线制同步通信协议",
+                code: `// I2C 总线特性
+// 1. 两根线：SCL(时钟) + SDA(数据)
+// 2. 开漏输出 + 上拉电阻
+// 3. 支持多主多从架构
+// 4. 标准模式：100 kbps
+// 5. 快速模式：400 kbps
+// 6. 高速模式：3.4 Mbps
+
+// 硬件连接
+// VCC ─┬─[4.7k]─┬─ SCL
+//      │        │
+//      │        └─ SDA
+// GND ─┴────────┴─ GND`,
+                visualState: { showBus: true, showPullup: true, showMaster: true, showSlave: true }
+            },
+            {
+                title: "I2C 时序基础",
+                description: "起始/停止条件与数据帧",
+                code: `// I2C 时序规则
+// 1. SCL 高电平时 SDA 必须稳定
+// 2. SCL 高电平时 SDA 变化 = Start/Stop
+// 3. SCL 低电平时 SDA 可以变化
+
+// 起始条件 (S)
+// SDA: 高→低 (SCL 保持高)
+// SCL: ───┐
+// SDA: ───┘↓
+
+// 停止条件 (P)
+// SDA: 低→高 (SCL 保持高)
+// SCL: ───┐
+// SDA:    └───↑`,
+                visualState: { showTiming: true, showStart: true, showStop: true }
+            },
+            {
+                title: "I2C 数据帧格式",
+                description: "7 位地址 + R/W 位 + ACK",
+                code: `// I2C 帧结构
+// ┌────────────────────────────────┐
+// │ S │ Addr[6:0] │ R/W │ ACK │   │
+// └────────────────────────────────┘
+//   │                            │
+//   ├─ 从机地址 (7 位)            │
+//   │   0x3C = 0b0111100         │
+//   │                            │
+//   └─ 数据位 (8 位) + ACK/NACK
+
+// R/W 位：0=写，1=读
+// ACK: 低电平 (接收方拉低)
+// NACK: 高电平 (未应答)`,
+                visualState: { showFrame: true, showAddr: true, showRW: true, showAck: true }
+            },
+            {
+                title: "I2C 写操作时序",
+                description: "Master 发送数据到 Slave",
+                code: `// I2C 写操作 (Master → Slave)
+// S Addr[6:0] 0 A Data[7:0] A P
+// │ │         │ │ │         │ │
+// │ │         │ │ │         │ └─ 停止
+// │ │         │ │ │         └─ ACK
+// │ │         │ │ └─ 数据字节
+// │ │         │ └─ ACK
+// │ │         └─ R/W=0(写)
+// │ └─ 从机地址
+// └─ 起始条件
+
+void I2C_Write(uint8_t addr, uint8_t data) {
+    I2C_Start();
+    I2C_SendByte((addr << 1) | 0);  // W
+    I2C_WaitAck();
+    I2C_SendByte(data);
+    I2C_WaitAck();
+    I2C_Stop();
+}`,
+                visualState: { showWrite: true, showDataFlow: 'master_to_slave' }
+            },
+            {
+                title: "I2C 读操作时序",
+                description: "Master 从 Slave 读取数据",
+                code: `// I2C 读操作 (Master ← Slave)
+// S Addr[6:0] 1 A [Data A] Data N P
+// │ │         │ │   │    │  │ │ │
+// │ │         │ │   │    │  │ │ └─ 停止
+// │ │         │ │   │    │  │ └─ NACK(最后字节)
+// │ │         │ │   │    │  └─ ACK
+// │ │         │ │   └─ 数据字节
+// │ │         │ └─ ACK
+// │ │         └─ R/W=1(读)
+// │ └─ 从机地址
+// └─ 起始条件
+
+uint8_t I2C_Read(uint8_t addr) {
+    I2C_Start();
+    I2C_SendByte((addr << 1) | 1);  // R
+    I2C_WaitAck();
+    data = I2C_RecvByte();
+    I2C_SendNack();  // 最后一个字节
+    I2C_Stop();
+    return data;
+}`,
+                visualState: { showRead: true, showDataFlow: 'slave_to_master' }
+            },
+            {
+                title: "I2C 寄存器访问",
+                description: "写寄存器地址 + 读/写数据",
+                code: `// 写寄存器操作
+// S Addr 0 A RegAddr A Data A P
+void I2C_WriteReg(uint8_t addr, uint8_t reg, uint8_t data) {
+    I2C_Start();
+    I2C_SendByte((addr << 1) | 0);
+    I2C_WaitAck();
+    I2C_SendByte(reg);    // 寄存器地址
+    I2C_WaitAck();
+    I2C_SendByte(data);   // 数据
+    I2C_WaitAck();
+    I2C_Stop();
+}
+
+// 读寄存器操作 (重复起始)
+// S Addr 0 A RegAddr A Sr Addr 1 A Data A P
+uint8_t I2C_ReadReg(uint8_t addr, uint8_t reg) {
+    I2C_Start();
+    I2C_SendByte((addr << 1) | 0);
+    I2C_WaitAck();
+    I2C_SendByte(reg);
+    I2C_WaitAck();
+    I2C_Start();  // 重复起始
+    I2C_SendByte((addr << 1) | 1);
+    I2C_WaitAck();
+    data = I2C_RecvByte();
+    I2C_SendNack();
+    I2C_Stop();
+    return data;
+}`,
+                visualState: { showRegAccess: true, showWriteReg: true, showReadReg: true }
+            },
+            {
+                title: "I2C 硬件实现",
+                description: "STM32 I2C 外设配置",
+                code: `// STM32 I2C 初始化
+void I2C_Init(void) {
+    // 1. 使能时钟
+    RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
+
+    // 2. 配置 GPIO (开漏 + 上拉)
+    GPIOB->MODER |= GPIO_MODER_MODER6_1 | GPIO_MODER_MODER7_1;
+    GPIOB->OTYPER |= GPIO_OTYPER_OT_6 | GPIO_OTYPER_OT_7;
+    GPIOB->PUPDR |= GPIO_PUPDR_PUPD6_0 | GPIO_PUPDR_PUPD7_0;
+    GPIOB->AFR[0] |= 0x44 << 8;  // AF4 (I2C1)
+
+    // 3. 配置 I2C 时序
+    I2C1->CR1 = 0;
+    I2C1->CR2 = (SystemCoreClock / 1000000);  // 1MHz
+    I2C1->CCR = 10;  // SCL = 100kHz
+    I2C1->TRISE = 4;
+
+    // 4. 使能 I2C
+    I2C1->CR1 |= I2C_CR1_PE;
+}`,
+                visualState: { showHardware: true, showSTM32: true }
+            },
+            {
+                title: "I2C 驱动框架",
+                description: "完整驱动与应用示例",
+                code: `// I2C 设备驱动框架
+typedef struct {
+    uint8_t addr;
+    void (*init)(void);
+    void (*write_reg)(uint8_t, uint8_t);
+    uint8_t (*read_reg)(uint8_t);
+} I2C_Device_t;
+
+// MPU6050 驱动示例
+void MPU6050_Init(void) {
+    I2C_WriteReg(0x68, 0x6B, 0x00);  // 唤醒
+    I2C_WriteReg(0x68, 0x1B, 0x00);  // 陀螺量程±250
+    I2C_WriteReg(0x68, 0x1C, 0x00);  // 加速度量程±2g
+}
+
+int16_t MPU6050_ReadAccX(void) {
+    uint8_t h = I2C_ReadReg(0x68, 0x3B);
+    uint8_t l = I2C_ReadReg(0x68, 0x3C);
+    return (int16_t)((h << 8) | l);
+}
+
+// 应用：多传感器 I2C 总线
+// MPU6050 (0x68), BMP280 (0x76), OLED (0x3C)
+// 所有设备并联在 SDA/SCL 上`,
+                visualState: { showDriver: true, showMultiSlave: true }
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isAutoPlaying, setIsAutoPlaying] = useState(true);
+            const [showAnswer, setShowAnswer] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const speak = (text) => {
+                if (!text) return;
+                const utterance = new SpeechSynthesisUtterance(text);
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v =>
+                    v.lang === 'zh-CN' &&
+                    (v.name.includes('Xiaoxiao') || v.name.includes('Chinese'))
+                );
+                if (zhVoice) utterance.voice = zhVoice;
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.lang = 'zh-CN';
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (isAutoPlaying && currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (isAutoPlaying && currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        }
+                    }, 800);
+                };
+                speechSynthesis.speak(utterance);
+            };
+
+            useEffect(() => {
+                speak(STEPS[currentStep].title + '。' + STEPS[currentStep].description);
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const handleRestart = () => {
+                setCurrentStep(0);
+                speechSynthesis.cancel();
+                setTimeout(() => speak(STEPS[0].title + '。' + STEPS[0].description), 100);
+            };
+
+            const I2CBusVisualization = () => {
+                const step = STEPS[currentStep];
+                const vs = step.visualState;
+
+                return (
+                    <div className="w-full h-96 bg-gray-800 rounded-lg p-6 relative overflow-hidden">
+                        {/* I2C Bus Lines */}
+                        {(vs.showBus || vs.showHardware) && (
+                            <g>
+                                {/* VCC Line */}
+                                <line x1="50" y1="20" x2="350" y2="20" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <text x="20" y="25" fill={COLOR_MAP.primary} fontSize="12">VCC</text>
+
+                                {/* Pull-up Resistors */}
+                                {(vs.showPullup || vs.showHardware) && (
+                                    <g>
+                                        <rect x="140" y="20" width="20" height="40" fill="none" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                        <text x="145" y="45" fill={COLOR_MAP.accent3} fontSize="10">4.7k</text>
+                                        <rect x="240" y="20" width="20" height="40" fill="none" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                        <text x="245" y="45" fill={COLOR_MAP.accent3} fontSize="10">4.7k</text>
+                                    </g>
+                                )}
+
+                                {/* SCL Line */}
+                                <line x1="100" y1="80" x2="300" y2="80" stroke={COLOR_MAP.primary} strokeWidth="3" className={vs.showTiming ? 'pulse' : ''} />
+                                <text x="60" y="85" fill={COLOR_MAP.primary} fontSize="14" fontWeight="bold">SCL</text>
+
+                                {/* SDA Line */}
+                                <line x1="100" y1="140" x2="300" y2="140" stroke={COLOR_MAP.secondary} strokeWidth="3" className={vs.showTiming ? 'pulse' : ''} />
+                                <text x="60" y="145" fill={COLOR_MAP.secondary} fontSize="14" fontWeight="bold">SDA</text>
+
+                                {/* Master Device */}
+                                {(vs.showMaster || vs.showHardware) && (
+                                    <g>
+                                        <rect x="20" y="60" width="60" height="100" rx="5" fill={COLOR_MAP.primary} opacity="0.2" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                        <text x="50" y="105" fill={COLOR_MAP.primary} fontSize="12" textAnchor="middle">Master</text>
+                                        <text x="50" y="125" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle">STM32</text>
+                                    </g>
+                                )}
+
+                                {/* Slave Device */}
+                                {(vs.showSlave || vs.showHardware) && (
+                                    <g>
+                                        <rect x="320" y="60" width="60" height="100" rx="5" fill={COLOR_MAP.secondary} opacity="0.2" stroke={COLOR_MAP.secondary} strokeWidth="2" />
+                                        <text x="350" y="105" fill={COLOR_MAP.secondary} fontSize="12" textAnchor="middle">Slave</text>
+                                        <text x="350" y="125" fill={COLOR_MAP.secondary} fontSize="10" textAnchor="middle">Sensor</text>
+                                    </g>
+                                )}
+
+                                {/* Connection Dots */}
+                                <circle cx="150" cy="80" r="4" fill={COLOR_MAP.primary} />
+                                <circle cx="150" cy="140" r="4" fill={COLOR_MAP.secondary} />
+                                <circle cx="250" cy="80" r="4" fill={COLOR_MAP.primary} />
+                                <circle cx="250" cy="140" r="4" fill={COLOR_MAP.secondary} />
+                            </g>
+                        )}
+
+                        {/* Start/Stop Condition Timing */}
+                        {vs.showTiming && (
+                            <g>
+                                <text x="20" y="200" fill="#fff" fontSize="12">起始/停止条件时序:</text>
+
+                                {/* Start Condition */}
+                                <line x1="20" y1="220" x2="180" y2="220" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <text x="20" y="215" fill={COLOR_MAP.primary} fontSize="10">SCL</text>
+                                <line x1="20" y1="250" x2="180" y2="250" stroke={COLOR_MAP.secondary} strokeWidth="2" />
+                                <text x="20" y="245" fill={COLOR_MAP.secondary} fontSize="10">SDA</text>
+                                {/* Start: SDA falls while SCL high */}
+                                <line x1="100" y1="250" x2="100" y2="270" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="85" y="290" fill={COLOR_MAP.accent1} fontSize="10">Start ↓</text>
+
+                                {/* Stop Condition */}
+                                <line x1="220" y1="220" x2="380" y2="220" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <line x1="220" y1="250" x2="380" y2="250" stroke={COLOR_MAP.secondary} strokeWidth="2" />
+                                {/* Stop: SDA rises while SCL high */}
+                                <line x1="300" y1="270" x2="300" y2="250" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="285" y="290" fill={COLOR_MAP.accent1} fontSize="10">Stop ↑</text>
+                            </g>
+                        )}
+
+                        {/* Frame Structure */}
+                        {(vs.showFrame || vs.showAddr || vs.showRW || vs.showAck) && (
+                            <g>
+                                <text x="20" y="200" fill="#fff" fontSize="12">I2C 帧结构:</text>
+
+                                {/* Start Bit */}
+                                <rect x="20" y="210" width="30" height="40" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="35" y="235" fill={COLOR_MAP.accent1} fontSize="10" textAnchor="middle">S</text>
+
+                                {/* Address */}
+                                {vs.showAddr && (
+                                    <g>
+                                        <rect x="55" y="210" width="70" height="40" fill={COLOR_MAP.primary} opacity="0.3" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                        <text x="90" y="235" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle">Addr[6:0]</text>
+                                    </g>
+                                )}
+
+                                {/* R/W Bit */}
+                                {vs.showRW && (
+                                    <g>
+                                        <rect x="130" y="210" width="30" height="40" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                        <text x="145" y="235" fill={COLOR_MAP.accent3} fontSize="10" textAnchor="middle">R/W</text>
+                                        <text x="145" y="265" fill={COLOR_MAP.accent3} fontSize="8" textAnchor="middle">0=写 1=读</text>
+                                    </g>
+                                )}
+
+                                {/* ACK */}
+                                {vs.showAck && (
+                                    <g>
+                                        <rect x="165" y="210" width="30" height="40" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                        <text x="180" y="235" fill={COLOR_MAP.accent2} fontSize="10" textAnchor="middle">A</text>
+                                        <text x="180" y="265" fill={COLOR_MAP.accent2} fontSize="8" textAnchor="middle">ACK</text>
+                                    </g>
+                                )}
+
+                                {/* Data */}
+                                <g>
+                                    <rect x="200" y="210" width="70" height="40" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                    <text x="235" y="235" fill={COLOR_MAP.accent3} fontSize="10" textAnchor="middle">Data[7:0]</text>
+                                </g>
+
+                                {/* Final ACK/NACK */}
+                                <g>
+                                    <rect x="275" y="210" width="30" height="40" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                    <text x="290" y="235" fill={COLOR_MAP.accent2} fontSize="10" textAnchor="middle">A</text>
+                                </g>
+
+                                {/* Stop Bit */}
+                                <rect x="310" y="210" width="30" height="40" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="325" y="235" fill={COLOR_MAP.accent1} fontSize="10" textAnchor="middle">P</text>
+                            </g>
+                        )}
+
+                        {/* Data Flow Animation */}
+                        {vs.showDataFlow && (
+                            <g>
+                                <circle cx="50" cy="100" r="15" fill={COLOR_MAP.primary} className="pulse" />
+                                <text x="50" y="105" fill="#fff" fontSize="10" textAnchor="middle">M</text>
+
+                                <circle cx="350" cy="100" r="15" fill={COLOR_MAP.secondary} className="pulse" />
+                                <text x="350" y="105" fill="#fff" fontSize="10" textAnchor="middle">S</text>
+
+                                {/* Data packets */}
+                                {[0, 1, 2].map((i) => (
+                                    <circle
+                                        key={i}
+                                        cx={vs.showDataFlow === 'master_to_slave' ? 120 + i * 60 : 230 - i * 60}
+                                        cy="100"
+                                        r="8"
+                                        fill={COLOR_MAP.accent3}
+                                        className="pulse"
+                                        style={{ animationDelay: `${i * 0.3}s` }}
+                                    />
+                                ))}
+
+                                {/* Direction Arrow */}
+                                <text x="200" y="150" fill="#fff" fontSize="12" textAnchor="middle">
+                                    {vs.showDataFlow === 'master_to_slave' ? 'Master → Slave (写)' : 'Slave → Master (读)'}
+                                </text>
+                            </g>
+                        )}
+
+                        {/* Register Access */}
+                        {(vs.showRegAccess || vs.showWriteReg || vs.showReadReg) && (
+                            <g>
+                                <text x="20" y="200" fill="#fff" fontSize="12">寄存器访问时序:</text>
+
+                                {/* Write Register */}
+                                {vs.showWriteReg && (
+                                    <g>
+                                        <text x="20" y="220" fill={COLOR_MAP.accent2} fontSize="10">写寄存器:</text>
+                                        <rect x="20" y="230" width="360" height="25" fill={COLOR_MAP.accent2} opacity="0.1" stroke={COLOR_MAP.accent2} strokeWidth="1" />
+                                        <text x="30" y="247" fill={COLOR_MAP.accent2} fontSize="9">S → Addr+W → A → RegAddr → A → Data → A → P</text>
+                                    </g>
+                                )}
+
+                                {/* Read Register */}
+                                {vs.showReadReg && (
+                                    <g>
+                                        <text x="20" y="270" fill={COLOR_MAP.accent1} fontSize="10">读寄存器:</text>
+                                        <rect x="20" y="280" width="360" height="25" fill={COLOR_MAP.accent1} opacity="0.1" stroke={COLOR_MAP.accent1} strokeWidth="1" />
+                                        <text x="30" y="297" fill={COLOR_MAP.accent1} fontSize="8">S → Addr+W → A → RegAddr → A → Sr → Addr+R → A → Data → N → P</text>
+                                    </g>
+                                )}
+                            </g>
+                        )}
+
+                        {/* Multi-Slave Bus */}
+                        {vs.showMultiSlave && (
+                            <g>
+                                <text x="20" y="200" fill="#fff" fontSize="12">多从机总线:</text>
+
+                                {/* SCL Bus */}
+                                <line x1="100" y1="220" x2="380" y2="220" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <text x="20" y="225" fill={COLOR_MAP.primary} fontSize="10">SCL</text>
+
+                                {/* SDA Bus */}
+                                <line x1="100" y1="260" x2="380" y2="260" stroke={COLOR_MAP.secondary} strokeWidth="2" />
+                                <text x="20" y="265" fill={COLOR_MAP.secondary} fontSize="10">SDA</text>
+
+                                {/* Slave Devices */}
+                                <g>
+                                    <rect x="120" y="230" width="50" height="40" rx="3" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="1" />
+                                    <text x="145" y="250" fill={COLOR_MAP.accent1} fontSize="8" textAnchor="middle">MPU6050</text>
+                                    <text x="145" y="265" fill={COLOR_MAP.accent1} fontSize="7" textAnchor="middle">0x68</text>
+                                </g>
+
+                                <g>
+                                    <rect x="190" y="230" width="50" height="40" rx="3" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="1" />
+                                    <text x="215" y="250" fill={COLOR_MAP.accent2} fontSize="8" textAnchor="middle">BMP280</text>
+                                    <text x="215" y="265" fill={COLOR_MAP.accent2} fontSize="7" textAnchor="middle">0x76</text>
+                                </g>
+
+                                <g>
+                                    <rect x="260" y="230" width="50" height="40" rx="3" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="1" />
+                                    <text x="285" y="250" fill={COLOR_MAP.accent3} fontSize="8" textAnchor="middle">OLED</text>
+                                    <text x="285" y="265" fill={COLOR_MAP.accent3} fontSize="7" textAnchor="middle">0x3C</text>
+                                </g>
+                            </g>
+                        )}
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="text-center mb-4">
+                            <h1 className="text-3xl font-bold mb-2" style={{ color: COLOR_MAP.primary }}>
+                                1193. I2C 通信协议完整指南
+                            </h1>
+                            <p className="text-gray-400 text-sm">双线制同步通信协议 · 多主多从架构 · 开漏输出</p>
+                        </div>
+
+                        {/* Progress Bar */}
+                        <div className="mb-4">
+                            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                <span>步骤 {currentStep + 1} / {STEPS.length}</span>
+                                <span>{Math.round(((currentStep + 1) / STEPS.length) * 100)}%</span>
+                            </div>
+                            <div className="w-full bg-gray-800 rounded-full h-2">
+                                <div
+                                    className="h-2 rounded-full transition-all duration-500"
+                                    style={{
+                                        width: `${((currentStep + 1) / STEPS.length) * 100}%`,
+                                        background: `linear-gradient(90deg, ${COLOR_MAP.primary}, ${COLOR_MAP.secondary})`
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Main Content - Three Column Layout */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            {/* Left: Code */}
+                            <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <h3 className="text-lg font-semibold mb-3" style={{ color: COLOR_MAP.primary }}>
+                                    💻 代码示例
+                                </h3>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+
+                            {/* Center: Visualization */}
+                            <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <h3 className="text-lg font-semibold mb-3" style={{ color: COLOR_MAP.secondary }}>
+                                    🔬 可视化动画
+                                </h3>
+                                <svg className="w-full h-64" viewBox="0 0 400 320">
+                                    <I2CBusVisualization />
+                                </svg>
+                            </div>
+
+                            {/* Right: Explanation */}
+                            <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <h3 className="text-lg font-semibold mb-3" style={{ color: COLOR_MAP.accent1 }}>
+                                    📖 核心概念
+                                </h3>
+                                <ul className="space-y-2 text-sm text-gray-300">
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.primary }}>物理层:</strong> 2 线 (SCL/SDA) + 上拉电阻</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.secondary }}>开漏输出:</strong> 需外接 4.7k 上拉电阻</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.accent1 }}>起始条件:</strong> SCL 高电平时 SDA 高→低</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.accent2 }}>停止条件:</strong> SCL 高电平时 SDA 低→高</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.accent3 }}>数据帧:</strong> 7 位地址 + R/W + 8 位数据 + ACK</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.primary }}>多从机:</strong> 每个从机有唯一 7 位地址</span>
+                                    </li>
+                                </ul>
+
+                                {/* Code Challenge */}
+                                <div className="mt-4 p-3 bg-gray-700 rounded">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-semibold">💡 代码挑战</span>
+                                        <button
+                                            onClick={() => setShowAnswer(!showAnswer)}
+                                            className="text-xs px-2 py-1 rounded"
+                                            style={{ backgroundColor: COLOR_MAP.primary, color: '#fff' }}
+                                        >
+                                            {showAnswer ? '隐藏' : '显示'}答案
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-gray-400 mb-2">
+                                        写一个函数扫描 I2C 总线上的所有从机地址:
+                                    </p>
+                                    {showAnswer && (
+                                        <pre className="text-xs text-gray-300 overflow-x-auto">
+{`void I2C_Scan(void) {
+    printf("Scanning I2C bus...\\n");
+    for (uint8_t i = 1; i < 127; i++) {
+        I2C_Start();
+        if (I2C_SendByte(i << 1) == 0) {
+            // 收到 ACK, 设备存在
+            printf("Found: 0x%02X\\n", i);
+        }
+        I2C_Stop();
+    }
+}`}
+                                        </pre>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Control Buttons */}
+                        <div className="flex justify-center gap-3 mb-4">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0
+                                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        : 'bg-gray-600 text-white hover:bg-gray-500'
+                                }`}
+                            >
+                                ← 上一步
+                            </button>
+
+                            <button
+                                onClick={handleRestart}
+                                className="px-6 py-3 rounded-lg font-semibold bg-gray-700 text-white hover:bg-gray-600 transition-all"
+                            >
+                                🔄 重新开始
+                            </button>
+
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1
+                                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        : 'bg-gray-600 text-white hover:bg-gray-500'
+                                }`}
+                            >
+                                下一步 →
+                            </button>
+                        </div>
+
+                        {/* Autoplay Toggle */}
+                        <div className="text-center">
+                            <button
+                                onClick={() => setIsAutoPlaying(!isAutoPlaying)}
+                                className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                                    isAutoPlaying
+                                        ? 'bg-green-600 text-white'
+                                        : 'bg-gray-700 text-gray-300'
+                                }`}
+                            >
+                                {isAutoPlaying ? '▶️ 自动播放中' : '⏸️ 已暂停'}
+                            </button>
+                        </div>
+
+                        {/* Step Indicators */}
+                        <div className="flex justify-center gap-2 mt-4 flex-wrap">
+                            {STEPS.map((step, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => setCurrentStep(index)}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                                        index === currentStep
+                                            ? 'bg-white text-gray-900'
+                                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                    }`}
+                                >
+                                    {index + 1}. {step.title}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

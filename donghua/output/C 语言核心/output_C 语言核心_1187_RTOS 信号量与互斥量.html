@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1187 - RTOS 信号量与互斥量 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: linear-gradient(135deg, #2d1b69 0%, #1a0f3d 100%); color: #e0e7ff; min-height: 100vh; overflow-x: hidden; }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(0.98); } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes flow { 0% { transform: translateY(0); } 100% { transform: translateY(20px); } }
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes semaphoreChange { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.1); } }
+        @keyframes lockUnlock { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(15deg); } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .flow { animation: flow 2s infinite; }
+        .rotate { animation: rotate 2s linear infinite; }
+        .semaphore-change { animation: semaphoreChange 1s infinite; }
+        .lock-unlock { animation: lockUnlock 1.5s infinite; }
+
+        .state-transition { transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+
+        .code-line { display: block; padding: 2px 0; }
+        .code-keyword { color: #c678dd; }
+        .code-type { color: #e5c07b; }
+        .code-function { color: #61afef; }
+        .code-string { color: #98c379; }
+        .code-comment { color: #7f8c8d; font-style: italic; }
+        .code-number { color: #d19a66; }
+        .code-operator { color: #56b6c2; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // ========== COLOR MAP - 6 unique colors for this file ==========
+        const COLOR_MAP = {
+            primary: '#a855f7',    // Purple - Binary semaphore
+            secondary: '#f59e0b',  // Amber - Mutex
+            accent: '#06b6d4',     // Cyan - Counting semaphore
+            bg: '#0f172a',         // Slate 900
+            text: '#f1f5f9',       // Slate 100
+            border: '#334155'      // Slate 700
+        };
+
+        // ========== SKILL.md v3.0 8 Regions ==========
+        const STEPS = [
+            { title: "二值信号量", subtitle: "事件同步机制", duration: 8000 },
+            { title: "互斥量", subtitle: "资源独占保护", duration: 8000 },
+            { title: "计数信号量", subtitle: "资源池管理", duration: 8000 },
+            { title: "优先级反转", subtitle: "问题与解决", duration: 8000 },
+            { title: "信号量 API", subtitle: "FreeRTOS 接口", duration: 8000 },
+            { title: "中断同步", subtitle: "ISR 安全操作", duration: 8000 },
+            { title: "应用案例", subtitle: "生产者消费者", duration: 8000 },
+            { title: "最佳实践", subtitle: "同步机制选择", duration: 10000 }
+        ];
+
+        // ========== Main App ==========
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+            const synthRef = useRef(window.speechSynthesis);
+            const currentUtteranceRef = useRef(null);
+
+            // 信号量状态
+            const [semaphoreState, setSemaphoreState] = useState({
+                binary: { value: 1, name: 'xEventSemaphore', color: COLOR_MAP.primary },
+                mutex: { locked: false, owner: null, name: 'xResourceMutex', color: COLOR_MAP.secondary },
+                counting: { value: 3, max: 5, name: 'xPoolSemaphore', color: COLOR_MAP.accent }
+            });
+
+            // 任务状态
+            const [taskStates, setTaskStates] = useState([
+                { id: 1, name: 'Task_ISR', state: 'running', priority: 1 },
+                { id: 2, name: 'Task_High', state: 'blocked', priority: 2 },
+                { id: 3, name: 'Task_Mid', state: 'ready', priority: 3 },
+                { id: 4, name: 'Task_Low', state: 'ready', priority: 4 }
+            ]);
+
+            // ========== 语音合成 ==========
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+                if (currentUtteranceRef.current) {
+                    synthRef.current.cancel();
+                }
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                const voices = synthRef.current.getVoices();
+                const xiaoxiaoVoice = voices.find(v =>
+                    v.name.includes('Xiaoxiao') ||
+                    v.name.includes('zh-CN') ||
+                    v.lang === 'zh-CN'
+                );
+                if (xiaoxiaoVoice) utterance.voice = xiaoxiaoVoice;
+
+                utterance.onend = () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.warn('Speech synthesis error:', event);
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                currentUtteranceRef.current = utterance;
+                synthRef.current.speak(utterance);
+            }, [isMuted]);
+
+            // ========== 步骤推进 ==========
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.subtitle);
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                };
+            }, [currentStep, speak]);
+
+            // ========== 手动控制 ==========
+            const handleNext = () => { if (currentStep < STEPS.length - 1) setCurrentStep(currentStep + 1); };
+            const handlePrev = () => { if (currentStep > 0) setCurrentStep(currentStep - 1); };
+            const handleRestart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+                setSemaphoreState({
+                    binary: { value: 1, name: 'xEventSemaphore', color: COLOR_MAP.primary },
+                    mutex: { locked: false, owner: null, name: 'xResourceMutex', color: COLOR_MAP.secondary },
+                    counting: { value: 3, max: 5, name: 'xPoolSemaphore', color: COLOR_MAP.accent }
+                });
+            };
+
+            // ========== 渲染代码区域 ==========
+            const renderCode = () => {
+                const codeSnippets = {
+                    0: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 二值信号量 - 事件同步 */</span><br/>
+                            <span className="code-type">SemaphoreHandle_t</span> xEventSem;<br/><br/>
+                            <span className="code-comment">// 创建 (宏定义为互斥量) */</span><br/>
+                            xEventSem = <span className="code-function">xSemaphoreCreateBinary</span>();<br/><br/>
+                            <span className="code-comment">// ISR 中给出信号量 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">EXTI_IRQHandler</span>(<span className="code-keyword">void</span>) {<br/>
+                            &nbsp;&nbsp;BaseType_t xHigherTask = pdFALSE;<br/>
+                            &nbsp;&nbsp;<span className="code-function">xSemaphoreGiveFromISR</span>(<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;xEventSem, &xHigherTask);<br/>
+                            &nbsp;&nbsp;<span className="code-function">portYIELD_FROM_ISR</span>(xHigherTask);<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    1: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 互斥量 - 资源保护 */</span><br/>
+                            <span className="code-type">SemaphoreHandle_t</span> xMutex;<br/><br/>
+                            <span className="code-comment">// 创建互斥量 */</span><br/>
+                            xMutex = <span className="code-function">xSemaphoreCreateMutex</span>();<br/><br/>
+                            <span className="code-comment">// 临界区访问共享资源 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">vTaskAccessResource</span>() {<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">if</span> (<span className="code-function">xSemaphoreTake</span>(xMutex,<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;portMAX_DELAY) == pdTRUE) {<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-comment">// 访问共享资源 */</span><br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">SharedResource_Write</span>(data);<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">xSemaphoreGive</span>(xMutex);<br/>
+                            &nbsp;&nbsp;}<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    2: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 计数信号量 - 资源池 */</span><br/>
+                            <span className="code-type">SemaphoreHandle_t</span> xCountSem;<br/><br/>
+                            <span className="code-comment">// 创建 (最大值 5, 初始值 3) */</span><br/>
+                            xCountSem = <span className="code-function">xSemaphoreCreateCounting</span>(<br/>
+                            &nbsp;&nbsp;5,  // 最大值<br/>
+                            &nbsp;&nbsp;3   // 初始值<br/>
+                            );<br/><br/>
+                            <span className="code-comment">// 获取资源 */</span><br/>
+                            <span className="code-keyword">if</span> (<span className="code-function">xSemaphoreTake</span>(xCountSem, 0)<br/>
+                            &nbsp;&nbsp;== pdTRUE) {<br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 使用资源 */</span><br/>
+                            &nbsp;&nbsp;<span className="code-function">xSemaphoreGive</span>(xCountSem);<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    3: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 优先级反转问题 */</span><br/>
+                            <span className="code-comment">// 场景: Low 持有 Mutex，High 等待 */</span><br/>
+                            <span className="code-comment">// Mid 就绪 → 抢占 Low → High 被阻塞 */</span><br/>
+                            <span className="code-comment">// 结果：High 被 Mid 阻塞 (不应发生) */</span><br/><br/>
+                            <span className="code-comment">/* 优先级继承解决方案 */</span><br/>
+                            <span className="code-comment">// 1. 使用互斥量 (非信号量) */</span><br/>
+                            <span className="code-comment">// 2. FreeRTOS 自动提升 Low 优先级 */</span><br/>
+                            <span className="code-comment">// 3. 释放后恢复原优先级 */</span><br/>
+                            <span className="code-keyword">typedef struct</span> {<br/>
+                            &nbsp;&nbsp;<span className="code-type">SemaphoreHandle_t</span> mutex;<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint8_t</span> originalPriority;<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint8_t</span> inheritedPriority;<br/>
+                            } Mutex_t;<br/>
+                        </div>
+                    ),
+                    4: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* FreeRTOS 信号量 API 汇总 */</span><br/>
+                            <span className="code-comment">// 创建 API */</span><br/>
+                            <span className="code-function">xSemaphoreCreateBinary</span>()<br/>
+                            <span className="code-function">xSemaphoreCreateMutex</span>()<br/>
+                            <span className="code-function">xSemaphoreCreateCounting</span>(max, init)<br/>
+                            <span className="code-function">xSemaphoreCreateBinaryStatic</span>(&buffer)<br/><br/>
+                            <span className="code-comment">// 获取/给出 API */</span><br/>
+                            <span className="code-function">xSemaphoreTake</span>(handle, ticks)<br/>
+                            <span className="code-function">xSemaphoreGive</span>(handle)<br/>
+                            <span className="code-function">xSemaphoreGiveFromISR</span>(h, &xHigher)<br/>
+                            <span className="code-function">xSemaphoreTakeFromISR</span>(h, &xHigher)<br/>
+                        </div>
+                    ),
+                    5: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* ISR 同步最佳实践 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">UART_IRQHandler</span>(<span className="code-keyword">void</span>) {<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint8_t</span> data = UART->DR;<br/>
+                            &nbsp;&nbsp;<br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 1. 写入环形缓冲区 */</span><br/>
+                            &nbsp;&nbsp;<span className="code-function">RingBuffer_Put</span>(&g_uartRx, data);<br/>
+                            &nbsp;&nbsp;<br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 2. 给出信号量通知任务 */</span><br/>
+                            &nbsp;&nbsp;BaseType_t xHigher = pdFALSE;<br/>
+                            &nbsp;&nbsp;<span className="code-function">xSemaphoreGiveFromISR</span>(<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;g_uartSem, &xHigher);<br/>
+                            &nbsp;&nbsp;<br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 3. 触发上下文切换 */</span><br/>
+                            &nbsp;&nbsp;<span className="code-function">portYIELD_FROM_ISR</span>(xHigher);<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    6: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 生产者 - 消费者模式 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">vProducer</span>(<span className="code-keyword">void</span>* pvParams) {<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">while</span>(1) {<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;data = <span className="code-function">Sensor_Read</span>();<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">xQueueSend</span>(g_queue, &data, 0);<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">xSemaphoreGive</span>(g_dataReady);<br/>
+                            &nbsp;&nbsp;}<br/>
+                            }<br/><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">vConsumer</span>(<span className="code-keyword">void</span>* pvParams) {<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">while</span>(1) {<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">xSemaphoreTake</span>(g_dataReady,<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;portMAX_DELAY);<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">xQueueReceive</span>(g_queue, &data, 0);<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">ProcessData</span>(data);<br/>
+                            &nbsp;&nbsp;}<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    7: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 同步机制选择指南 */</span><br/>
+                            <span className="code-comment">// 场景 → 推荐机制 */</span><br/>
+                            <span className="code-comment">// ISR→任务通知 → 二值信号量 */</span><br/>
+                            <span className="code-comment">// 共享资源访问 → 互斥量 */</span><br/>
+                            <span className="code-comment">// 资源池管理 → 计数信号量 */</span><br/>
+                            <span className="code-comment">// 多事件组合 → 事件组 (Event Group) */</span><br/>
+                            <span className="code-comment">// 单任务通知 → 任务通知 (Direct Task) */</span><br/>
+                            <span className="code-keyword">typedef enum</span> {<br/>
+                            &nbsp;&nbsp;SYNC_BINARY,    <span className="code-comment">// ISR 同步</span><br/>
+                            &nbsp;&nbsp;SYNC_MUTEX,     <span className="code-comment">// 资源保护</span><br/>
+                            &nbsp;&nbsp;SYNC_COUNTING,  <span className="code-comment">// 资源池</span><br/>
+                            &nbsp;&nbsp;SYNC_EVENTGROUP, <span className="code-comment">// 多事件</span><br/>
+                            &nbsp;&nbsp;SYNC_TASK_NOTIFY <span className="code-comment">// 轻量通知</span><br/>
+                            } SyncType_t;<br/>
+                        </div>
+                    )
+                };
+                return codeSnippets[currentStep];
+            };
+
+            // ========== 渲染可视化区域 ==========
+            const renderVisualization = () => {
+                if (currentStep === 0) {
+                    // 二值信号量
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>二值信号量 (Binary Semaphore)</h3>
+                            <div className="flex justify-center items-center gap-8">
+                                <div className="text-center">
+                                    <div className="w-20 h-20 rounded-full flex items-center justify-center mb-2 pulse" style={{backgroundColor: semaphoreState.binary.color}}>
+                                        <span className="text-3xl font-bold text-white">{semaphoreState.binary.value}</span>
+                                    </div>
+                                    <div className="text-sm" style={{color: COLOR_MAP.text}}>信号量值</div>
+                                </div>
+                                <div className="text-4xl">⟷</div>
+                                <div className="text-center">
+                                    <div className="w-20 h-20 rounded-full flex items-center justify-center mb-2" style={{backgroundColor: '#475569'}}>
+                                        <span className="text-3xl">🎯</span>
+                                    </div>
+                                    <div className="text-sm" style={{color: COLOR_MAP.text}}>事件触发</div>
+                                </div>
+                            </div>
+                            <div className="space-y-2 text-sm">
+                                <div className="flex justify-between p-2 rounded" style={{backgroundColor: 'rgba(168,85,247,0.2)'}}>
+                                    <span>Give() →</span>
+                                    <span>0 → 1 (空→满)</span>
+                                </div>
+                                <div className="flex justify-between p-2 rounded" style={{backgroundColor: 'rgba(168,85,247,0.2)'}}>
+                                    <span>Take() →</span>
+                                    <span>1 → 0 (满→空)</span>
+                                </div>
+                            </div>
+                            <div className="text-xs text-center" style={{color: COLOR_MAP.text}}>
+                                典型应用：ISR 通知任务、事件同步
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 1) {
+                    // 互斥量
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>互斥量 (Mutex)</h3>
+                            <div className="flex justify-center items-center gap-4">
+                                <div className={`w-24 h-24 rounded-lg flex items-center justify-center lock-unlock ${semaphoreState.mutex.locked ? 'opacity-100' : 'opacity-50'}`} style={{backgroundColor: semaphoreState.mutex.color}}>
+                                    <span className="text-5xl">{semaphoreState.mutex.locked ? '🔒' : '🔓'}</span>
+                                </div>
+                                <div className="text-center">
+                                    <div className="text-sm mb-1" style={{color: COLOR_MAP.text}}>持有者:</div>
+                                    <div className="font-bold" style={{color: semaphoreState.mutex.owner ? COLOR_MAP.primary : '#6b7280'}}>
+                                        {semaphoreState.mutex.owner || '无'}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="space-y-2 text-sm">
+                                <button onClick={() => setSemaphoreState(prev => ({
+                                    ...prev,
+                                    mutex: { ...prev.mutex, locked: !prev.mutex.locked, owner: prev.mutex.locked ? null : 'Task_High' }
+                                }))}
+                                    className="w-full py-2 rounded font-bold transition-opacity hover:opacity-80"
+                                    style={{backgroundColor: semaphoreState.mutex.locked ? '#ef4444' : COLOR_MAP.secondary}}>
+                                    {semaphoreState.mutex.locked ? '解锁 (Give)' : '加锁 (Take)'}
+                                </button>
+                            </div>
+                            <div className="text-xs text-center" style={{color: COLOR_MAP.text}}>
+                                特性：优先级继承、防止优先级反转
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 2) {
+                    // 计数信号量
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>计数信号量 (Counting Semaphore)</h3>
+                            <div className="flex justify-center gap-2">
+                                {[...Array(5)].map((_, idx) => (
+                                    <div key={idx}
+                                        className={`w-12 h-32 border-2 rounded flex items-end justify-center transition-all ${idx < semaphoreState.counting.value ? 'pulse' : 'opacity-30'}`}
+                                        style={{
+                                            borderColor: COLOR_MAP.accent,
+                                            backgroundColor: idx < semaphoreState.counting.value ? `rgba(6,182,212,${0.3 + (idx/5)*0.4})` : 'transparent'
+                                        }}>
+                                        <div className="text-2xl mb-2">🪙</div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="text-center text-lg" style={{color: COLOR_MAP.text}}>
+                                当前值：<span className="font-bold" style={{color: COLOR_MAP.accent}}>{semaphoreState.counting.value}</span> / {semaphoreState.counting.max}
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => setSemaphoreState(prev => ({
+                                    ...prev,
+                                    counting: { ...prev.counting, value: Math.max(0, prev.counting.value - 1) }
+                                }))}
+                                    className="flex-1 py-2 rounded font-bold hover:opacity-80"
+                                    style={{backgroundColor: COLOR_MAP.primary}}>
+                                    获取资源 (Take)
+                                </button>
+                                <button onClick={() => setSemaphoreState(prev => ({
+                                    ...prev,
+                                    counting: { ...prev.counting, value: Math.min(prev.counting.max, prev.counting.value + 1) }
+                                }))}
+                                    className="flex-1 py-2 rounded font-bold hover:opacity-80"
+                                    style={{backgroundColor: COLOR_MAP.accent}}>
+                                    释放资源 (Give)
+                                </button>
+                            </div>
+                            <div className="text-xs text-center" style={{color: COLOR_MAP.text}}>
+                                典型应用：资源池、限流、缓冲区管理
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 3) {
+                    // 优先级反转
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>优先级反转问题</h3>
+
+                            {/* 问题场景 */}
+                            <div className="border-2 rounded-lg p-4 mb-4" style={{borderColor: '#ef4444'}}>
+                                <div className="text-center font-bold mb-2" style={{color: '#ef4444'}}>❌ 优先级反转 (未解决)</div>
+                                <div className="space-y-2 text-sm">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-16 p-1 rounded text-center font-bold" style={{backgroundColor: COLOR_MAP.primary}}>High</div>
+                                        <div className="flex-1 h-4 bg-gray-700 rounded overflow-hidden">
+                                            <div className="h-full bg-red-500" style={{width: '30%'}}></div>
+                                        </div>
+                                        <span>等待 Mutex</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-16 p-1 rounded text-center font-bold" style={{backgroundColor: '#6b7280'}}>Mid</div>
+                                        <div className="flex-1 h-4 bg-gray-700 rounded overflow-hidden">
+                                            <div className="h-full bg-yellow-500 pulse" style={{width: '60%'}}></div>
+                                        </div>
+                                        <span>正在运行</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-16 p-1 rounded text-center font-bold" style={{backgroundColor: '#8b5cf6'}}>Low</div>
+                                        <div className="flex-1 h-4 bg-gray-700 rounded overflow-hidden">
+                                            <div className="h-full bg-green-500" style={{width: '40%'}}></div>
+                                        </div>
+                                        <span>持有 Mutex</span>
+                                    </div>
+                                </div>
+                                <div className="text-xs mt-2 text-red-400">问题：High 被 Mid 阻塞 (不应发生!)</div>
+                            </div>
+
+                            {/* 解决方案 */}
+                            <div className="border-2 rounded-lg p-4" style={{borderColor: COLOR_MAP.secondary}}>
+                                <div className="text-center font-bold mb-2" style={{color: COLOR_MAP.secondary}}>✓ 优先级继承 (已解决)</div>
+                                <div className="space-y-2 text-sm">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-16 p-1 rounded text-center font-bold" style={{backgroundColor: COLOR_MAP.primary}}>High</div>
+                                        <div className="flex-1 h-4 bg-gray-700 rounded overflow-hidden">
+                                            <div className="h-full bg-green-500 pulse" style={{width: '70%'}}></div>
+                                        </div>
+                                        <span>正在运行</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-16 p-1 rounded text-center font-bold" style={{backgroundColor: '#6b7280'}}>Mid</div>
+                                        <div className="flex-1 h-4 bg-gray-700 rounded overflow-hidden">
+                                            <div className="h-full bg-gray-600" style={{width: '0%'}}></div>
+                                        </div>
+                                        <span>就绪</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-16 p-1 rounded text-center font-bold" style={{backgroundColor: COLOR_MAP.primary}}>Low</div>
+                                        <div className="flex-1 h-4 bg-gray-700 rounded overflow-hidden">
+                                            <div className="h-full bg-blue-500" style={{width: '30%'}}></div>
+                                        </div>
+                                        <span>优先级提升</span>
+                                    </div>
+                                </div>
+                                <div className="text-xs mt-2 text-green-400">解决：Low 临时继承 High 优先级</div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 4) {
+                    // API 汇总
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>FreeRTOS 信号量 API</h3>
+                            <div className="space-y-3 text-sm">
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(168,85,247,0.2)'}}>
+                                    <div className="font-bold mb-1" style={{color: COLOR_MAP.primary}}>创建 API</div>
+                                    <div className="font-mono text-xs">xSemaphoreCreateBinary()</div>
+                                    <div className="font-mono text-xs">xSemaphoreCreateMutex()</div>
+                                    <div className="font-mono text-xs">xSemaphoreCreateCounting(max,init)</div>
+                                </div>
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(6,182,212,0.2)'}}>
+                                    <div className="font-bold mb-1" style={{color: COLOR_MAP.accent}}>任务 API</div>
+                                    <div className="font-mono text-xs">xSemaphoreTake(handle, ticks)</div>
+                                    <div className="font-mono text-xs">xSemaphoreGive(handle)</div>
+                                </div>
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(245,158,11,0.2)'}}>
+                                    <div className="font-bold mb-1" style={{color: COLOR_MAP.secondary}}>ISR API</div>
+                                    <div className="font-mono text-xs">xSemaphoreGiveFromISR()</div>
+                                    <div className="font-mono text-xs">portYIELD_FROM_ISR(xHigher)</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 5) {
+                    // ISR 同步
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>中断同步流程</h3>
+                            <div className="relative">
+                                {/* ISR */}
+                                <div className="p-3 rounded-lg mb-2 pulse" style={{backgroundColor: '#ef4444'}}>
+                                    <div className="font-bold">1. ISR 触发</div>
+                                    <div className="text-xs">硬件中断 → 保存上下文</div>
+                                </div>
+                                <div className="absolute left-8 top-12 bottom-0 w-0.5" style={{backgroundColor: COLOR_MAP.text}}></div>
+
+                                {/* 环形缓冲 */}
+                                <div className="p-3 rounded-lg mb-2 ml-8" style={{backgroundColor: COLOR_MAP.accent}}>
+                                    <div className="font-bold">2. 写入 Ring Buffer</div>
+                                    <div className="flex gap-1 mt-2">
+                                        {[...Array(8)].map((_, i) => (
+                                            <div key={i} className={`w-6 h-6 rounded flex items-center justify-center text-xs ${i === 3 ? 'pulse' : ''}`} style={{backgroundColor: i <= 3 ? COLOR_MAP.accent : '#374151'}}>
+                                                {i <= 3 ? i : ''}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="absolute left-8 top-32 bottom-0 w-0.5" style={{backgroundColor: COLOR_MAP.text}}></div>
+
+                                {/* 信号量 */}
+                                <div className="p-3 rounded-lg mb-2 ml-8" style={{backgroundColor: COLOR_MAP.primary}}>
+                                    <div className="font-bold">3. Give 信号量</div>
+                                    <div className="text-xs">xSemaphoreGiveFromISR()</div>
+                                </div>
+                                <div className="absolute left-8 top-52 bottom-0 w-0.5" style={{backgroundColor: COLOR_MAP.text}}></div>
+
+                                {/* 任务 */}
+                                <div className="p-3 rounded-lg ml-8" style={{backgroundColor: COLOR_MAP.secondary}}>
+                                    <div className="font-bold">4. 任务被唤醒</div>
+                                    <div className="text-xs">portYIELD_FROM_ISR(xHigher)</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 6) {
+                    // 生产者消费者
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>生产者 - 消费者模式</h3>
+                            <div className="flex items-center gap-4">
+                                {/* 生产者 */}
+                                <div className="flex-1 p-4 rounded-lg" style={{backgroundColor: 'rgba(59,130,246,0.2)'}}>
+                                    <div className="font-bold text-center mb-2" style={{color: COLOR_MAP.primary}}>生产者 Task</div>
+                                    <div className="text-xs space-y-1">
+                                        <div>1. 读取传感器</div>
+                                        <div>2. 写入队列</div>
+                                        <div>3. Give 信号量</div>
+                                    </div>
+                                    <div className="mt-3 flex justify-center">
+                                        <div className="w-12 h-12 rounded-full flex items-center justify-center pulse" style={{backgroundColor: COLOR_MAP.primary}}>
+                                            <span className="text-2xl">📤</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 队列 */}
+                                <div className="flex-1 p-4 rounded-lg" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                    <div className="font-bold text-center mb-2" style={{color: COLOR_MAP.secondary}}>队列 (Queue)</div>
+                                    <div className="flex gap-1 justify-center mt-4">
+                                        {[...Array(5)].map((_, i) => (
+                                            <div key={i} className={`w-8 h-8 rounded border-2 flex items-center justify-center ${i < 3 ? 'pulse' : 'opacity-30'}`} style={{borderColor: COLOR_MAP.secondary, backgroundColor: i < 3 ? COLOR_MAP.secondary : 'transparent'}}>
+                                                {i < 3 && <span className="text-xs">{i}</span>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* 消费者 */}
+                                <div className="flex-1 p-4 rounded-lg" style={{backgroundColor: 'rgba(245,158,11,0.2)'}}>
+                                    <div className="font-bold text-center mb-2" style={{color: COLOR_MAP.secondary}}>消费者 Task</div>
+                                    <div className="text-xs space-y-1">
+                                        <div>1. Take 信号量</div>
+                                        <div>2. 读取队列</div>
+                                        <div>3. 处理数据</div>
+                                    </div>
+                                    <div className="mt-3 flex justify-center">
+                                        <div className="w-12 h-12 rounded-full flex items-center justify-center pulse" style={{backgroundColor: COLOR_MAP.secondary}}>
+                                            <span className="text-2xl">📥</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 7) {
+                    // 最佳实践
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>同步机制选择指南</h3>
+                            <div className="grid grid-cols-1 gap-3 text-xs">
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(168,85,247,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.primary}}>🎯 二值信号量</div>
+                                    <div>✓ ISR → 任务通知</div>
+                                    <div>✓ 事件同步 (单事件)</div>
+                                    <div>✗ 不解决优先级反转</div>
+                                </div>
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(245,158,11,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.secondary}}>🔒 互斥量</div>
+                                    <div>✓ 共享资源保护</div>
+                                    <div>✓ 优先级继承</div>
+                                    <div>✗ 不能用于 ISR</div>
+                                </div>
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(6,182,212,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.accent}}>📊 计数信号量</div>
+                                    <div>✓ 资源池管理</div>
+                                    <div>✓ 限流控制</div>
+                                    <div>✗ 不解决优先级反转</div>
+                                </div>
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(239,68,68,0.2)'}}>
+                                    <div className="font-bold" style={{color: '#ef4444'}}>🎭 事件组</div>
+                                    <div>✓ 多事件组合 (与/或)</div>
+                                    <div>✓ 一对多通知</div>
+                                    <div>✗ 不支持 ISR</div>
+                                </div>
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(139,92,246,0.2)'}}>
+                                    <div className="font-bold" style={{color: '#8b5cf6'}}>⚡ 任务通知</div>
+                                    <div>✓ 轻量级 (无对象)</div>
+                                    <div>✓ 一对一通知</div>
+                                    <div>✗ 仅支持单任务</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                return null;
+            };
+
+            // ========== 渲染解释区域 ==========
+            const renderExplanation = () => {
+                const explanations = {
+                    0: {
+                        title: "二值信号量 (Binary Semaphore)",
+                        points: [
+                            "信号量值只能是 0 或 1，表示"空"或"满"状态",
+                            "典型应用：ISR 通知任务、事件同步",
+                            "Give() 将值从 0 变为 1，Take() 从 1 变为 0",
+                            "不解决优先级反转问题，仅用于同步"
+                        ]
+                    },
+                    1: {
+                        title: "互斥量 (Mutex)",
+                        points: [
+                            "专用于共享资源保护，防止并发访问冲突",
+                            "具有优先级继承机制，防止优先级反转",
+                            "只能由持有者释放 (Give)，防止误操作",
+                            "不能在 ISR 中使用 (会触发断言失败)"
+                        ]
+                    },
+                    2: {
+                        title: "计数信号量 (Counting Semaphore)",
+                        points: [
+                            "信号量值范围 0 到最大值，表示可用资源数量",
+                            "典型应用：资源池管理、限流控制",
+                            "Take() 减 1，Give() 加 1，边界时阻塞",
+                            "不解决优先级反转，仅用于资源计数"
+                        ]
+                    },
+                    3: {
+                        title: "优先级反转问题",
+                        points: [
+                            "场景：Low 持有 Mutex，High 等待，Mid 就绪",
+                            "结果：Mid 抢占 Low，导致 High 被 Mid 阻塞",
+                            "解决方案：使用互斥量 (非二值信号量)",
+                            "FreeRTOS 自动提升 Low 优先级到 High 级别"
+                        ]
+                    },
+                    4: {
+                        title: "FreeRTOS 信号量 API",
+                        points: [
+                            "创建：xSemaphoreCreateBinary/Mutex/Counting",
+                            "静态创建：xxxStatic 版本 (预分配内存)",
+                            "任务 API：xSemaphoreTake/Give (可阻塞)",
+                            "ISR API：xxxFromISR 后缀 (带 xHigher 参数)"
+                        ]
+                    },
+                    5: {
+                        title: "中断同步最佳实践",
+                        points: [
+                            "ISR 中仅执行最小操作：读取数据 + 写入缓冲",
+                            "使用环形缓冲区存储 ISR 数据",
+                            "通过 GiveFromISR 通知任务处理",
+                            "portYIELD_FROM_ISR 触发上下文切换"
+                        ]
+                    },
+                    6: {
+                        title: "生产者 - 消费者模式",
+                        points: [
+                            "生产者：读取传感器 → 写队列 → Give 信号量",
+                            "消费者：Take 信号量 → 读队列 → 处理数据",
+                            "信号量保证消费者不会在空队列阻塞",
+                            "队列传递数据，信号量同步事件"
+                        ]
+                    },
+                    7: {
+                        title: "同步机制选择指南",
+                        points: [
+                            "ISR→任务：二值信号量 或 任务通知",
+                            "资源保护：互斥量 (优先级继承)",
+                            "资源池：计数信号量",
+                            "多事件：事件组 (Event Group)",
+                            "轻量通知：任务通知 (Task Notification)"
+                        ]
+                    }
+                };
+
+                const exp = explanations[currentStep];
+                return (
+                    <div>
+                        <h3 className="text-lg font-bold mb-3" style={{color: COLOR_MAP.primary}}>{exp.title}</h3>
+                        <ul className="space-y-2">
+                            {exp.points.map((point, idx) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                    <span className="text-green-400 mt-1">▸</span>
+                                    <span>{point}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="flex flex-col h-screen p-4 gap-4">
+                    {/* 顶部标题 */}
+                    <div className="text-center py-3 rounded-lg" style={{backgroundColor: 'rgba(0,0,0,0.3)'}}>
+                        <h1 className="text-2xl font-bold mb-1">1187 - RTOS 信号量与互斥量</h1>
+                        <p className="text-sm opacity-75">C 语言核心 | 嵌入式实时操作系统同步机制</p>
+                    </div>
+
+                    {/* 三列主布局 */}
+                    <div className="flex-1 grid grid-cols-3 gap-4 overflow-hidden">
+                        {/* 左列：代码 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>📝</span> 代码示例
+                            </h2>
+                            <div className="font-mono text-xs leading-relaxed" style={{color: COLOR_MAP.text}}>
+                                {renderCode()}
+                            </div>
+                        </div>
+
+                        {/* 中列：可视化 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>🎬</span> 可视化演示
+                            </h2>
+                            <div className="text-sm">
+                                {renderVisualization()}
+                            </div>
+                        </div>
+
+                        {/* 右列：解释 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>📖</span> 原理解析
+                            </h2>
+                            <div className="text-sm space-y-3" style={{color: COLOR_MAP.text}}>
+                                {renderExplanation()}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部控制栏 */}
+                    <div className="rounded-lg p-3 flex items-center justify-between" style={{backgroundColor: 'rgba(0,0,0,0.3)'}}>
+                        <div className="flex items-center gap-4">
+                            <button onClick={handlePrev} disabled={currentStep === 0}
+                                className="px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.primary}}>上一步</button>
+                            <button onClick={handleNext} disabled={currentStep === STEPS.length - 1}
+                                className="px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.secondary}}>下一步</button>
+                            <button onClick={handleRestart}
+                                className="px-4 py-2 rounded hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.accent}}>重新开始</button>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            <div className="text-sm">
+                                <span className="opacity-75">进度：</span>
+                                <span className="font-bold">{currentStep + 1} / {STEPS.length}</span>
+                            </div>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className="px-3 py-2 rounded text-sm"
+                                style={{backgroundColor: isMuted ? '#ef4444' : '#10b981'}}>
+                                {isMuted ? '🔇 静音' : '🔊 有声'}
+                            </button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className="px-4 py-2 rounded font-bold"
+                                style={{backgroundColor: isPlaying ? COLOR_MAP.primary : COLOR_MAP.accent}}>
+                                {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

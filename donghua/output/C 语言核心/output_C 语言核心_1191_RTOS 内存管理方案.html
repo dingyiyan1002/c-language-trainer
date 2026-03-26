@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1191 - RTOS 内存管理方案 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: linear-gradient(135deg, #dc2626 0%, #7f1d1d 100%); color: #e0e7ff; min-height: 100vh; overflow-x: hidden; }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(0.98); } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes fragment { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(5px); } }
+        @keyframes alloc { 0% { transform: scaleY(0); opacity: 0; } 100% { transform: scaleY(1); opacity: 1; } }
+        @keyframes free { 0% { transform: scaleY(1); opacity: 1; } 100% { transform: scaleY(0); opacity: 0; } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .fragment { animation: fragment 1s infinite; }
+        .alloc { animation: alloc 0.3s ease-out; }
+        .free { animation: free 0.3s ease-in; }
+
+        .state-transition { transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+
+        .code-line { display: block; padding: 2px 0; }
+        .code-keyword { color: #c678dd; }
+        .code-type { color: #e5c07b; }
+        .code-function { color: #61afef; }
+        .code-string { color: #98c379; }
+        .code-comment { color: #7f8c8d; font-style: italic; }
+        .code-number { color: #d19a66; }
+        .code-operator { color: #56b6c2; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // ========== COLOR MAP - 6 unique colors for this file ==========
+        const COLOR_MAP = {
+            primary: '#ef4444',    // Red - Heap fragmentation
+            secondary: '#10b981',  // Emerald - Static allocation
+            accent: '#f59e0b',     // Amber - Memory pool
+            bg: '#0f172a',         // Slate 900
+            text: '#f1f5f9',       // Slate 100
+            border: '#334155'      // Slate 700
+        };
+
+        // ========== SKILL.md v3.0 8 Regions ==========
+        const STEPS = [
+            { title: "内存管理问题", subtitle: "碎片化风险", duration: 8000 },
+            { title: "静态内存分配", subtitle: "编译时确定", duration: 8000 },
+            { title: "内存池技术", subtitle: "固定大小块", duration: 8000 },
+            { title: "FreeRTOS heap_1", subtitle: "仅分配不释放", duration: 8000 },
+            { title: "FreeRTOS heap_4", subtitle: "首次拟合法", duration: 8000 },
+            { title: "内存对齐", subtitle: "性能优化", duration: 8000 },
+            { title: "应用案例", subtitle: "缓冲区管理", duration: 8000 },
+            { title: "最佳实践", subtitle: "嵌入式内存策略", duration: 10000 }
+        ];
+
+        // ========== Main App ==========
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+            const synthRef = useRef(window.speechSynthesis);
+            const currentUtteranceRef = useRef(null);
+
+            // 堆内存状态
+            const [heapState, setHeapState] = useState({
+                totalSize: 1024,
+                blocks: [
+                    {id: 1, size: 128, allocated: true, address: 0},
+                    {id: 2, size: 64, allocated: false, address: 128},
+                    {id: 3, size: 256, allocated: true, address: 192},
+                    {id: 4, size: 128, allocated: false, address: 448},
+                    {id: 5, size: 192, allocated: true, address: 576},
+                    {id: 6, size: 448, allocated: false, address: 768}
+                ],
+                fragmentation: 35
+            });
+
+            // 内存池状态
+            const [poolState, setPoolState] = useState({
+                blockSize: 64,
+                totalBlocks: 16,
+                allocated: [true, true, false, true, false, false, true, false, true, true, false, false, false, true, false, true]
+            });
+
+            // 动画状态
+            const [allocAnim, setAllocAnim] = useState({active: false, index: -1, action: 'alloc'});
+
+            // ========== 语音合成 ==========
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+                if (currentUtteranceRef.current) {
+                    synthRef.current.cancel();
+                }
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                const voices = synthRef.current.getVoices();
+                const xiaoxiaoVoice = voices.find(v =>
+                    v.name.includes('Xiaoxiao') ||
+                    v.name.includes('zh-CN') ||
+                    v.lang === 'zh-CN'
+                );
+                if (xiaoxiaoVoice) utterance.voice = xiaoxiaoVoice;
+
+                utterance.onend = () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.warn('Speech synthesis error:', event);
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                currentUtteranceRef.current = utterance;
+                synthRef.current.speak(utterance);
+            }, [isMuted]);
+
+            // ========== 步骤推进 ==========
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.subtitle);
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                };
+            }, [currentStep, speak]);
+
+            // ========== 手动控制 ==========
+            const handleNext = () => { if (currentStep < STEPS.length - 1) setCurrentStep(currentStep + 1); };
+            const handlePrev = () => { if (currentStep > 0) setCurrentStep(currentStep - 1); };
+            const handleRestart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+                setHeapState({
+                    totalSize: 1024,
+                    blocks: [
+                        {id: 1, size: 128, allocated: true, address: 0},
+                        {id: 2, size: 64, allocated: false, address: 128},
+                        {id: 3, size: 256, allocated: true, address: 192},
+                        {id: 4, size: 128, allocated: false, address: 448},
+                        {id: 5, size: 192, allocated: true, address: 576},
+                        {id: 6, size: 448, allocated: false, address: 768}
+                    ],
+                    fragmentation: 35
+                });
+                setPoolState({
+                    blockSize: 64,
+                    totalBlocks: 16,
+                    allocated: [true, true, false, true, false, false, true, false, true, true, false, false, false, true, false, true]
+                });
+            };
+
+            // 模拟分配/释放
+            const simulateAlloc = () => {
+                const freeIdx = heapState.blocks.findIndex(b => !b.allocated);
+                if (freeIdx !== -1) {
+                    setAllocAnim({active: true, index: freeIdx, action: 'alloc'});
+                    setTimeout(() => {
+                        setHeapState(prev => ({
+                            ...prev,
+                            blocks: prev.blocks.map((b, i) => i === freeIdx ? {...b, allocated: true} : b),
+                            fragmentation: prev.fragmentation + 5
+                        }));
+                        setAllocAnim({active: false, index: -1, action: 'alloc'});
+                    }, 300);
+                }
+            };
+
+            const simulateFree = () => {
+                const allocIdx = heapState.blocks.findIndex(b => b.allocated);
+                if (allocIdx !== -1) {
+                    setAllocAnim({active: true, index: allocIdx, action: 'free'});
+                    setTimeout(() => {
+                        setHeapState(prev => ({
+                            ...prev,
+                            blocks: prev.blocks.map((b, i) => i === allocIdx ? {...b, allocated: false} : b),
+                            fragmentation: Math.max(0, prev.fragmentation - 10)
+                        }));
+                        setAllocAnim({active: false, index: -1, action: 'free'});
+                    }, 300);
+                }
+            };
+
+            // ========== 渲染代码区域 ==========
+            const renderCode = () => {
+                const codeSnippets = {
+                    0: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 动态内存问题 */</span><br/>
+                            <span className="code-comment">// 标准 malloc/free 在嵌入式中的问题: */</span><br/>
+                            <span className="code-comment">// 1. 内存碎片化 (Fragmentation) */</span><br/>
+                            <span className="code-comment">// 2. 分配时间不确定 (非实时) */</span><br/>
+                            <span className="code-comment">// 3. 可能分配失败返回 NULL */</span><br/>
+                            <span className="code-comment">// 4. 无线程安全保护 */</span><br/><br/>
+                            <span className="code-comment">/* 碎片化示例 */</span><br/>
+                            <span className="code-keyword">while</span>(1) {<br/>
+                            &nbsp;&nbsp;p = <span className="code-function">malloc</span>(random_size());<br/>
+                            &nbsp;&nbsp;<span className="code-function">free</span>(p);  <span className="code-comment">// 释放后产生碎片 */</span><br/>
+                            }<br/>
+                        </div>
+                    ),
+                    1: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 静态内存分配 - 最安全 */</span><br/>
+                            <span className="code-keyword">static uint8_t</span> rxBuffer[256];<br/>
+                            <span className="code-keyword">static uint8_t</span> txBuffer[256];<br/><br/>
+                            <span className="code-comment">/* 静态 TCB 和栈 */</span><br/>
+                            <span className="code-keyword">static</span> StaticTask_t xTaskBuffer;<br/>
+                            <span className="code-keyword">static</span> StackType_t xTaskStack[128];<br/><br/>
+                            <span className="code-comment">// 创建任务 (无动态分配) */</span><br/>
+                            xTask = <span className="code-function">xTaskCreateStatic</span>(<br/>
+                            &nbsp;&nbsp;vTaskCode, "Task", 128,<br/>
+                            &nbsp;&nbsp;NULL, 1, xTaskStack, &xTaskBuffer<br/>
+                            );<br/>
+                        </div>
+                    ),
+                    2: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 内存池技术 */</span><br/>
+                            #define POOL_SIZE  16<br/>
+                            #define BLOCK_SIZE 64<br/><br/>
+                            <span className="code-keyword">typedef struct</span> {<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint8_t</span> data[BLOCK_SIZE];<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">struct</span> Block* next;<br/>
+                            } Block;<br/><br/>
+                            <span className="code-keyword">static</span> Block pool[POOL_SIZE];<br/>
+                            <span className="code-keyword">static</span> Block* freeList;<br/><br/>
+                            <span className="code-keyword">void</span>* <span className="code-function">pool_alloc</span>(<span className="code-keyword">void</span>) {<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">if</span> (freeList == NULL) <span className="code-keyword">return</span> NULL;<br/>
+                            &nbsp;&nbsp;Block* block = freeList;<br/>
+                            &nbsp;&nbsp;freeList = freeList->next;<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">return</span> block;<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    3: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* FreeRTOS heap_1 - 仅分配不释放 */</span><br/>
+                            <span className="code-comment">// 配置： */</span><br/>
+                            #define configSUPPORT_DYNAMIC_ALLOCATION 1<br/>
+                            #define configTOTAL_HEAP_SIZE  ((size_t)4096)<br/><br/>
+                            <span className="code-comment">// 特点: */</span><br/>
+                            <span className="code-comment">// ✓ 简单，代码量小 */</span><br/>
+                            <span className="code-comment">// ✓ 无碎片化 */</span><br/>
+                            <span className="code-comment">// ✗ 不能释放 (pvPortFree 为空) */</span><br/>
+                            <span className="code-comment">// 适用：任务/队列创建后不删除的系统 */</span><br/>
+                        </div>
+                    ),
+                    4: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* FreeRTOS heap_4 - 首次拟合法 */</span><br/>
+                            <span className="code-comment">// 特点： */</span><br/>
+                            <span className="code-comment">// ✓ 支持 malloc/free */</span><br/>
+                            <span className="code-comment">// ✓ 相邻空闲块合并 (防碎片) */</span><br/>
+                            <span className="code-comment">// ✓ 线程安全 (临界区保护) */</span><br/>
+                            <span className="code-comment">// ✗ 分配时间不确定 */</span><br/>
+                            <span className="code-comment">// 适用：需要动态释放的通用系统 */</span><br/><br/>
+                            <span className="code-comment">// API: */</span><br/>
+                            <span className="code-keyword">void</span>* pvPortMalloc(<span className="code-type">size_t</span> size);<br/>
+                            <span className="code-keyword">void</span> vPortFree(<span className="code-keyword">void</span>* ptr);<br/>
+                        </div>
+                    ),
+                    5: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 内存对齐优化 */</span><br/>
+                            <span className="code-comment">// Cortex-M4 要求 4 字节对齐 */</span><br/>
+                            #define portBYTE_ALIGNMENT  8<br/><br/>
+                            <span className="code-comment">/* 对齐分配 */</span><br/>
+                            <span className="code-keyword">struct</span> Data {<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint8_t</span> a;      <span className="code-comment">// 1 字节 */</span><br/>
+                            &nbsp;&nbsp;<span className="code-type">uint32_t</span> b;    <span className="code-comment">// 4 字节 (需要 3 字节填充) */</span><br/>
+                            &nbsp;&nbsp;<span className="code-type">uint16_t</span> c;    <span className="code-comment">// 2 字节 (需要 2 字节填充) */</span><br/>
+                            };<br/>
+                            <span className="code-comment">// 实际大小：1+3+4+2+2 = 12 字节 */</span><br/><br/>
+                            <span className="code-comment">/* 优化布局 */</span><br/>
+                            <span className="code-keyword">struct</span> DataOpt {<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint32_t</span> b;<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint16_t</span> c;<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint8_t</span> a;<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint8_t</span> pad;  <span className="code-comment">// 显式填充 */</span><br/>
+                            };<br/>
+                        </div>
+                    ),
+                    6: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 环形缓冲区 - 静态实现 */</span><br/>
+                            #define RX_BUF_SIZE  256<br/>
+                            <span className="code-keyword">static uint8_t</span> g_rxBuffer[RX_BUF_SIZE];<br/>
+                            <span className="code-keyword">static volatile uint16_t</span> g_rxHead = 0;<br/>
+                            <span className="code-keyword">static volatile uint16_t</span> g_rxTail = 0;<br/><br/>
+                            <span className="code-type">bool</span> <span className="code-function">RingBuf_Put</span>(<span className="code-type">uint8_t</span> data) {<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint16_t</span> next = (g_rxHead + 1) % RX_BUF_SIZE;<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">if</span> (next == g_rxTail) <span className="code-keyword">return</span> false;<br/>
+                            &nbsp;&nbsp;g_rxBuffer[g_rxHead] = data;<br/>
+                            &nbsp;&nbsp;g_rxHead = next;<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">return</span> true;<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    7: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 嵌入式内存管理最佳实践 */</span><br/>
+                            <span className="code-comment">// 优先级 1: 静态分配 (无运行时风险) */</span><br/>
+                            <span className="code-comment">// 优先级 2: 内存池 (固定大小块) */</span><br/>
+                            <span className="code-comment">// 优先级 3: heap_4 (首次拟合，防碎片) */</span><br/>
+                            <span className="code-comment">// 避免：标准 malloc/free */</span><br/><br/>
+                            <span className="code-comment">/* 设计原则 */</span><br/>
+                            <span className="code-keyword">#define</span> MAX_TASKS    8   <span className="code-comment">// 编译时确定上限 */</span><br/>
+                            <span className="code-keyword">#define</span> MAX_QUEUES   16  <span className="code-comment">// 避免动态扩展 */</span><br/>
+                            <span className="code-keyword">#define</span> BUFFER_SIZE  256 <span className="code-comment">// 固定缓冲区大小 */</span><br/>
+                        </div>
+                    )
+                };
+                return codeSnippets[currentStep];
+            };
+
+            // ========== 渲染可视化区域 ==========
+            const renderVisualization = () => {
+                if (currentStep === 0) {
+                    // 内存管理问题
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>动态内存碎片化问题</h3>
+                            <div className="border-2 rounded-lg overflow-hidden" style={{borderColor: COLOR_MAP.border}}>
+                                <div className="p-2 text-center font-bold" style={{backgroundColor: COLOR_MAP.primary}}>堆内存 (Heap) - {heapState.totalSize} 字节</div>
+                                <div className="p-4 space-y-2">
+                                    {heapState.blocks.map((block) => (
+                                        <div key={block.id}
+                                            className={`h-12 rounded flex items-center justify-between px-4 transition-all ${allocAnim.active && allocAnim.index === heapState.blocks.indexOf(block) ? (allocAnim.action === 'alloc' ? 'pulse' : 'opacity-50') : ''}`}
+                                            style={{
+                                                backgroundColor: block.allocated ? COLOR_MAP.primary : '#374151',
+                                                width: `${(block.size / heapState.totalSize) * 100}%`
+                                            }}>
+                                            <span className="text-xs">0x{block.address.toString(16)}</span>
+                                            <span className="text-xs font-bold">{block.size}B</span>
+                                            <span className="text-xs">{block.allocated ? '已分配' : '空闲'}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="text-center p-3 rounded" style={{backgroundColor: 'rgba(239,68,68,0.2)'}}>
+                                    <div className="text-2xl font-bold" style={{color: COLOR_MAP.primary}}>{heapState.fragmentation}%</div>
+                                    <div className="text-xs" style={{color: COLOR_MAP.text}}>碎片化程度</div>
+                                </div>
+                                <div className="text-center p-3 rounded" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                    <div className="text-2xl font-bold" style={{color: COLOR_MAP.secondary}}>{heapState.blocks.filter(b => !b.allocated).reduce((sum, b) => sum + b.size, 0)}B</div>
+                                    <div className="text-xs" style={{color: COLOR_MAP.text}}>总空闲内存</div>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={simulateAlloc} className="flex-1 py-2 rounded font-bold hover:opacity-80" style={{backgroundColor: COLOR_MAP.primary}}>模拟分配</button>
+                                <button onClick={simulateFree} className="flex-1 py-2 rounded font-bold hover:opacity-80" style={{backgroundColor: COLOR_MAP.secondary}}>模拟释放</button>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 1) {
+                    // 静态内存分配
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>静态内存分配</h3>
+                            <div className="space-y-4">
+                                <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                    <div className="font-bold mb-2" style={{color: COLOR_MAP.secondary}}>✓ 全局/静态缓冲区</div>
+                                    <div className="font-mono text-xs">static uint8_t rxBuffer[256];</div>
+                                    <div className="flex gap-1 mt-2">
+                                        {[...Array(16)].map((_, i) => (
+                                            <div key={i} className="flex-1 h-4 rounded" style={{backgroundColor: COLOR_MAP.secondary}}></div>
+                                        ))}
+                                    </div>
+                                    <div className="text-xs mt-2">编译时确定大小，无运行时分配</div>
+                                </div>
+
+                                <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(59,130,246,0.2)'}}>
+                                    <div className="font-bold mb-2" style={{color: COLOR_MAP.accent}}>✓ 静态 TCB + 栈</div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <div className="text-xs">StaticTask_t</div>
+                                            <div className="h-8 rounded mt-1" style={{backgroundColor: COLOR_MAP.accent}}></div>
+                                        </div>
+                                        <div>
+                                            <div className="text-xs">StackType_t[128]</div>
+                                            <div className="h-8 rounded mt-1 flex">
+                                                {[...Array(8)].map((_, i) => (
+                                                    <div key={i} className="flex-1 border-r" style={{backgroundColor: i % 2 === 0 ? COLOR_MAP.accent : '#3b82f6'}}></div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="text-xs mt-2">xTaskCreateStatic() 创建任务</div>
+                                </div>
+
+                                <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(139,92,246,0.2)'}}>
+                                    <div className="font-bold mb-2" style={{color: '#8b5cf6'}}>优势</div>
+                                    <div className="text-xs space-y-1">
+                                        <div>✓ 无碎片化风险</div>
+                                        <div>✓ 分配时间确定 (编译时)</div>
+                                        <div>✓ 不会失败 (无 NULL 检查)</div>
+                                        <div>✓ 内存布局清晰可见</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 2) {
+                    // 内存池技术
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>内存池 (Memory Pool)</h3>
+                            <div className="border-2 rounded-lg p-4" style={{borderColor: COLOR_MAP.border}}>
+                                <div className="text-center mb-2" style={{color: COLOR_MAP.text}}>内存池 (16 块 × 64 字节 = 1KB)</div>
+                                <div className="grid grid-cols-8 gap-1">
+                                    {poolState.allocated.map((isAlloc, idx) => (
+                                        <div key={idx}
+                                            className={`h-12 rounded flex items-center justify-center transition-all ${isAlloc ? 'pulse' : 'opacity-50'}`}
+                                            style={{backgroundColor: isAlloc ? COLOR_MAP.accent : '#374151'}}>
+                                            <span className="text-xs font-bold">{idx}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex justify-between mt-2 text-xs" style={{color: COLOR_MAP.text}}>
+                                    <span>已分配：{poolState.allocated.filter(a => a).length} 块</span>
+                                    <span>空闲：{poolState.allocated.filter(a => !a).length} 块</span>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => setPoolState(prev => {
+                                    const freeIdx = prev.allocated.findIndex(a => !a);
+                                    if (freeIdx !== -1) {
+                                        const newAlloc = [...prev.allocated];
+                                        newAlloc[freeIdx] = true;
+                                        return {...prev, allocated: newAlloc};
+                                    }
+                                    return prev;
+                                })} className="flex-1 py-2 rounded font-bold hover:opacity-80" style={{backgroundColor: COLOR_MAP.accent}}>分配块</button>
+                                <button onClick={() => setPoolState(prev => {
+                                    const allocIdx = prev.allocated.findIndex(a => a);
+                                    if (allocIdx !== -1) {
+                                        const newAlloc = [...prev.allocated];
+                                        newAlloc[allocIdx] = false;
+                                        return {...prev, allocated: newAlloc};
+                                    }
+                                    return prev;
+                                })} className="flex-1 py-2 rounded font-bold hover:opacity-80" style={{backgroundColor: COLOR_MAP.secondary}}>释放块</button>
+                            </div>
+                            <div className="text-xs text-center" style={{color: COLOR_MAP.text}}>
+                                固定大小块，无碎片化，O(1) 分配时间
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 3) {
+                    // heap_1
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>FreeRTOS heap_1</h3>
+                            <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(239,68,68,0.1)'}}>
+                                <div className="font-bold mb-2 text-center" style={{color: COLOR_MAP.primary}}>仅分配，不释放</div>
+                                <div className="relative h-32 border-2 rounded" style={{borderColor: COLOR_MAP.border}}>
+                                    <div className="absolute bottom-0 left-0 right-0 h-20 flex" style={{backgroundColor: COLOR_MAP.primary}}>
+                                        <div className="flex-1 border-r flex items-center justify-center text-xs" style={{borderColor: COLOR_MAP.border}}>已分配 768B</div>
+                                    </div>
+                                    <div className="absolute top-0 left-0 right-0 h-12 flex" style={{backgroundColor: '#374151'}}>
+                                        <div className="flex-1 flex items-center justify-center text-xs">空闲 256B</div>
+                                    </div>
+                                </div>
+                                <div className="text-xs mt-2">
+                                    堆指针只增不减，释放操作为空
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.secondary}}>✓ 优点</div>
+                                    <div>简单，代码量最小</div>
+                                    <div>无碎片化</div>
+                                    <div>确定性高</div>
+                                </div>
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(239,68,68,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.primary}}>✗ 缺点</div>
+                                    <div>不能释放内存</div>
+                                    <div>任务/队列创建后不能删除</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 4) {
+                    // heap_4
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>FreeRTOS heap_4</h3>
+                            <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(59,130,246,0.2)'}}>
+                                <div className="font-bold mb-2" style={{color: COLOR_MAP.accent}}>首次拟合法 (First Fit)</div>
+                                <div className="relative h-40 border-2 rounded overflow-hidden" style={{borderColor: COLOR_MAP.border}}>
+                                    {/* 空闲块 1 */}
+                                    <div className="absolute top-0 left-0 right-0 h-8 flex items-center justify-center" style={{backgroundColor: '#374151'}}>
+                                        <span className="text-xs">空闲 128B</span>
+                                    </div>
+                                    {/* 已分配块 1 */}
+                                    <div className="absolute top-8 left-0 right-0 h-16 flex items-center justify-center pulse" style={{backgroundColor: COLOR_MAP.primary}}>
+                                        <span className="text-xs">已分配 256B</span>
+                                    </div>
+                                    {/* 空闲块 2 (合并后) */}
+                                    <div className="absolute top-24 left-0 right-0 h-16 flex items-center justify-center" style={{backgroundColor: '#374151'}}>
+                                        <span className="text-xs">空闲 512B (相邻块合并)</span>
+                                    </div>
+                                </div>
+                                <div className="text-xs mt-2">
+                                    空闲块按地址排序，分配时遍历找到第一个足够大的块
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.secondary}}>✓ 优点</div>
+                                    <div>支持 malloc/free</div>
+                                    <div>相邻空闲块合并</div>
+                                    <div>线程安全</div>
+                                </div>
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(239,68,68,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.primary}}>✗ 缺点</div>
+                                    <div>分配时间不确定</div>
+                                    <div>仍可能碎片化</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 5) {
+                    // 内存对齐
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>内存对齐优化</h3>
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* 未优化 */}
+                                <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(239,68,68,0.1)'}}>
+                                    <div className="font-bold mb-2" style={{color: '#ef4444'}}>✗ 未优化布局</div>
+                                    <div className="space-y-1 text-xs">
+                                        <div className="flex">
+                                            <div className="w-8 h-8 flex items-center justify-center" style={{backgroundColor: '#ef4444'}}>a:1</div>
+                                            <div className="w-24 h-8 flex items-center justify-center" style={{backgroundColor: '#6b7280'}}>填充：3</div>
+                                        </div>
+                                        <div className="flex">
+                                            <div className="w-32 h-8 flex items-center justify-center" style={{backgroundColor: '#3b82f6'}}>b:4</div>
+                                        </div>
+                                        <div className="flex">
+                                            <div className="w-16 h-8 flex items-center justify-center" style={{backgroundColor: '#10b981'}}>c:2</div>
+                                            <div className="w-16 h-8 flex items-center justify-center" style={{backgroundColor: '#6b7280'}}>填充：2</div>
+                                        </div>
+                                    </div>
+                                    <div className="text-center mt-2 font-bold" style={{color: '#ef4444'}}>总大小：16 字节</div>
+                                </div>
+
+                                {/* 优化后 */}
+                                <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(16,185,129,0.1)'}}>
+                                    <div className="font-bold mb-2" style={{color: COLOR_MAP.secondary}}>✓ 优化布局</div>
+                                    <div className="space-y-1 text-xs">
+                                        <div className="flex">
+                                            <div className="w-32 h-8 flex items-center justify-center" style={{backgroundColor: '#3b82f6'}}>b:4</div>
+                                        </div>
+                                        <div className="flex">
+                                            <div className="w-16 h-8 flex items-center justify-center" style={{backgroundColor: '#10b981'}}>c:2</div>
+                                            <div className="w-16 h-8 flex items-center justify-center" style={{backgroundColor: '#ef4444'}}>a:1</div>
+                                            <div className="w-16 h-8 flex items-center justify-center" style={{backgroundColor: '#6b7280'}}>pad:1</div>
+                                        </div>
+                                    </div>
+                                    <div className="text-center mt-2 font-bold" style={{color: COLOR_MAP.secondary}}>总大小：12 字节</div>
+                                </div>
+                            </div>
+                            <div className="text-xs text-center" style={{color: COLOR_MAP.text}}>
+                                按大小降序排列成员，减少填充字节
+                            </div>
+                            <div className="p-3 rounded" style={{backgroundColor: 'rgba(139,92,246,0.2)'}}>
+                                <div className="font-bold mb-1" style={{color: '#8b5cf6'}}>对齐规则 (Cortex-M)</div>
+                                <div className="text-xs">4 字节类型必须存储在 4 的倍数地址上</div>
+                                <div className="text-xs">8 字节类型必须存储在 8 的倍数地址上</div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 6) {
+                    // 应用案例
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>环形缓冲区实现</h3>
+                            <div className="border-2 rounded-lg p-4" style={{borderColor: COLOR_MAP.border}}>
+                                <div className="text-center mb-2" style={{color: COLOR_MAP.text}}>静态环形缓冲区 (256 字节)</div>
+                                <div className="flex gap-0 overflow-hidden rounded border" style={{borderColor: COLOR_MAP.border}}>
+                                    {[...Array(32)].map((_, i) => (
+                                        <div key={i}
+                                            className={`flex-1 h-8 flex items-center justify-center text-xs ${i < 12 ? 'pulse' : i < 20 ? '' : 'opacity-50'}`}
+                                            style={{backgroundColor: i < 12 ? COLOR_MAP.primary : i < 20 ? '#374151' : COLOR_MAP.secondary}}>
+                                            {i < 8 ? 'D' : i < 12 ? '▶' : i < 20 ? '' : 'F'}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex justify-between mt-2 text-xs" style={{color: COLOR_MAP.text}}>
+                                    <span>Head: {12} (ISR 写入)</span>
+                                    <span>Tail: {20} (任务读取)</span>
+                                </div>
+                                <div className="text-xs text-center mt-2">
+                                    数据区 (12) | 空闲区 (8) | 已读区
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.secondary}}>✓ 静态实现</div>
+                                    <div>编译时确定大小</div>
+                                    <div>无动态分配</div>
+                                </div>
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(59,130,246,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.accent}}>✓ ISR 安全</div>
+                                    <div>原子操作 Head/Tail</div>
+                                    <div>无需临界区</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 7) {
+                    // 最佳实践
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>嵌入式内存管理最佳实践</h3>
+                            <div className="space-y-3">
+                                <div className="p-3 rounded border-l-4" style={{backgroundColor: 'rgba(16,185,129,0.1)', borderLeftColor: COLOR_MAP.secondary}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.secondary}}>优先级 1: 静态分配</div>
+                                    <div className="text-xs mt-1">全局/静态变量，StaticT 创建 API</div>
+                                    <div className="text-xs">适用：所有大小固定的场景</div>
+                                </div>
+
+                                <div className="p-3 rounded border-l-4" style={{backgroundColor: 'rgba(245,158,11,0.1)', borderLeftColor: COLOR_MAP.accent}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.accent}}>优先级 2: 内存池</div>
+                                    <div className="text-xs mt-1">固定大小块，O(1) 分配</div>
+                                    <div className="text-xs">适用：网络包、传感器数据</div>
+                                </div>
+
+                                <div className="p-3 rounded border-l-4" style={{backgroundColor: 'rgba(59,130,246,0.1)', borderLeftColor: COLOR_MAP.accent}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.accent}}>优先级 3: heap_4</div>
+                                    <div className="text-xs mt-1">首次拟合，相邻块合并</div>
+                                    <div className="text-xs">适用：需要动态释放的场景</div>
+                                </div>
+
+                                <div className="p-3 rounded border-l-4" style={{backgroundColor: 'rgba(239,68,68,0.1)', borderLeftColor: '#ef4444'}}>
+                                    <div className="font-bold" style={{color: '#ef4444'}}>✗ 避免：标准 malloc/free</div>
+                                    <div className="text-xs mt-1">碎片化风险，非确定性</div>
+                                    <div className="text-xs">不适用：实时系统、资源受限</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                return null;
+            };
+
+            // ========== 渲染解释区域 ==========
+            const renderExplanation = () => {
+                const explanations = {
+                    0: {
+                        title: "动态内存问题",
+                        points: [
+                            "标准 malloc/free 在嵌入式系统中存在严重问题",
+                            "内存碎片化：频繁分配释放导致空闲内存不连续",
+                            "分配时间不确定：遍历空闲链表时间随碎片增加",
+                            "可能分配失败：即使总空闲足够，但无连续大块"
+                        ]
+                    },
+                    1: {
+                        title: "静态内存分配",
+                        points: [
+                            "使用全局/静态变量，编译时确定大小",
+                            "FreeRTOS 提供 xTaskCreateStatic() 等静态 API",
+                            "无运行时分配，零碎片化风险",
+                            "内存布局清晰，便于分析和调试"
+                        ]
+                    },
+                    2: {
+                        title: "内存池技术",
+                        points: [
+                            "预分配固定大小的内存块数组",
+                            "分配/释放 O(1) 时间，高度确定性",
+                            "空闲列表 (freeList) 管理可用块",
+                            "适用：网络包、传感器数据等固定大小场景"
+                        ]
+                    },
+                    3: {
+                        title: "FreeRTOS heap_1",
+                        points: [
+                            "最简单的堆实现，仅支持分配不支持释放",
+                            "堆指针单调递增，pvPortFree() 为空操作",
+                            "无碎片化，代码量最小",
+                            "适用：任务/队列创建后不删除的系统"
+                        ]
+                    },
+                    4: {
+                        title: "FreeRTOS heap_4",
+                        points: [
+                            "首次拟合法：遍历空闲块找到第一个足够大的",
+                            "相邻空闲块自动合并，减少碎片化",
+                            "临界区保护，线程安全",
+                            "分配时间不确定，但功能完整"
+                        ]
+                    },
+                    5: {
+                        title: "内存对齐",
+                        points: [
+                            "Cortex-M 要求 4 字节对齐访问",
+                            "编译器自动插入填充字节满足对齐",
+                            "结构体成员按大小降序排列可减少填充",
+                            "正确布局可节省 25% 以上内存"
+                        ]
+                    },
+                    6: {
+                        title: "应用案例 - 环形缓冲区",
+                        points: [
+                            "静态数组实现，无动态分配",
+                            "Head/Tail 指针管理读写位置",
+                            "ISR 写入，任务读取，无锁设计",
+                            "串口、SPI、I2C 等驱动的标准实现"
+                        ]
+                    },
+                    7: {
+                        title: "最佳实践总结",
+                        points: [
+                            "优先静态分配：全局/静态变量，StaticT API",
+                            "其次内存池：固定大小块，O(1) 分配",
+                            "再次 heap_4：首次拟合，相邻块合并",
+                            "避免标准 malloc/free：碎片化、非确定性"
+                        ]
+                    }
+                };
+
+                const exp = explanations[currentStep];
+                return (
+                    <div>
+                        <h3 className="text-lg font-bold mb-3" style={{color: COLOR_MAP.primary}}>{exp.title}</h3>
+                        <ul className="space-y-2">
+                            {exp.points.map((point, idx) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                    <span className="text-green-400 mt-1">▸</span>
+                                    <span>{point}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="flex flex-col h-screen p-4 gap-4">
+                    {/* 顶部标题 */}
+                    <div className="text-center py-3 rounded-lg" style={{backgroundColor: 'rgba(0,0,0,0.3)'}}>
+                        <h1 className="text-2xl font-bold mb-1">1191 - RTOS 内存管理方案</h1>
+                        <p className="text-sm opacity-75">C 语言核心 | 嵌入式系统内存管理策略</p>
+                    </div>
+
+                    {/* 三列主布局 */}
+                    <div className="flex-1 grid grid-cols-3 gap-4 overflow-hidden">
+                        {/* 左列：代码 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>📝</span> 代码示例
+                            </h2>
+                            <div className="font-mono text-xs leading-relaxed" style={{color: COLOR_MAP.text}}>
+                                {renderCode()}
+                            </div>
+                        </div>
+
+                        {/* 中列：可视化 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>🎬</span> 可视化演示
+                            </h2>
+                            <div className="text-sm">
+                                {renderVisualization()}
+                            </div>
+                        </div>
+
+                        {/* 右列：解释 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>📖</span> 原理解析
+                            </h2>
+                            <div className="text-sm space-y-3" style={{color: COLOR_MAP.text}}>
+                                {renderExplanation()}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部控制栏 */}
+                    <div className="rounded-lg p-3 flex items-center justify-between" style={{backgroundColor: 'rgba(0,0,0,0.3)'}}>
+                        <div className="flex items-center gap-4">
+                            <button onClick={handlePrev} disabled={currentStep === 0}
+                                className="px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.primary}}>上一步</button>
+                            <button onClick={handleNext} disabled={currentStep === STEPS.length - 1}
+                                className="px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.secondary}}>下一步</button>
+                            <button onClick={handleRestart}
+                                className="px-4 py-2 rounded hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.accent}}>重新开始</button>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            <div className="text-sm">
+                                <span className="opacity-75">进度：</span>
+                                <span className="font-bold">{currentStep + 1} / {STEPS.length}</span>
+                            </div>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className="px-3 py-2 rounded text-sm"
+                                style={{backgroundColor: isMuted ? '#ef4444' : '#10b981'}}>
+                                {isMuted ? '🔇 静音' : '🔊 有声'}
+                            </button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className="px-4 py-2 rounded font-bold"
+                                style={{backgroundColor: isPlaying ? COLOR_MAP.primary : COLOR_MAP.accent}}>
+                                {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

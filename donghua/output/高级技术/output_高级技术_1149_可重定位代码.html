@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1149 - 可重定位代码 | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes move { 0% { transform: translateX(0); } 100% { transform: translateX(100px); } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .animate-move { animation: move 2s ease-in-out infinite alternate; }
+    .highlight { box-shadow: 0 0 20px rgba(6, 182, 212, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(6, 182, 212, 0.2); border-left: 3px solid #06b6d4; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#06b6d4', primaryLight: '#22d3ee',
+      secondary: '#0891b2', secondaryLight: '#22d3ee',
+      accent: '#3b82f6', accentLight: '#60a5fa',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== 可重定位代码 (Position Independent Code, PIC) =====
+// 可在任意地址加载执行的代码
+
+// 1. 相对跳转表 (Relative Jump Table)
+typedef struct {
+  int32_t offset;
+  void (*handler)(void);
+} JumpEntry;
+
+void jump_table_dispatch(int index) {
+  static JumpEntry table[] = {
+    {.offset = 0, .handler = handler0},
+    {.offset = 0, .handler = handler1},
+    {.offset = 0, .handler = handler2},
+  };
+
+  if (index >= 0 && index < 3) {
+    table[index].handler();
+  }
+}
+
+// 2. PC 相对寻址 (ARM Cortex-M)
+int32_t get_pc_relative(void) {
+  uint32_t pc;
+  __asm volatile("MOV %0, PC" : "=r"(pc));
+  return pc - (uint32_t)__builtin_return_address(0);
+}
+
+// 3. 位置无关函数指针
+typedef void (*FuncPtr)(void);
+
+void call_relative(FuncPtr func) {
+  // 函数指针可直接调用 (编译器生成相对跳转)
+  func();
+}
+
+// 4. Bootloader 跳转应用
+typedef void (*AppMain)(void);
+
+void bootloader_jump(uint32_t app_addr) {
+  // 检查栈顶地址
+  uint32_t sp = *(uint32_t*)app_addr;
+  // 检查复位向量
+  uint32_t reset = *(uint32_t*)(app_addr + 4);
+
+  // 设置主栈指针
+  __set_MSP(sp);
+  __DSB();
+  __ISB();
+
+  // 跳转到应用
+  ((AppMain)reset)();
+}
+
+// 5. 编译器选项
+// GCC: -fPIC -fPIE -mpic-register=r9
+// IAR: --pic
+// Keil: --pic --apcs=/pic`;
+
+    const VOICE_TEXT_MAP = {
+      1: "第一千一百四十九题，可重定位代码。",
+      2: "相对跳转表使用函数指针数组，支持在任意地址执行。",
+      3: "PC 相对寻址读取当前 PC 值，计算相对偏移实现位置无关。",
+      4: "位置无关函数指针可直接调用，编译器生成相对跳转代码。",
+      5: "Bootloader 跳转应用需要读取栈顶和复位向量，设置 MSP 后跳转。",
+      6: "跳转前需要关闭中断，确保系统状态一致。",
+      7: "编译器选项 fPIC 生成位置无关代码，用于共享库和 Bootloader。",
+      8: "应用：Bootloader、OTA 升级、插件系统、动态加载、ROM 代码。"
+    };
+
+    const MAX_STEPS = 8;
+
+    function App() {
+      const [step, setStep] = useState(1);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+      const [voiceRate, setVoiceRate] = useState(1);
+      const voiceEndTimerRef = useRef(null);
+
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if (voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if (!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        const voices = window.speechSynthesis.getVoices();
+        const xiaoxiaoVoice = voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('zh-CN'));
+        if (xiaoxiaoVoice) utterance.voice = xiaoxiaoVoice;
+        utterance.onend = () => {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate]);
+
+      useEffect(() => {
+        if (isPlaying && step <= MAX_STEPS) {
+          playVoice();
+        } else if (step > MAX_STEPS) {
+          setIsPlaying(false);
+          setIsVoicePlaying(false);
+        }
+        return () => {
+          if (voiceEndTimerRef.current) {
+            clearTimeout(voiceEndTimerRef.current);
+          }
+        };
+      }, [isPlaying, step, playVoice]);
+
+      useEffect(() => {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length === 0) {
+          window.speechSynthesis.onvoiceschanged = () => {
+            window.speechSynthesis.getVoices();
+          };
+        }
+      }, []);
+
+      const handlePlay = () => {
+        setIsPlaying(!isPlaying);
+        if (!isPlaying && step >= MAX_STEPS) {
+          setStep(1);
+        }
+      };
+
+      const handleReset = () => {
+        window.speechSynthesis.cancel();
+        setStep(1);
+        setIsPlaying(false);
+        setIsVoicePlaying(false);
+      };
+
+      const handleStepChange = (newStep) => {
+        window.speechSynthesis.cancel();
+        setStep(newStep);
+      };
+
+      const getActiveLine = (lineIndex) => {
+        const stepLines = {
+          1: [0],
+          2: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          3: [16, 17, 18, 19, 20, 21],
+          4: [23, 24, 25, 26, 27, 28],
+          5: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41],
+          6: [43],
+          7: [45, 46, 47],
+          8: [49]
+        };
+        return (stepLines[step] || []).includes(lineIndex) ? 'active' : '';
+      };
+
+      const renderVisualization = () => {
+        switch(step) {
+          case 1:
+            return (
+              <div className="text-center">
+                <div className="text-6xl mb-4">📍</div>
+                <h3 className="text-2xl font-bold mb-2" style={{color: COLOR_MAP.primary}}>可重定位代码</h3>
+                <p className="text-gray-300">Position Independent Code - PIC</p>
+              </div>
+            );
+          case 2:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.primary}}>相对跳转表</div>
+                <div className="space-y-3 text-sm">
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div className="text-purple-400">typedef struct</div> {'{'}
+                  </div>
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div className="pl-4">int32_t offset;  <span className="text-gray-500">// 相对偏移</span></div>
+                  </div>
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div className="pl-4"><div className="text-purple-400">void</div> (*handler)(<div className="text-purple-400">void</div>);  <span className="text-gray-500">// 函数指针</span></div>
+                  </div>
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div className="pl-4">{'}'} JumpEntry;</div>
+                  </div>
+                  <div className="text-xs bg-green-900 p-2 rounded">
+                    <div className="text-green-300">
+                      <span className="font-bold">✓ 特点:</span> 跳转表随代码一起移动，无需重定位
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 3:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.accent}}>PC 相对寻址</div>
+                <div className="space-y-3">
+                  <div className="text-xs text-gray-400 text-center">ARM Cortex-M 特性</div>
+                  <div className="relative">
+                    <div className="flex justify-between items-center mb-4">
+                      <div className="text-center">
+                        <div className="w-16 h-16 rounded bg-blue-600 flex items-center justify-center mx-auto mb-1">
+                          <span className="text-xs">PC</span>
+                        </div>
+                        <div className="text-xs">当前 PC</div>
+                      </div>
+                      <div className="flex-1 mx-4">
+                        <div className="h-1 bg-blue-600 rounded"></div>
+                        <div className="text-xs text-center text-gray-400 mt-1">相对偏移</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="w-16 h-16 rounded bg-green-600 flex items-center justify-center mx-auto mb-1">
+                          <span className="text-xs">Data</span>
+                        </div>
+                        <div className="text-xs">数据/代码</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div>uint32_t pc;</div>
+                    <div>__asm <div className="text-purple-400">volatile</div>(<span className="text-green-400">"MOV %0, PC"</span> : <span className="text-green-400">"=r"</span>(pc));</div>
+                  </div>
+                  <div className="text-xs bg-blue-900 p-2 rounded">
+                    <div className="text-blue-300">
+                      <span className="font-bold">⚡ ARM Thumb:</span> 支持 PC 相对加载/跳转
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 4:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.success}}>函数指针调用</div>
+                <div className="space-y-3">
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div className="text-purple-400">typedef void</div> (*FuncPtr)(<div className="text-purple-400">void</div>);
+                  </div>
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div className="text-purple-400">void</div> call_relative(FuncPtr func) {'{'}
+                  </div>
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div className="pl-4 text-gray-500">// 编译器生成相对跳转代码</div>
+                  </div>
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div className="pl-4 text-yellow-400">func();</div>
+                  </div>
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div className="pl-4">{'}'}</div>
+                  </div>
+                  <div className="text-xs bg-green-900 p-2 rounded">
+                    <div className="text-green-300">
+                      <span className="font-bold">✓ PIC 模式:</span> 函数调用使用 BLX 指令，支持任意地址
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 5:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.warning}}>Bootloader 跳转</div>
+                <div className="space-y-3 text-sm">
+                  <div className="text-xs text-gray-400 text-center">从 Bootloader 跳转到应用固件</div>
+                  <div className="space-y-2">
+                    <div className="flex items-center">
+                      <div className="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center mr-3 flex-shrink-0">1</div>
+                      <div>读取应用栈顶地址 *(uint32_t*)app_addr</div>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center mr-3 flex-shrink-0">2</div>
+                      <div>读取复位向量 *(uint32_t*)(app_addr + 4)</div>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center mr-3 flex-shrink-0">3</div>
+                      <div>关闭所有中断 (NVIC)</div>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center mr-3 flex-shrink-0">4</div>
+                      <div>设置主栈指针 __set_MSP(sp)</div>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center mr-3 flex-shrink-0">5</div>
+                      <div>DSB/ISB 屏障指令</div>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center mr-3 flex-shrink-0">6</div>
+                      <div>跳转到应用复位向量</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 6:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.error}}>跳转前准备</div>
+                <div className="space-y-4">
+                  <div className="bg-red-900 p-3 rounded border border-red-600">
+                    <div className="text-sm font-bold text-red-300 mb-2">❌ 必须关闭中断</div>
+                    <div className="text-xs text-gray-300 font-mono">
+                      <div>__disable_irq();</div>
+                      <div>NVIC_DisableIRQ_All();</div>
+                    </div>
+                  </div>
+                  <div className="bg-yellow-900 p-3 rounded border border-yellow-600">
+                    <div className="text-sm font-bold text-yellow-300 mb-2">⚠️ 清理外设状态</div>
+                    <div className="text-xs text-gray-300 space-y-1">
+                      <div>• 禁用 DMA 传输</div>
+                      <div>• 清空 FIFO 缓冲</div>
+                      <div>• 保存配置状态 (如需)</div>
+                    </div>
+                  </div>
+                  <div className="bg-green-900 p-3 rounded border border-green-600">
+                    <div className="text-sm font-bold text-green-300 mb-2">✅ 确保系统状态一致</div>
+                    <div className="text-xs text-gray-300">
+                      防止跳转后出现不可预测行为
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 7:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.primary}}>编译器选项</div>
+                <div className="space-y-3 text-sm">
+                  <div className="bg-gray-900 p-3 rounded">
+                    <div className="font-bold text-blue-400 mb-1">GCC</div>
+                    <div className="text-xs font-mono text-gray-300">-fPIC -fPIE -mpic-register=r9</div>
+                    <div className="text-xs text-gray-500 mt-1">fPIC: 生成位置无关代码</div>
+                  </div>
+                  <div className="bg-gray-900 p-3 rounded">
+                    <div className="font-bold text-green-400 mb-1">IAR</div>
+                    <div className="text-xs font-mono text-gray-300">--pic</div>
+                    <div className="text-xs text-gray-500 mt-1">生成位置无关代码</div>
+                  </div>
+                  <div className="bg-gray-900 p-3 rounded">
+                    <div className="font-bold text-yellow-400 mb-1">Keil</div>
+                    <div className="text-xs font-mono text-gray-300">--pic --apcs=/pic</div>
+                    <div className="text-xs text-gray-500 mt-1">ARM 过程调用标准/PIC</div>
+                  </div>
+                  <div className="text-xs bg-blue-900 p-2 rounded">
+                    <div className="text-blue-300">
+                      <span className="font-bold">⚠️ 注意:</span> PIC 代码可能稍慢，但支持任意地址加载
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 8:
+            return (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">🚀</div>
+                  <div className="font-bold text-sm">Bootloader</div>
+                </div>
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">📥</div>
+                  <div className="font-bold text-sm">OTA 升级</div>
+                </div>
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">🔌</div>
+                  <div className="font-bold text-sm">插件系统</div>
+                </div>
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">📦</div>
+                  <div className="font-bold text-sm">动态加载</div>
+                </div>
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">💾</div>
+                  <div className="font-bold text-sm">ROM 代码</div>
+                </div>
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">🔗</div>
+                  <div className="font-bold text-sm">共享库</div>
+                </div>
+              </div>
+            );
+          default:
+            return null;
+        }
+      };
+
+      const explanations = {
+        1: "可重定位代码基础概念",
+        2: "相对跳转表设计",
+        3: "PC 相对寻址原理",
+        4: "位置无关函数指针",
+        5: "Bootloader 跳转流程",
+        6: "跳转前准备工作",
+        7: "编译器 PIC 选项",
+        8: "可重定位代码应用场景"
+      };
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-6">
+            <h1 className="text-3xl font-bold mb-2">1149 - 可重定位代码</h1>
+            <p className="text-gray-400">Position Independent Code - PIC</p>
+          </div>
+
+          {/* Controls */}
+          <div className="flex justify-center items-center space-x-4 mb-6">
+            <button
+              onClick={handleReset}
+              className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 transition"
+            >
+              🔄 重置
+            </button>
+            <button
+              onClick={handlePlay}
+              className={`px-6 py-2 rounded transition ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'}`}
+              style={{backgroundColor: isPlaying ? COLOR_MAP.warning : COLOR_MAP.success}}
+            >
+              {isPlaying ? '⏸️ 暂停' : '▶️ 播放'}
+            </button>
+            <div className="flex items-center space-x-2">
+              <span className="text-gray-400">语速:</span>
+              <input
+                type="range"
+                min="0.5"
+                max="1.5"
+                step="0.1"
+                value={voiceRate}
+                onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
+                className="w-24"
+              />
+              <span className="text-sm w-12">{voiceRate.toFixed(1)}x</span>
+            </div>
+          </div>
+
+          {/* Step Indicator */}
+          <div className="flex justify-center mb-6">
+            <div className="flex space-x-2">
+              {Array.from({length: MAX_STEPS}).map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleStepChange(i + 1)}
+                  className={`w-10 h-10 rounded-full transition ${step === i + 1 ? 'text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                  style={step === i + 1 ? {backgroundColor: COLOR_MAP.primary} : {}}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Main Content */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Code */}
+            <div className="bg-gray-800 rounded-lg p-4">
+              <div className="text-sm font-bold mb-3" style={{color: COLOR_MAP.primary}}>💻 代码示例</div>
+              <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+                {CODE.split('\n').map((line, i) => (
+                  <div key={i} className={`code-line ${getActiveLine(i)} py-1`}>{line}</div>
+                ))}
+              </pre>
+            </div>
+
+            {/* Visualization */}
+            <div className="bg-gray-800 rounded-lg p-4">
+              <div className="text-sm font-bold mb-3" style={{color: COLOR_MAP.accent}}>🎨 可视化</div>
+              {renderVisualization()}
+            </div>
+
+            {/* Explanations */}
+            <div className="bg-gray-800 rounded-lg p-4">
+              <div className="text-sm font-bold mb-3" style={{color: COLOR_MAP.secondary}}>📝 解释</div>
+              <div className="space-y-4">
+                {Array.from({length: MAX_STEPS}).map((_, i) => (
+                  <div key={i} className={`p-3 rounded transition ${step >= i + 1 ? 'opacity-100' : 'opacity-30'}`}>
+                    <div className="flex items-center mb-2">
+                      <div className={`w-6 h-6 rounded-full mr-2 flex items-center justify-center text-sm font-bold ${step >= i + 1 ? 'text-white' : 'bg-gray-700 text-gray-500'}`} style={step >= i + 1 ? {backgroundColor: COLOR_MAP.primary} : {}}>{i + 1}</div>
+                      <span className={step >= i + 1 ? 'text-white' : 'text-gray-500'}>{explanations[i + 1]}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Voice Status */}
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                <div className="text-sm text-gray-400 mb-2">🔊 语音讲解</div>
+                <div className={`text-sm ${isVoicePlaying ? 'text-green-400' : 'text-gray-500'}`}>
+                  {isVoicePlaying ? '正在播放...' : '已暂停'}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  当前：步骤 {step} / {MAX_STEPS}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

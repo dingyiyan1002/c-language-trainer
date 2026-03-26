@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1137 - GNU 扩展和内联汇编 | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .highlight { box-shadow: 0 0 20px rgba(124, 58, 237, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(124, 58, 237, 0.2); border-left: 3px solid #7c3aed; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#7c3aed', primaryLight: '#a78bfa',
+      secondary: '#6d28d9', secondaryLight: '#a78bfa',
+      accent: '#14b8a6', accentLight: '#2dd4bf',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== GNU 扩展和内联汇编 =====
+// GCC 特有扩展，用于底层硬件操作
+
+// 1. 内联汇编基本语法
+#define nop() __asm__ __volatile__("nop")
+
+// 2. 带输入输出的内联汇编
+static inline int add(int a, int b) {
+  int result;
+  __asm__ __volatile__(
+    "add %1, %2, %0"
+    : "=r"(result)      // 输出
+    : "r"(a), "r"(b)    // 输入
+    :                   // 破坏列表
+  );
+  return result;
+}
+
+// 3. 内存屏障
+#define mb() __asm__ __volatile__("dmb ish" ::: "memory")
+
+// 4. 禁用中断 (ARM)
+static inline void cli(void) {
+  __asm__ __volatile__("cpsid i" ::: "memory");
+}
+
+// 5. 启用中断 (ARM)
+static inline void sei(void) {
+  __asm__ __volatile__("cpsie i" ::: "memory");
+}`;
+
+    const VOICE_TEXT_MAP = {
+      1: "第一千一百三十七题，GNU 扩展和内联汇编。",
+      2: "GNU C 扩展提供内联汇编功能，允许在 C 代码中直接嵌入汇编指令。",
+      3: "基本语法使用__asm__关键字，可以执行单条或多条汇编指令。",
+      4: "带输入输出的内联汇编使用冒号分隔输出、输入、破坏列表三个部分。",
+      5: "内存屏障指令确保内存操作顺序，用于多核同步和 DMA 场景。",
+      6: "禁用和启用中断是嵌入式系统中保护临界区的常用操作。",
+      7: "应用：操作系统内核、设备驱动、实时系统、性能关键代码。",
+      8: "注意：内联汇编降低可移植性，优先使用内置函数和标准 C。"
+    };
+
+    const MAX_STEPS = 8;
+
+    function App() {
+      const [step, setStep] = useState(1);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+      const [voiceRate, setVoiceRate] = useState(1);
+      const voiceEndTimerRef = useRef(null);
+
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if (voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if (!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if (voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate]);
+
+      useEffect(() => {
+        if (isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+
+      const handleStepChange = (newStep) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsVoicePlaying(false);
+        setStep(newStep);
+      };
+
+      const togglePlay = () => {
+        if (step >= MAX_STEPS) {
+          handleStepChange(1);
+          setTimeout(() => setIsPlaying(true), 100);
+        } else {
+          setIsPlaying(!isPlaying);
+        }
+      };
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="bg-gradient-to-r from-violet-900/50 via-purple-900/50 to-fuchsia-900/50 rounded-xl p-6 mb-4 border border-violet-700/50">
+            <h1 className="text-3xl font-bold text-violet-400 mb-2">1137 - GNU 扩展和内联汇编</h1>
+            <p className="text-violet-300 text-sm">内联汇编 / 内存屏障 / 中断控制</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-violet-700/30">
+              <h2 className="text-lg font-semibold text-violet-400 mb-3">代码展示</h2>
+              <pre className="text-xs text-gray-300 overflow-x-auto bg-gray-900/50 p-3 rounded-lg font-mono leading-relaxed">
+                {CODE.split('\n').map((line, i) => (
+                  <div key={i} className={`code-line ${
+                    (step === 2 && i >= 4 && i <= 4) ||
+                    (step === 3 && i >= 7 && i <= 15) ||
+                    (step === 4 && i >= 7 && i <= 15) ||
+                    (step === 5 && i >= 18 && i <= 18) ||
+                    (step === 6 && i >= 21 && i <= 26) ||
+                    (step === 7 && i >= 4 && i <= 26)
+                    ? 'active' : ''
+                  }`}>{line || '\u00A0'}</div>
+                ))}
+              </pre>
+            </div>
+
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-violet-700/30">
+              <h2 className="text-lg font-semibold text-violet-400 mb-3">可视化演示</h2>
+              <div className="space-y-4">
+                {step === 1 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-violet-600/20 to-purple-600/20 rounded-lg border border-violet-500/30">
+                    <p className="text-violet-300 text-sm font-medium mb-2">💡 GNU 扩展和内联汇编</p>
+                    <p className="text-xs text-gray-400">GCC 内联汇编允许在 C 代码中直接嵌入汇编指令，用于硬件操作、性能优化和系统编程。</p>
+                  </div>
+                )}
+                {step === 2 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-violet-600/20 to-purple-600/20 rounded-lg border border-violet-500/30">
+                    <p className="text-violet-300 text-sm font-medium mb-2">基本语法</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono text-xs">
+                        <div className="text-violet-400">#define nop() __asm__ __volatile__("nop")</div>
+                      </div>
+                      <div className="text-violet-400 text-center text-xs">
+                        __asm__: 内联汇编关键字<br/>
+                        __volatile__: 阻止编译器优化
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 3 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-violet-600/20 to-purple-600/20 rounded-lg border border-violet-500/30">
+                    <p className="text-violet-300 text-sm font-medium mb-2">带输入输出的内联汇编</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded text-xs">
+                        <div>static inline int add(int a, int b) {'{'}</div>
+                        <div>&nbsp;&nbsp;int result;</div>
+                        <div className="text-violet-400">&nbsp;&nbsp;__asm__ __volatile__(</div>
+                        <div>&nbsp;&nbsp;&nbsp;&nbsp;"add %1, %2, %0"</div>
+                        <div className="text-green-400">&nbsp;&nbsp;&nbsp;&nbsp;: "=r"(result)  <span className="text-gray-500">// 输出</span></div>
+                        <div className="text-blue-400">&nbsp;&nbsp;&nbsp;&nbsp;: "r"(a), "r"(b)  <span className="text-gray-500">// 输入</span></div>
+                        <div>&nbsp;&nbsp;&nbsp;&nbsp;:  <span className="text-gray-500">// 破坏列表</span></div>
+                        <div>&nbsp;&nbsp;);</div>
+                        <div>&nbsp;&nbsp;return result;</div>
+                        <div>{'}'}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 4 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-violet-600/20 to-purple-600/20 rounded-lg border border-violet-500/30">
+                    <p className="text-violet-300 text-sm font-medium mb-2">约束符说明</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                          <div className="text-green-400 text-xs font-medium">=r</div>
+                          <div className="text-gray-400 text-xs mt-1">输出寄存器</div>
+                        </div>
+                        <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30">
+                          <div className="text-blue-400 text-xs font-medium">r</div>
+                          <div className="text-gray-400 text-xs mt-1">任意寄存器</div>
+                        </div>
+                        <div className="p-2 bg-orange-900/20 rounded border border-orange-500/30">
+                          <div className="text-orange-400 text-xs font-medium">"m"</div>
+                          <div className="text-gray-400 text-xs mt-1">内存操作数</div>
+                        </div>
+                      </div>
+                      <div className="p-2 bg-violet-900/20 rounded border border-violet-500/30 font-mono text-xs">
+                        <div>%0, %1, %2: 占位符，按顺序引用</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 5 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-violet-600/20 to-purple-600/20 rounded-lg border border-violet-500/30">
+                    <p className="text-violet-300 text-sm font-medium mb-2">内存屏障</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono text-xs">
+                        <div className="text-violet-400">#define mb()</div>
+                        <div>&nbsp;&nbsp;__asm__ __volatile__("dmb ish" ::: "memory")</div>
+                      </div>
+                      <div className="text-violet-400 text-center text-xs">
+                        确保内存操作顺序，用于多核同步
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <div className="p-2 bg-violet-900/20 rounded border border-violet-500/30">
+                          <div className="text-violet-400 text-xs">无屏障</div>
+                          <div className="text-gray-400 text-xs">指令可能重排</div>
+                        </div>
+                        <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                          <div className="text-green-400 text-xs">有屏障</div>
+                          <div className="text-gray-400 text-xs">顺序执行</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 6 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-violet-600/20 to-purple-600/20 rounded-lg border border-violet-500/30">
+                    <p className="text-violet-300 text-sm font-medium mb-2">中断控制 (ARM)</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="p-2 bg-red-900/20 rounded border border-red-500/30">
+                        <div className="text-red-400 text-xs font-medium">禁用中断</div>
+                        <div>static inline void cli(void) {'{'}</div>
+                        <div className="text-violet-400">&nbsp;&nbsp;__asm__ __volatile__("cpsid i" ::: "memory");</div>
+                        <div>{'}'}</div>
+                      </div>
+                      <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                        <div className="text-green-400 text-xs font-medium">启用中断</div>
+                        <div>static inline void sei(void) {'{'}</div>
+                        <div className="text-violet-400">&nbsp;&nbsp;__asm__ __volatile__("cpsie i" ::: "memory");</div>
+                        <div>{'}'}</div>
+                      </div>
+                      <div className="text-violet-400 text-center text-xs">
+                        cpsid i: Clear interrupt Disable (关中断)<br/>
+                        cpsie i: Clear interrupt Enable (开中断)
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 7 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-violet-900/20 rounded-lg border border-violet-500/30">
+                      <p className="text-violet-300 text-xs font-medium mb-2">📋 应用场景</p>
+                      <div className="text-xs text-gray-400 space-y-2">
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-green-400 text-xs font-medium">操作系统内核</div>
+                          <ul className="text-gray-400 text-xs mt-1">
+                            <li>• 上下文切换</li>
+                            <li>• 中断处理</li>
+                            <li>• 自旋锁实现</li>
+                          </ul>
+                        </div>
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-green-400 text-xs font-medium">设备驱动</div>
+                          <ul className="text-gray-400 text-xs mt-1">
+                            <li>• 寄存器访问</li>
+                            <li>• DMA 控制</li>
+                            <li>• 时序关键操作</li>
+                          </ul>
+                        </div>
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-green-400 text-xs font-medium">性能优化</div>
+                          <ul className="text-gray-400 text-xs mt-1">
+                            <li>• SIMD 指令</li>
+                            <li>• 特殊 CPU 指令</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 8 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-violet-900/20 rounded-lg border border-violet-500/30">
+                      <p className="text-violet-300 text-xs font-medium mb-2">⚠️ 注意事项</p>
+                      <ul className="text-xs text-gray-400 space-y-2">
+                        <li>• <span className="text-red-400">可移植性</span>: 内联汇编绑定特定架构</li>
+                        <li>• <span className="text-orange-400">维护成本</span>: 汇编代码难以阅读和维护</li>
+                        <li>• <span className="text-blue-400">优先选择</span>: 使用内置函数 (如__builtin_clz)</li>
+                        <li>• <span className="text-green-400">正确使用</span>: 准确填写破坏列表，避免优化错误</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-violet-700/30">
+                <h2 className="text-lg font-semibold text-violet-400 mb-3">关键点说明</h2>
+                <div className="space-y-2 text-sm">
+                  <div className={`p-2 rounded transition-colors ${step >= 2 ? 'bg-violet-900/30 text-violet-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">①</span> __asm__ 嵌入汇编指令
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 4 ? 'bg-violet-900/30 text-violet-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">②</span> 约束符指定操作数
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 6 ? 'bg-violet-900/30 text-violet-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">③</span> 内存屏障和中断控制
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-violet-700/30">
+                <h2 className="text-lg font-semibold text-violet-400 mb-3">GNU 扩展</h2>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-violet-900/20 rounded border border-violet-500/30">
+                    <p className="text-violet-300 font-medium">内联汇编</p>
+                    <pre className="text-gray-400 font-mono text-xs">__asm__ __volatile__(...)</pre>
+                  </div>
+                  <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30">
+                    <p className="text-blue-300 font-medium">属性扩展</p>
+                    <pre className="text-gray-400 font-mono text-xs">__attribute__((...))</pre>
+                  </div>
+                  <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                    <p className="text-green-300 font-medium">内置函数</p>
+                    <pre className="text-gray-400 font-mono text-xs">__builtin_...</pre>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-violet-700/30">
+                <h2 className="text-lg font-semibold text-violet-400 mb-3">架构支持</h2>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-violet-900/20 rounded border border-violet-500/30">
+                    <p className="text-violet-300 font-medium">ARM / ARM64</p>
+                    <p className="text-gray-400">主流嵌入式平台</p>
+                  </div>
+                  <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30">
+                    <p className="text-blue-300 font-medium">RISC-V</p>
+                    <p className="text-gray-400">开源指令集</p>
+                  </div>
+                  <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                    <p className="text-green-300 font-medium">x86 / x86_64</p>
+                    <p className="text-gray-400">桌面/服务器平台</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-gray-800/80 rounded-xl p-4 border border-violet-700/30">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <button onClick={togglePlay} className={`px-4 py-2 rounded-lg font-medium transition-colors ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-violet-600 hover:bg-violet-700'} text-white`}>
+                  {step >= MAX_STEPS ? '🔄 重新播放' : isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                </button>
+                <button onClick={() => handleStepChange(Math.max(1, step - 1))} disabled={step <= 1} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  ◀ 上一步
+                </button>
+                <span className="text-violet-400 font-medium px-3">步骤 {step} / {MAX_STEPS}</span>
+                <button onClick={() => handleStepChange(Math.min(MAX_STEPS, step + 1))} disabled={step >= MAX_STEPS} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  下一步 ▶
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-violet-300">
+                  语速：
+                  <input type="range" min="0.5" max="1.5" step="0.1" value={voiceRate} onChange={(e) => setVoiceRate(parseFloat(e.target.value))} className="ml-2 w-24" />
+                  <span className="ml-2 text-violet-400">{voiceRate.toFixed(1)}x</span>
+                </label>
+                {isVoicePlaying && <span className="text-violet-400 animate-pulse">🔊 语音播放中...</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

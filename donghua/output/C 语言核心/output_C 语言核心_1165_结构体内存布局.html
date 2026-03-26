@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1165 - 结构体内存布局</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(59, 130, 246, 0.2); } 50% { background-color: rgba(59, 130, 246, 0.5); } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .animate-blink { animation: blink 1s steps(2) infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#10b981',
+            secondary: '#059669',
+            accent: '#34d399',
+            highlight: '#6ee7b7',
+            bg: '#064e3b',
+            text: '#d1fae5'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const steps = [
+                { title: '结构体内存布局概述', voice: '结构体内存布局。在嵌入式 C 语言中，结构体成员的存储顺序和内存对齐方式直接影响程序的正确性和效率。理解内存布局对于硬件寄存器映射、通信协议解析至关重要。' },
+                { title: '内存对齐原则', voice: '内存对齐原则。编译器为了提高访问速度，会按照特定边界对齐成员地址。对齐规则：成员偏移量必须是成员大小的整数倍，结构体总大小必须是最大成员大小的整数倍。' },
+                { title: '默认对齐示例', voice: '默认对齐示例。8 位 MCU 通常按 1 字节对齐，32 位 MCU 按 4 字节对齐。例如 uint8_t 后跟 uint32_t，编译器会在中间插入 3 字节填充，确保 uint32_t 地址是 4 的倍数。' },
+                { title: '填充字节演示', voice: '填充字节演示。struct { uint8_t a; uint32_t b; uint8_t c; } 总共占用 12 字节而非 6 字节。a 占 1 字节，填充 3 字节，b 占 4 字节，c 占 1 字节，再填充 3 字节使总大小为 4 的倍数。' },
+                { title: 'pragma pack 指令', voice: 'pragma pack 指令。使用#pragma pack(1)可以取消对齐，紧凑存储。但注意：非对齐访问在某些 MCU 上会导致硬件异常，在 ARM Cortex-M 上性能下降。仅用于通信协议等需要精确控制内存的场景。' },
+                { title: '位域内存布局', voice: '位域内存布局。位域允许定义小于 1 字节的成员。但位域的内存布局依赖编译器实现，不同编译器可能产生不同的内存分布。避免在跨平台代码中使用位域。' },
+                { title: '嵌套结构体对齐', voice: '嵌套结构体对齐。嵌套结构体的对齐边界由内部最大成员决定。外层结构体计算偏移时，将嵌套结构体视为整体，其偏移量必须满足嵌套结构体的对齐要求。' },
+                { title: '最佳实践总结', voice: '最佳实践总结。一，硬件寄存器映射使用 pack(1) 确保精确布局。二，普通数据结构使用默认对齐获得最佳性能。三，通信协议结构体显式指定对齐方式。四，使用 sizeof 和 offsetof 验证实际布局。' }
+            ];
+
+            useEffect(() => {
+                if (!isPlaying) return;
+
+                const speak = () => {
+                    if (isMuted || !steps[currentStep]) return;
+                    const utterance = new SpeechSynthesisUtterance(steps[currentStep].voice);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+
+                speak();
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    window.speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, isMuted]);
+
+            const MemoryLayout = () => {
+                const members = [
+                    { name: 'a', type: 'uint8_t', size: 1, offset: 0, color: 'bg-emerald-500' },
+                    { name: 'pad1', type: '填充', size: 3, offset: 1, color: 'bg-gray-600' },
+                    { name: 'b', type: 'uint32_t', size: 4, offset: 4, color: 'bg-blue-500' },
+                    { name: 'c', type: 'uint8_t', size: 1, offset: 8, color: 'bg-purple-500' },
+                    { name: 'pad2', type: '填充', size: 3, offset: 9, color: 'bg-gray-600' }
+                ];
+
+                return (
+                    <div className="space-y-4">
+                        <div className="bg-gray-800 rounded-lg p-4">
+                            <h4 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>struct SensorData 内存布局 (12 字节)</h4>
+                            <div className="space-y-1">
+                                {members.map((m, idx) => (
+                                    <div key={idx} className={`h-10 ${m.color} rounded flex items-center px-3 text-sm font-mono transition-all duration-300 ${currentStep >= 3 ? 'animate-scaleIn' : ''}`}
+                                         style={{ animationDelay: `${idx * 100}ms` }}>
+                                        <span className="flex-1">{m.name}: {m.type}</span>
+                                        <span className="text-xs opacity-75">偏移 {m.offset}, {m.size}字节</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="mt-4 p-3 bg-yellow-900/30 rounded border border-yellow-600">
+                                <p className="text-yellow-300 text-sm">
+                                    ⚠️ 实际数据仅 6 字节，填充 6 字节！使用 #pragma pack(1) 可紧凑存储为 6 字节。
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const AlignmentDemo = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>对齐规则演示</h4>
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-gray-600">
+                                    <th className="text-left py-2" style={{ color: COLOR_MAP.text }}>成员</th>
+                                    <th className="text-center" style={{ color: COLOR_MAP.text }}>大小</th>
+                                    <th className="text-center" style={{ color: COLOR_MAP.text }}>对齐要求</th>
+                                    <th className="text-center" style={{ color: COLOR_MAP.text }}>实际偏移</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr className={`${currentStep >= 1 ? 'animate-highlight' : ''} border-b border-gray-700`}>
+                                    <td className="py-2 font-mono">uint8_t a</td>
+                                    <td className="text-center">1 字节</td>
+                                    <td className="text-center">1 字节边界</td>
+                                    <td className="text-center" style={{ color: COLOR_MAP.accent }}>0</td>
+                                </tr>
+                                <tr className={`${currentStep >= 2 ? 'animate-highlight' : ''} border-b border-gray-700`}>
+                                    <td className="py-2 font-mono">uint8_t pad</td>
+                                    <td className="text-center">3 字节</td>
+                                    <td className="text-center">-</td>
+                                    <td className="text-center" style={{ color: COLOR_MAP.highlight }}>1-3</td>
+                                </tr>
+                                <tr className={`${currentStep >= 3 ? 'animate-highlight' : ''} border-b border-gray-700`}>
+                                    <td className="py-2 font-mono">uint32_t b</td>
+                                    <td className="text-center">4 字节</td>
+                                    <td className="text-center">4 字节边界</td>
+                                    <td className="text-center" style={{ color: COLOR_MAP.accent }}>4</td>
+                                </tr>
+                                <tr className={`${currentStep >= 4 ? 'animate-highlight' : ''} border-b border-gray-700`}>
+                                    <td className="py-2 font-mono">uint8_t c</td>
+                                    <td className="text-center">1 字节</td>
+                                    <td className="text-center">1 字节边界</td>
+                                    <td className="text-center" style={{ color: COLOR_MAP.accent }}>8</td>
+                                </tr>
+                                <tr className={`${currentStep >= 5 ? 'animate-highlight' : ''}`}>
+                                    <td className="py-2 font-mono">uint8_t pad</td>
+                                    <td className="text-center">3 字节</td>
+                                    <td className="text-center">-</td>
+                                    <td className="text-center" style={{ color: COLOR_MAP.highlight }}>9-11</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+
+            const CodeComparison = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>对齐方式对比</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">默认对齐 (4 字节)</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono overflow-x-auto">
+{`struct Default {
+    uint8_t  a;    // 0
+    // pad x3       // 1-3
+    uint32_t b;    // 4-7
+    uint8_t  c;    // 8
+    // pad x3       // 9-11
+};
+// sizeof = 12`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 5 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-purple-400 font-bold mb-2">#pragma pack(1)</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono overflow-x-auto">
+{`#pragma pack(push, 1)
+struct Packed {
+    uint8_t  a;    // 0
+    uint32_t b;    // 1-4
+    uint8_t  c;    // 5
+};
+#pragma pack(pop)
+// sizeof = 6`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch(currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-6">
+                                <div className="bg-gradient-to-r from-emerald-900/50 to-teal-900/50 rounded-lg p-6">
+                                    <h3 className="text-2xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>结构体内存布局概述</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">▸</span>
+                                            <span>结构体成员在内存中按声明顺序存储</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">▸</span>
+                                            <span>编译器可能插入填充字节以满足对齐要求</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">▸</span>
+                                            <span>内存布局影响程序性能和内存占用</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">▸</span>
+                                            <span>嵌入式系统需要精确控制内存布局</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`// 典型结构体定义
+typedef struct {
+    uint8_t  sensor_id;     // 传感器 ID
+    uint32_t timestamp;     // 时间戳
+    uint8_t  status;        // 状态标志
+    float    value;         // 测量值
+} SensorData_t;
+
+// sizeof(SensorData_t) = 12 字节 (非 10 字节)`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                    case 2:
+                    case 3:
+                    case 4:
+                        return <MemoryLayout />;
+                    case 5:
+                        return <AlignmentDemo />;
+                    case 6:
+                        return <CodeComparison />;
+                    case 7:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gradient-to-r from-emerald-900/50 to-teal-900/50 rounded-lg p-6">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>最佳实践总结</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">✓</span>
+                                            <span><strong>硬件寄存器映射：</strong>始终使用 #pragma pack(1) 确保精确布局</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">✓</span>
+                                            <span><strong>普通数据结构：</strong>使用默认对齐获得最佳访问性能</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">✓</span>
+                                            <span><strong>通信协议：</strong>显式指定对齐方式，确保跨平台兼容</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">✓</span>
+                                            <span><strong>验证工具：</strong>使用 sizeof() 和 offsetof() 宏验证实际布局</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`// 验证内存布局
+#include <stddef.h>
+printf("sizeof(SensorData) = %zu\\n", sizeof(SensorData_t));
+printf("offsetof(timestamp) = %zu\\n", offsetof(SensorData_t, timestamp));
+printf("offsetof(value) = %zu\\n", offsetof(SensorData_t, value));
+
+// 输出:
+// sizeof(SensorData) = 12
+// offsetof(timestamp) = 4
+// offsetof(value) = 8`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-6 flex items-center justify-between">
+                            <div>
+                                <h1 className="text-3xl font-bold" style={{ color: COLOR_MAP.primary }}>
+                                    1165 - 结构体内存布局
+                                </h1>
+                                <p className="text-gray-400 mt-1">C 语言核心 · 步骤 {currentStep + 1} / {steps.length}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setIsMuted(!isMuted)}
+                                    className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-emerald-600'} hover:opacity-80`}>
+                                    {isMuted ? '🔇 静音' : '🔊 语音'}
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className={`px-4 py-2 rounded ${isPlaying ? 'bg-emerald-600' : 'bg-gray-600'} hover:opacity-80`}>
+                                    {isPlaying ? '⏸ 暂停' : '▶ 继续'}
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-3 gap-6">
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>代码示例</h3>
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`struct SensorData {
+    uint8_t  a;    // 1 字节
+    uint32_t b;    // 4 字节
+    uint8_t  c;    // 1 字节
+};
+
+// 默认对齐：12 字节
+// pack(1): 6 字节
+
+// 验证宏
+#include <stddef.h>
+offsetof(struct SensorData, b)
+// 返回 4 (默认对齐)`}
+                                    </pre>
+                                </div>
+                                <MemoryLayout />
+                            </div>
+
+                            <div className="col-span-1">
+                                <div className="bg-gray-800 rounded-lg p-6 h-full">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>
+                                        {steps[currentStep].title}
+                                    </h3>
+                                    {renderContent()}
+                                </div>
+                            </div>
+
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>关键点</h3>
+                                    <ul className="space-y-2 text-sm text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">•</span>
+                                            <span>成员偏移量必须是成员大小的整数倍</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">•</span>
+                                            <span>结构体总大小必须是最大成员大小的整数倍</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">•</span>
+                                            <span>#pragma pack(1) 紧凑存储但可能降低性能</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">•</span>
+                                            <span>使用 offsetof 验证成员偏移量</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <CodeComparison />
+                            </div>
+                        </div>
+
+                        <footer className="mt-8 flex justify-center gap-2">
+                            {steps.map((_, idx) => (
+                                <button key={idx} onClick={() => setCurrentStep(idx)}
+                                    className={`w-3 h-3 rounded-full transition-all ${idx === currentStep ? 'w-8' : ''}`}
+                                    style={{ backgroundColor: idx <= currentStep ? COLOR_MAP.primary : '#374151' }} />
+                            ))}
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

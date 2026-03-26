@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>sizeof 各类型 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#312e81;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#7c3aed;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:500px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .type-grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:16px}
+    .type-row{display:grid;grid-template-columns:120px 1fr 80px;gap:12px;align-items:center;transition:all 0.4s ease}
+    .type-row.highlight{transform:scale(1.02)}
+    .type-name{font-weight:700;font-size:13px;color:#312e81;font-family:'Consolas',monospace}
+    .type-bar-container{height:48px;background:#f1f5f9;border-radius:8px;overflow:hidden;position:relative}
+    .type-bar{height:100%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:14px;transition:all 0.6s ease;position:relative}
+    .type-bar.u8{background:linear-gradient(90deg,#22c55e,#16a34a)}
+    .type-bar.u16{background:linear-gradient(90deg,#3b82f6,#2563eb)}
+    .type-bar.u32{background:linear-gradient(90deg,#8b5cf6,#7c3aed)}
+    .type-bar.u64{background:linear-gradient(90deg,#ec4899,#db2777)}
+    .type-bar.ptr{background:linear-gradient(90deg,#f59e0b,#d97706)}
+    .type-bar.active{animation:barPulse 0.6s ease}
+    @keyframes barPulse{0%,100%{transform:scaleX(1)}50%{transform:scaleX(1.05)}}
+    .type-value{font-weight:700;font-size:14px;color:#475569;text-align:right}
+    .byte-grid{display:flex;gap:4px;justify-content:center;margin-top:8px}
+    .byte-box{width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#e2e8f0;border-radius:6px;font-weight:700;font-size:11px;color:#475569;transition:all 0.4s ease}
+    .byte-box.filled{background:linear-gradient(135deg,#6366f1,#4f46e5);color:white}
+    .byte-box.highlight{animation:bytePop 0.5s ease;box-shadow:0 4px 12px rgba(99,102,241,0.4)}
+    @keyframes bytePop{0%{transform:scale(0)}50%{transform:scale(1.2)}100%{transform:scale(1)}}
+    .memory-visual{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-top:16px}
+    .memory-title{font-weight:700;font-size:14px;color:#92400e;margin-bottom:12px}
+    .memory-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+    .memory-label{font-size:11px;color:#78350f;width:70px}
+    .memory-blocks{display:flex;gap:2px}
+    .memory-block{width:20px;height:20px;background:#f59e0b;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:white;font-weight:700}
+    .memory-block.filled{background:#3b82f6}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:13px;color:#22d3ee;min-height:150px}
+    .terminal-line{margin-bottom:6px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid #f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+    .size-compare{margin-top:16px}
+    .sc-title{font-weight:700;font-size:13px;color:#475569;margin-bottom:8px}
+    .sc-row{display:flex;gap:4px;margin-bottom:6px}
+    .sc-block{width:40px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;font-weight:700;font-size:11px;transition:all 0.4s ease}
+    .sc-block.u8{background:#22c55e;color:white}
+    .sc-block.u16{background:#3b82f6;color:white}
+    .sc-block.u32{background:#8b5cf6;color:white}
+    .sc-block.u64{background:#ec4899;color:white}
+    .sc-block.ptr{background:#f59e0b;color:white}
+    .sc-block.highlight{transform:scale(1.1);box-shadow:0 4px 12px rgba(0,0,0,0.2)}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const PROG_NAME = "sizeof_types";
+    const FILE_NAME = "sizeof_types.c";
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',orange:'#f97316'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'#include <stdint.h>',color:'#7c3aed'},
+      3:{step:1,text:'',color:'#94a3b8'},
+      4:{step:1,text:'int main(void) {',color:'#3b82f6'},
+      5:{step:2,text:'    printf("uint8_t:  %zu bytes\\n", sizeof(uint8_t));',color:'#eab308'},
+      6:{step:3,text:'    printf("uint16_t: %zu bytes\\n", sizeof(uint16_t));',color:'#eab308'},
+      7:{step:4,text:'    printf("uint32_t: %zu bytes\\n", sizeof(uint32_t));',color:'#eab308'},
+      8:{step:5,text:'    printf("uint64_t: %zu bytes\\n", sizeof(uint64_t));',color:'#eab308'},
+      9:{step:6,text:'    printf("pointer:  %zu bytes\\n", sizeof(void*));',color:'#eab308'},
+      10:{step:6,text:'    return 0;',color:'#3b82f6'},
+      11:{step:6,text:'}',color:'#94a3b8'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，包含标准输入输出头文件和标准整数头文件',
+      2:'sizeof uint8_t 等于 1 字节，8 位无符号整数占用 1 字节内存',
+      3:'sizeof uint16_t 等于 2 字节，16 位无符号整数占用 2 字节内存',
+      4:'sizeof uint32_t 等于 4 字节，32 位无符号整数占用 4 字节内存',
+      5:'sizeof uint64_t 等于 8 字节，64 位无符号整数占用 8 字节内存',
+      6:'64 位系统上指针占用 8 字节，32 位系统上是 4 字节'
+    };
+    const TYPES = [
+      {name:'uint8_t',size:1,class:'u8'},
+      {name:'uint16_t',size:2,class:'u16'},
+      {name:'uint32_t',size:4,class:'u32'},
+      {name:'uint64_t',size:8,class:'u64'},
+      {name:'pointer',size:8,class:'ptr'}
+    ];
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',memory:'M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [highlightType,setHighlightType] = useState(-1);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 11; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step >= 2 && step <= 6) {
+          setHighlightType(step - 2);
+          const lines = [];
+          for(let i = 2; i < step; i++) {
+            if(i === 2) lines.push('uint8_t:  1 bytes');
+            if(i === 3) lines.push('uint16_t: 2 bytes');
+            if(i === 4) lines.push('uint32_t: 4 bytes');
+            if(i === 5) lines.push('uint64_t: 8 bytes');
+          }
+          if(step === 6) {
+            lines.push('pointer:  8 bytes');
+          }
+          setTerminalLines(lines);
+          setTimeout(() => setHighlightType(-1), 600);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setTerminalLines([]);
+        setHighlightType(-1);
+        setIsPlaying(true);
+      };
+      const renderBytes = (size) => {
+        const boxes = [];
+        for(let i = 0; i < 8; i++) {
+          boxes.push(
+            <div key={i} className={`byte-box ${i < size ? 'filled' : ''} ${highlightType >= 0 && i < size ? 'highlight' : ''}`}>
+              {i < size ? i+1 : ''}
+            </div>
+          );
+        }
+        return boxes;
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>sizeof 各类型 - C 语言可视化</h1>
+            <p>数据类型大小 | 内存占用 | sizeof 运算符</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.purple,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                {FILE_NAME}
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8,9,10,11].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.memory} size={22} />
+                类型大小可视化
+              </div>
+              <div className="type-grid">
+                {TYPES.map((t, idx) => (
+                  <div key={t.name} className={`type-row ${highlightType === idx ? 'highlight' : ''}`}>
+                    <div className="type-name">{t.name}</div>
+                    <div className="type-bar-container">
+                      <div className={`type-bar ${t.class} ${highlightType === idx ? 'active' : ''}`} style={{width:`${(t.size/8)*100}%`}}>
+                        {t.size} bytes
+                      </div>
+                    </div>
+                    <div className="type-value">{t.size}B</div>
+                  </div>
+                ))}
+              </div>
+              {step >= 2 && (
+                <div className="byte-grid">
+                  {renderBytes(step >= 7 ? 8 : step >= 6 ? 8 : step >= 5 ? 8 : step >= 4 ? 4 : step >= 3 ? 2 : 1)}
+                </div>
+              )}
+              {step >= 2 && (
+                <div className="size-compare">
+                  <div className="sc-title">大小对比 (1-8 字节)</div>
+                  <div className="sc-row">
+                    <div className={`sc-block u8 ${highlightType === 0 ? 'highlight' : ''}`}>1B</div>
+                    <div style={{fontSize:11,color:'#64748b',marginLeft:4}}>uint8_t</div>
+                  </div>
+                  <div className="sc-row">
+                    <div className={`sc-block u16 ${highlightType === 1 ? 'highlight' : ''}`}></div>
+                    <div className={`sc-block u16 ${highlightType === 1 ? 'highlight' : ''}`}></div>
+                    <div style={{fontSize:11,color:'#64748b',marginLeft:4}}>uint16_t (2B)</div>
+                  </div>
+                  <div className="sc-row">
+                    {[...Array(4)].map((_,i) => <div key={i} className={`sc-block u32 ${highlightType === 2 ? 'highlight' : ''}`}></div>)}
+                    <div style={{fontSize:11,color:'#64748b',marginLeft:4}}>uint32_t (4B)</div>
+                  </div>
+                  <div className="sc-row">
+                    {[...Array(8)].map((_,i) => <div key={i} className={`sc-block u64 ${highlightType === 3 ? 'highlight' : ''}`}></div>)}
+                    <div style={{fontSize:11,color:'#64748b',marginLeft:4}}>uint64_t (8B)</div>
+                  </div>
+                </div>
+              )}
+              {step >= 2 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.purple}}>stdint 类型</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>stdint.h 定义的类型大小固定，跨平台一致</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>uint8_t</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>8 位 = 1 字节，范围 0-255</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>uint16_t</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>16 位 = 2 字节，范围 0-65535</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.purple}}>uint32_t</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>32 位 = 4 字节，范围 0-42 亿</p>
+              </div>
+              <div className={`explanation-card ${step >= 5 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.pink}}>uint64_t</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>64 位 = 8 字节，超大整数</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.orange}}>指针大小</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>64 位系统 8 字节，32 位系统 4 字节</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

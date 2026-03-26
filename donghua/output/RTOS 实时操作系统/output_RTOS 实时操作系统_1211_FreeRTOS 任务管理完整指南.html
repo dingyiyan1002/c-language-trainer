@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1211 - FreeRTOS 任务管理完整指南 - 嵌入式 C 语言可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(59, 130, 246, 0.2); } 50% { background-color: rgba(59, 130, 246, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes danger { 0%, 100% { background-color: rgba(239, 68, 68, 0.3); } 50% { background-color: rgba(239, 68, 68, 0.6); } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes run { 0% { transform: translateX(0); } 50% { transform: translateX(10px); } 100% { transform: translateX(0); } }
+        @keyframes ready { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+        @keyframes blocked { 0%, 100% { filter: brightness(0.5); } 50% { filter: brightness(0.7); } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .flow { animation: flow 2s infinite; }
+        .highlight { animation: highlight 2s infinite; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .countdown { animation: countdown 0.3s ease-out; }
+        .danger { animation: danger 1s infinite; }
+        .reset { animation: reset 1s linear; }
+        .run { animation: run 1s infinite; }
+        .ready { animation: ready 2s infinite; }
+        .blocked { animation: blocked 2s infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#3b82f6',
+            secondary: '#1d4ed8',
+            accent: '#60a5fa',
+            highlight: '#93c5fd',
+            danger: '#ef4444',
+            success: '#10b981'
+        };
+
+        const STEPS = [
+            {
+                title: "FreeRTOS 任务基础",
+                code: `// FreeRTOS 任务概述
+// 任务是 FreeRTOS 的基本执行单元
+
+// 任务特性:
+// - 无限循环结构 (永不返回)
+// - 独立栈空间
+// - 可配置优先级 (0-configMAX_PRIORITIES-1)
+// - 可阻塞/就绪/运行/挂起状态
+
+// 任务函数原型
+void vTaskFunction(void *pvParameters) {
+    for(;;) {
+        // 任务代码
+        vTaskDelay(pdMS_TO_TICKS(100));  // 延时 100ms
+    }
+}
+
+// 创建任务
+xTaskCreate(
+    vTaskFunction,      // 任务函数
+    "TaskName",         // 任务名称
+    configMINIMAL_STACK_SIZE,  // 栈大小 (字数)
+    NULL,               // 参数
+    tskIDLE_PRIORITY,   // 优先级
+    NULL                // 任务句柄
+);
+
+// 调度器启动
+vTaskStartScheduler();  // 永不返回`,
+                description: "FreeRTOS 任务是独立的执行线程，具有无限循环结构。每个任务有独立的栈空间、优先级和状态 (运行/就绪/阻塞/挂起)。任务通过 vTaskCreate 创建，vTaskStartScheduler 启动调度器后开始多任务执行。优先级数值越大优先级越高。",
+                highlight: "任务函数永不返回，必须是无限循环，否则导致系统崩溃"
+            },
+            {
+                title: "任务状态与调度",
+                code: `// FreeRTOS 任务状态:
+// 1. Running (运行态) - 正在 CPU 执行
+// 2. Ready (就绪态) - 可运行但其他高优先级任务在运行
+// 3. Blocked (阻塞态) - 等待事件 (延时、信号量等)
+// 4. Suspended (挂起态) - 被 vTaskSuspend 挂起
+
+// 抢占式调度:
+// - 高优先级任务就绪时立即切换
+// - 同优先级任务时间片轮转
+
+// 查询任务状态
+eTaskState eTaskGetState(TaskHandle_t xTask);
+
+// 任务状态转换:
+// Running → Blocked: 调用 vTaskDelay/vTaskDelayUntil
+// Running → Ready:  高优先级任务就绪
+// Running → Suspended: 调用 vTaskSuspend
+// Blocked → Ready:  阻塞事件发生
+// Suspended → Ready: 调用 vTaskResume`,
+                description: "FreeRTOS 任务有四种状态：运行态 (Running)、就绪态 (Ready)、阻塞态 (Blocked)、挂起态 (Suspended)。调度器采用抢占式调度，高优先级任务就绪时立即切换。同优先级任务采用时间片轮转。任务通过延时、等待信号量等操作进入阻塞态，释放 CPU 给其他任务。",
+                highlight: "阻塞态不占用 CPU，是低功耗和多任务协作的关键"
+            },
+            {
+                title: "任务优先级配置",
+                code: `// 优先级配置 (FreeRTOSConfig.h)
+#define configMAX_PRIORITIES    5  // 最大优先级数
+
+// 优先级分配建议:
+// 优先级 4 (最高): 关键实时任务 (电机控制、保护)
+// 优先级 3: 通信任务 (UART、CAN 处理)
+// 优先级 2: 一般任务 (传感器读取)
+// 优先级 1: 后台任务 (数据显示)
+// 优先级 0: 空闲任务 (最低)
+
+// 创建不同优先级的任务
+xTaskCreate(vTaskHigh, "High", 128, NULL, 4, NULL);    // 最高
+xTaskCreate(vTaskMedium, "Medium", 128, NULL, 2, NULL); // 中等
+xTaskCreate(vTaskLow, "Low", 128, NULL, 1, NULL);      // 低
+
+// 动态修改优先级
+vTaskPrioritySet(taskHandle, newPriority);
+
+// 获取任务优先级
+UBaseType_t uxTaskPriorityGet(TaskHandle_t xTask);
+
+// 注意：避免优先级反转问题`,
+                description: "优先级决定任务执行顺序，数值越大优先级越高。configMAX_PRIORITIES 定义最大优先级数。关键实时任务应使用高优先级，后台任务使用低优先级。优先级可动态修改，但需谨慎使用。优先级反转是高优先级任务等待低优先级任务持有的资源导致的问题，可通过互斥量的优先级继承解决。",
+                highlight: "优先级反转可导致系统实时性失效，使用互斥量可避免"
+            },
+            {
+                title: "任务延时与调度",
+                code: `// 阻塞延时 (推荐) - 让出 CPU
+vTaskDelay(TickType_t xTicksToDelay);
+vTaskDelay(pdMS_TO_TICKS(100));  // 延时 100ms
+
+// 相对延时 vs 绝对延时
+// vTaskDelay: 相对当前时间的延时
+// vTaskDelayUntil: 精确周期延时
+
+void vTaskPeriodic(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xPeriod = pdMS_TO_TICKS(100);  // 100ms 周期
+
+    for(;;) {
+        // 周期性任务代码
+        vTaskDelayUntil(&xLastWakeTime, xPeriod);
+        // 精确保持 100ms 周期，不受任务执行时间影响
+    }
+}
+
+// 非阻塞延时 (不推荐) - 占用 CPU
+void software_delay(uint32_t ms) {
+    for(uint32_t i = 0; i < ms * 1000; i++);  // 空转
+}`,
+                description: "vTaskDelay 使任务进入阻塞态，释放 CPU 给其他任务。vTaskDelayUntil 用于精确周期任务，自动补偿任务执行时间。避免使用软件空转延时，会浪费 CPU 资源。Tick 是 RTOS 的时间基准，通常 1ms 一个 Tick。pdMS_TO_TICKS 将毫秒转换为 Tick 数。",
+                highlight: "vTaskDelayUntil 保证精确周期，不受任务执行时间抖动影响"
+            },
+            {
+                title: "任务通知 (Task Notification)",
+                code: `// 任务通知 - 轻量级信号量替代
+// 直接向任务发送通知，无需创建信号量对象
+
+// 发送通知 (从中断或任务)
+xTaskNotify(taskHandle, ulValue, eAction);
+xTaskNotifyGive(taskHandle);  // 简化版，值 +1
+
+// 等待通知 (阻塞)
+ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // 清除通知
+ulTaskNotifyTake(pdFALSE, portMAX_DELAY); // 不清除
+
+// 等待通知 (非阻塞)
+ulTaskNotifyTake(pdTRUE, 0);
+
+// 使用示例：中断通知任务
+void EXTI0_IRQHandler(void) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(xTaskHandle, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+// 任务等待通知
+void vTaskWaitNotify(void *pvParameters) {
+    for(;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // 阻塞等待
+        // 处理事件...
+    }
+}`,
+                description: "任务通知是 FreeRTOS v8.2 引入的轻量级 IPC 机制，比信号量快 45% 且节省 RAM。每个任务有 32 位通知值，可配置为累加、置位、赋值等模式。常用于中断通知任务、任务间同步。ulTaskNotifyTake 等待通知并可选择是否清除。",
+                highlight: "任务通知比信号量更快更省内存，应优先使用"
+            },
+            {
+                title: "任务栈与内存管理",
+                code: `// 任务栈配置
+// 栈大小单位：字数 (32 位系统 1 字=4 字节)
+
+// 最小栈大小
+#define configMINIMAL_STACK_SIZE    128
+
+// 检查栈溢出
+void vApplicationStackOverflowHook(
+    TaskHandle_t xTask,
+    char *pcTaskName
+) {
+    // 栈溢出处理
+    while(1);
+}
+
+// 获取任务栈剩余空间
+UBaseType_t uxTaskGetStackHighWaterMark(TaskHandle_t xTask);
+// 返回值：栈使用后的最小剩余字数
+
+// 内存管理方案 (FreeRTOSConfig.h)
+// heap_1.c: 仅分配，不释放
+// heap_2.c: 可释放，有碎片
+// heap_3.c: 使用 malloc/free
+// heap_4.c: 合并相邻空闲块 (推荐)
+// heap_5.c: 支持多个内存区域
+
+#define configSUPPORT_DYNAMIC_ALLOCATION 1
+#define configTOTAL_HEAP_SIZE   (1024 * 10)  // 10KB 堆`,
+                description: "每个任务需要独立栈空间，栈大小不足会导致溢出。uxTaskGetStackHighWaterMark 用于检查栈使用情况，指导栈大小配置。栈溢出钩子函数用于调试。FreeRTOS 提供 5 种堆管理方案，heap_4 最常用 (支持释放且合并碎片)。configTOTAL_HEAP_SIZE 定义总堆大小。",
+                highlight: "栈溢出是常见崩溃原因，必须配置足够栈空间并监控使用"
+            },
+            {
+                title: "空闲任务钩子函数",
+                code: `// 空闲任务 (Idle Task)
+// - 优先级 0 (最低)
+// - 无其他任务就绪时运行
+// - 负责清理已终止任务的资源
+
+// 空闲任务钩子函数
+void vApplicationIdleHook(void) {
+    // 注意：不能使用 vTaskDelay (会阻塞空闲任务)
+
+    // 低功耗应用：进入睡眠
+    #if configUSE_TICKLESS_IDLE
+    __WFI();  // Wait For Interrupt
+    #endif
+
+    // 看门狗喂狗
+    IWDG->KR = 0xAAAA;
+}
+
+// 空闲任务钩子配置
+#define configUSE_IDLE_HOOK 1
+
+// 应用场景:
+// 1. 低功耗模式进入
+// 2. 后台数据统计
+// 3. 看门狗喂狗
+// 4. CPU 占用率计算`,
+                description: "空闲任务是优先级最低的任务，当无其他任务就绪时运行。空闲任务钩子函数可用于低功耗应用 (进入睡眠模式)、后台统计、看门狗喂狗等。钩子函数中不能使用任何阻塞 API。configUSE_TICKLESS_IDLE 启用时无空闲任务自动进入低功耗模式。",
+                highlight: "空闲任务钩子不能阻塞，否则系统崩溃"
+            },
+            {
+                title: "多任务应用实例",
+                code: `// 多任务系统实例
+
+#include "FreeRTOS.h"
+#include "task.h"
+
+// 任务句柄
+TaskHandle_t xTaskLed, xTaskBtn, xTaskSensor;
+
+// LED 任务 (优先级 1, 100ms 周期)
+void vTaskLed(void *pvParameters) {
+    for(;;) {
+        GPIOA->ODR ^= GPIO_ODR_OD5;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+// 按键任务 (优先级 2, 事件驱动)
+void vTaskButton(void *pvParameters) {
+    for(;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // 等待通知
+        // 按键处理...
+    }
+}
+
+// 传感器任务 (优先级 3, 50ms 周期)
+void vTaskSensor(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    for(;;) {
+        float temp = Sensor_Read();
+        // 发送数据...
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(50));
+    }
+}
+
+// 主函数
+int main(void) {
+    Hardware_Init();
+
+    xTaskCreate(vTaskLed, "LED", 128, NULL, 1, &xTaskLed);
+    xTaskCreate(vTaskButton, "BTN", 128, NULL, 2, &xTaskBtn);
+    xTaskCreate(vTaskSensor, "SNS", 256, NULL, 3, &xTaskSensor);
+
+    vTaskStartScheduler();  // 启动调度器
+
+    while(1);  // 永不执行
+}`,
+                description: "多任务系统实例展示了三个典型任务：LED 闪烁 (周期性)、按键处理 (事件驱动)、传感器读取 (精确周期)。优先级：传感器>按键>LED。使用 vTaskDelay 实现简单延时，vTaskDelayUntil 实现精确周期，ulTaskNotifyTake 实现事件等待。主函数创建所有任务后启动调度器。",
+                highlight: "多任务设计核心：合理分配优先级，周期性任务用 vTaskDelayUntil"
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [showCode, setShowCode] = useState(true);
+            const voiceEndTimerRef = useRef(null);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v =>
+                        v.lang === 'zh-CN' ||
+                        v.lang === 'zh-CN-XiaoxiaoNeural' ||
+                        v.lang.includes('Chinese')
+                    );
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.description + "。" + step.highlight);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep]);
+
+            // 任务状态可视化
+            const TaskStates = () => {
+                const states = [
+                    { name: '运行态', status: 'Running', color: 'bg-green-500', class: 'run' },
+                    { name: '就绪态', status: 'Ready', color: 'bg-yellow-500', class: 'ready' },
+                    { name: '阻塞态', status: 'Blocked', color: 'bg-blue-500', class: 'blocked' },
+                    { name: '挂起态', status: 'Suspended', color: 'bg-gray-500', class: '' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-blue-400 mb-3">任务状态</h3>
+                        <div className="grid grid-cols-2 gap-2">
+                            {states.map((s, i) => (
+                                <div key={i} className={`p-3 rounded text-center ${s.color} ${s.class}`}>
+                                    <div className="text-xs font-bold">{s.name}</div>
+                                    <div className="text-xs opacity-75">{s.status}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 优先级可视化
+            const PriorityVisual = () => {
+                const tasks = [
+                    { name: '传感器', priority: 3, color: 'bg-red-500' },
+                    { name: '按键', priority: 2, color: 'bg-yellow-500' },
+                    { name: 'LED', priority: 1, color: 'bg-green-500' },
+                    { name: '空闲', priority: 0, color: 'bg-gray-500' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-3">任务优先级</h3>
+                        <div className="space-y-2">
+                            {tasks.map((t, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                    <div className={`w-4 h-4 rounded ${t.color}`}></div>
+                                    <span className="text-xs flex-1">{t.name}</span>
+                                    <div className="flex gap-1">
+                                        {[0, 1, 2, 3].map((p) => (
+                                            <div key={p} className={`w-3 h-3 rounded ${
+                                                p === t.priority ? t.color : 'bg-gray-700'
+                                            }`}></div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 任务切换可视化
+            const TaskSwitching = () => {
+                const tasks = ['任务 A(高)', '任务 B(中)', '任务 C(低)'];
+                const [activeTask, setActiveTask] = useState(0);
+
+                useEffect(() => {
+                    if (!isPlaying) return;
+                    const interval = setInterval(() => {
+                        setActiveTask(prev => (prev + 1) % 3);
+                    }, 1500);
+                    return () => clearInterval(interval);
+                }, [isPlaying]);
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-3">任务调度</h3>
+                        <div className="space-y-2">
+                            {tasks.map((t, i) => (
+                                <div key={i} className={`p-2 rounded transition-all ${
+                                    i === activeTask
+                                        ? 'bg-blue-500 scale-105'
+                                        : 'bg-gray-700 opacity-50'
+                                }`}>
+                                    <div className="text-xs flex justify-between">
+                                        <span>{t}</span>
+                                        {i === activeTask && <span>▶ 运行中</span>}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 栈使用可视化
+            const StackUsage = () => {
+                const stacks = [
+                    { task: '任务 A', total: 256, used: 180, remaining: 76 },
+                    { task: '任务 B', total: 256, used: 120, remaining: 136 },
+                    { task: '任务 C', total: 128, used: 90, remaining: 38 }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-orange-400 mb-3">任务栈使用</h3>
+                        <div className="space-y-2">
+                            {stacks.map((s, i) => (
+                                <div key={i}>
+                                    <div className="flex justify-between text-xs mb-1">
+                                        <span>{s.task}</span>
+                                        <span className={s.remaining < 50 ? 'text-red-400' : 'text-green-400'}>
+                                            剩余{s.remaining}字
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-gray-700 rounded h-3">
+                                        <div
+                                            className={`h-3 rounded ${s.remaining < 50 ? 'bg-red-500' : 'bg-green-500'}`}
+                                            style={{width: `${(s.used / s.total) * 100}%`}}
+                                        ></div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    {/* 头部 */}
+                    <div className="max-w-7xl mx-auto mb-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-blue-400">
+                                1211 - FreeRTOS 任务管理完整指南
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">
+                                    {isPlaying ? '暂停' : '播放'}
+                                </button>
+                                <button onClick={() => setShowCode(!showCode)} className="px-3 py-1 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                    {showCode ? '隐藏代码' : '显示代码'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div className="flex gap-1 mb-4">
+                            {STEPS.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentStep(i)}
+                                    className={`flex-1 h-2 rounded transition-all ${
+                                        i === currentStep ? 'bg-blue-500 scale-110' :
+                                        i < currentStep ? 'bg-blue-700' : 'bg-gray-600'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 主内容区 - 三列布局 */}
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* 左列：代码 */}
+                        {showCode && (
+                            <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                                <h2 className="text-sm font-bold text-blue-400 mb-2">
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap bg-gray-900 p-3 rounded">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        )}
+
+                        {/* 中列：可视化动画 */}
+                        <div className={`${showCode ? 'col-span-1' : 'col-span-2'} space-y-4`}>
+                            <TaskStates />
+                            <div className="grid grid-cols-2 gap-4">
+                                {currentStep >= 2 ? <PriorityVisual /> : <TaskSwitching />}
+                                {currentStep >= 5 ? <StackUsage /> : <div className="bg-gray-800 rounded-lg p-4"><h3 className="text-sm font-bold text-gray-400 mb-2">等待下一步...</h3></div>}
+                            </div>
+                        </div>
+
+                        {/* 右列：说明 */}
+                        <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                            <h3 className="text-sm font-bold text-blue-400 mb-2">说明</h3>
+                            <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                                {STEPS[currentStep].description}
+                            </p>
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2">
+                                <p className="text-xs text-yellow-300">
+                                    <span className="font-bold">💡 重点:</span> {STEPS[currentStep].highlight}
+                                </p>
+                            </div>
+
+                            {/* 导航按钮 */}
+                            <div className="flex gap-2 mt-4">
+                                <button
+                                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                                    disabled={currentStep === 0}
+                                    className="flex-1 py-2 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 text-xs"
+                                >
+                                    ← 上一步
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+                                    disabled={currentStep === STEPS.length - 1}
+                                    className="flex-1 py-2 bg-blue-600 rounded hover:bg-blue-500 disabled:opacity-50 text-xs"
+                                >
+                                    下一步 →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部摘要 */}
+                    <div className="max-w-7xl mx-auto mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-blue-400 mb-2">FreeRTOS 任务核心要点</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-blue-400 font-bold">四种状态</span>
+                                <p className="text-gray-400 mt-1">运行/就绪/阻塞/挂起</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-green-400 font-bold">抢占调度</span>
+                                <p className="text-gray-400 mt-1">高优先级优先执行</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-purple-400 font-bold">任务通知</span>
+                                <p className="text-gray-400 mt-1">轻量级同步机制</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-orange-400 font-bold">栈监控</span>
+                                <p className="text-gray-400 mt-1">防止栈溢出</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

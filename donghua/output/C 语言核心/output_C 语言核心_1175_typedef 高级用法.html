@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1175 - typedef 高级用法</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(6, 182, 212, 0.2); } 50% { background-color: rgba(6, 182, 212, 0.5); } }
+        @keyframes aliasAnim { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .animate-blink { animation: blink 1s steps(2) infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+        .animate-alias { animation: aliasAnim 1.5s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#06b6d4',
+            secondary: '#0891b2',
+            accent: '#22d3ee',
+            highlight: '#67e8f9',
+            bg: '#164e63',
+            text: '#ecfeff'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const steps = [
+                { title: 'typedef 基础概念', voice: 'typedef 基础概念。typedef 用于为现有类型创建别名，不创建新类型。typedef 提高代码可读性，简化复杂类型声明，使代码更易于修改和维护。在嵌入式 C 中，typedef 广泛用于类型抽象和平台无关代码。' },
+                { title: '基本类型别名', voice: '基本类型别名。为基本类型创建有意义的别名，增强代码自解释性。例如，用 int32_t 代替 int，明确表示 32 位宽度。用 bool 代替 int 表示布尔值。类型别名使代码意图更清晰。' },
+                { title: '结构体联合体枚举', voice: '结构体、联合体、枚举的 typedef。typedef 简化结构体等复合类型的声明。可以省略 struct 关键字，直接使用类型名。这是 C 语言的标准做法，使代码更简洁。' },
+                { title: '指针类型别名', voice: '指针类型别名。typedef 可以为指针类型创建别名，简化声明。但要注意，typedef 指针可能隐藏指针本质，导致误解。推荐做法是为基类型创建别名，而不是指针类型。' },
+                { title: '函数指针 typedef', voice: '函数指针的 typedef 用法。函数指针是 typedef 最有价值的应用场景。复杂的函数指针声明通过 typedef 变得清晰可读。回调函数、状态机、驱动接口都依赖此技术。' },
+                { title: '数组与复合类型', voice: '数组和复合类型的 typedef。typedef 可以简化数组类型声明，特别是多维数组。可以定义固定大小的数组类型。但数组 typedef 可能导致混淆，使用时需谨慎。' },
+                { title: '平台无关类型', voice: '平台无关类型定义。stdint.h 使用 typedef 定义精确宽度类型。int32_t、uint8_t 等类型确保代码在不同平台上行为一致。这是嵌入式 C 编程的基础实践。' },
+                { title: '最佳实践与陷阱', voice: 'typedef 最佳实践与常见陷阱。最佳实践：为语义清晰使用 typedef，为复杂类型使用 typedef，遵循项目命名约定。陷阱：过度使用导致类型系统不透明，指针 typedef 可能隐藏间接性。' }
+            ];
+
+            useEffect(() => {
+                if (!isPlaying) return;
+                const speak = () => {
+                    if (isMuted || !steps[currentStep]) return;
+                    const utterance = new SpeechSynthesisUtterance(steps[currentStep].voice);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak();
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    window.speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, isMuted]);
+
+            const BasicTypedef = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>基本类型别名</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-red-400 font-bold mb-2">❌ 无类型别名</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 代码意图不明确
+int status;
+int result;
+int flag;
+
+// 类型宽度不明确
+int counter;     // 16 位？32 位？
+int timeout;     // 依赖平台
+unsigned int x;  // 是 uint 还是 ulong？`}
+                                </pre>
+                                <div className="mt-2 text-xs text-red-400">
+                                    ⚠️ 类型语义不清晰，依赖编译器实现
+                                </div>
+                            </div>
+                            <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">✓ 使用 typedef</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`typedef int Status;
+typedef int Result;
+typedef int Flag;
+
+Status status;     // 语义清晰
+Result result;
+Flag flag;
+
+// 精确宽度
+typedef int32_t Counter;
+typedef uint32_t Timeout;
+
+Counter counter;   // 明确 32 位
+Timeout timeout;`}
+                                </pre>
+                                <div className="mt-2 text-xs text-emerald-400">
+                                    ✓ 类型意图明确，平台无关
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const StructTypedef = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>结构体 typedef</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 传统方式 (需要 struct 关键字)
+struct Point {
+    int x;
+    int y;
+};
+struct Point p1;  // 必须写 struct
+
+// typedef 简化
+typedef struct {
+    int x;
+    int y;
+} Point;
+Point p2;  // 直接使用
+
+// 命名结构体 + typedef (推荐)
+typedef struct Point {
+    int x;
+    int y;
+} Point_t;
+
+// 使用
+Point_t p3;
+struct Point *pPtr;  // 可以在结构体内自引用`}
+                            </pre>
+                            <div className={`${currentStep >= 2 ? 'animate-scaleIn' : ''} p-3 bg-cyan-900/30 rounded border border-cyan-600`}>
+                                <div className="text-cyan-300 font-bold mb-2">自引用结构体</div>
+                                <pre className="text-xs font-mono text-gray-300">
+{`// 链表节点 - 需要命名结构体
+typedef struct Node {
+    int data;
+    struct Node *next;  // 自引用必须用 struct
+} Node_t;
+
+// 如果省略 struct 名，无法自引用
+typedef struct {
+    int data;
+    ??? *next;  // 错误！无法引用自身
+} Node;}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const PointerTypedef = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>指针类型别名</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className={`${currentStep >= 3 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-amber-400 font-bold mb-2">⚠️ 指针 typedef (谨慎使用)</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`typedef char* String;
+
+String s1, s2;  // 都是 char*
+String* s3;     // 是 char** ! 容易混淆
+
+const String s; // const char* 还是 char* const?
+                // 实际是 char* const (指针常量)
+
+// 容易误解指针层级`}
+                                </pre>
+                                <div className="mt-2 text-xs text-amber-400">
+                                    ⚠️ 隐藏了指针本质，可能导致类型误解
+                                </div>
+                            </div>
+                            <div className={`${currentStep >= 3 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">✓ 推荐做法</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 为基类型创建别名
+typedef char String[256];  // 数组类型
+
+String s;  // char[256]
+
+// 或者明确指针
+typedef struct Buffer Buffer;
+typedef Buffer* BufferHandle;  // 明确是句柄
+
+// 或者使用不透明指针
+typedef struct File* FileHandle;
+FileHandle fh;  // 明确是指针`}
+                                </pre>
+                                <div className="mt-2 text-xs text-emerald-400">
+                                    ✓ 清晰表达意图，减少混淆
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const FunctionPointerTypedef = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>函数指针 typedef</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 原始函数指针声明
+int (*fp)(int, int);
+void (*callback)(const char*, void*);
+int (*compare)(const void*, const void*);
+
+// 使用 typedef 简化
+typedef int (*BinaryOp)(int, int);
+typedef void (*StringCallback)(const char*, void*);
+typedef int (*Comparator)(const void*, const void*);
+
+// 使用
+BinaryOp addOp, subOp, mulOp;
+StringCallback onLog, onError;
+Comparator sortCmp;
+
+// 复杂例子
+typedef void (*GPIO_Handler)(int pin, int event);
+typedef struct {
+    GPIO_Handler onKeyDown;
+    GPIO_Handler onKeyUp;
+} GPIO_Callbacks;`}
+                            </pre>
+                            <div className={`${currentStep >= 4 ? 'animate-scaleIn' : ''} p-3 bg-purple-900/30 rounded border border-purple-600`}>
+                                <div className="text-purple-300 font-bold mb-2">实际应用场景</div>
+                                <pre className="text-xs font-mono text-gray-300">
+{`// qsort 比较函数
+typedef int (*qsort_cmp_t)(const void*, const void*);
+
+// 中断回调
+typedef void (*IRQ_Handler)(void* context);
+
+// 状态机转换函数
+typedef int (*StateAction)(void* data);
+
+// 设备驱动方法
+typedef int (*dev_read_t)(uint8_t* buf, size_t len);
+typedef int (*dev_write_t)(const uint8_t* buf, size_t len);`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const ArrayTypedef = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>数组类型别名</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 固定大小数组
+typedef int Vector3[3];
+typedef float Matrix4x4[4][4];
+
+Vector3 position;      // int[3]
+Matrix4x4 transform;   // float[4][4]
+
+// DMA 缓冲区
+typedef uint8_t DMA_Buffer[1024];
+DMA_Buffer rxBuffer;
+DMA_Buffer txBuffer;
+
+// 作为函数参数
+void processVector(Vector3 v) {
+    // v 退化为 int*
+}
+
+// 注意：数组 typedef 在参数传递时会退化为指针`}
+                            </pre>
+                            <div className="grid grid-cols-2 gap-4 mt-4">
+                                <div className="bg-blue-900/30 p-3 rounded border border-blue-600">
+                                    <div className="text-blue-300 font-bold mb-1">优点</div>
+                                    <ul className="text-xs text-gray-300 space-y-1">
+                                        <li>• 简化多维数组声明</li>
+                                        <li>• 表达固定大小意图</li>
+                                        <li>• 便于类型修改</li>
+                                    </ul>
+                                </div>
+                                <div className="bg-amber-900/30 p-3 rounded border border-amber-600">
+                                    <div className="text-amber-300 font-bold mb-1">注意</div>
+                                    <ul className="text-xs text-gray-300 space-y-1">
+                                        <li>• 函数参数中退化为指针</li>
+                                        <li>• sizeof 行为可能不符合预期</li>
+                                        <li>• 赋值行为不同于普通类型</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const StdintTypes = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>平台无关类型 (stdint.h)</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// stdint.h 使用 typedef 定义精确宽度类型
+
+// 精确宽度类型
+typedef signed char        int8_t;
+typedef unsigned char      uint8_t;
+typedef signed short       int16_t;
+typedef unsigned short     uint16_t;
+typedef signed int         int32_t;
+typedef unsigned int       uint32_t;
+typedef signed long long   int64_t;
+typedef unsigned long long uint64_t;
+
+// 最大宽度类型
+typedef int32_t    intptr_t;
+typedef uint32_t   uintptr_t;
+
+// 使用
+uint32_t timer_count;     // 明确 32 位无符号
+int16_t sensor_value;     // 明确 16 位有符号
+uintptr_t addr;           // 能容纳指针的整数`}
+                            </pre>
+                            <div className="p-3 bg-emerald-900/30 rounded border border-emerald-600">
+                                <div className="text-emerald-300 text-sm">
+                                    💡 stdint.h 类型确保代码在 8 位、16 位、32 位、64 位平台上行为一致，是嵌入式 C 编程的基础
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const AdvancedTypedef = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>复杂 typedef 示例</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 数组指针
+typedef int (*ArrayPtr)[10];    // 指向 int[10] 的指针
+
+// 函数返回指针
+typedef int* (*FuncPtr)(int);   // 函数返回 int*
+
+// 指针数组
+typedef char* StringArray[10];  // 10 个 char* 的数组
+
+// 函数指针数组
+typedef void (*HandlerArray[5])(int);  // 5 个函数指针
+
+// 指向函数的指针，函数返回函数指针
+typedef void (*FuncA)(int);
+typedef FuncA (*FuncB)(int);  // 返回 FuncA 的函数
+
+// 复杂结构体
+typedef struct {
+    uint32_t *buffer;
+    size_t size;
+    void (*onComplete)(void*);
+    void *context;
+} AsyncOperation;`}
+                            </pre>
+                            <div className="p-3 bg-purple-900/30 rounded border border-purple-600">
+                                <div className="text-purple-300 font-bold mb-1">解读技巧</div>
+                                <div className="text-xs text-gray-300">
+                                    从内向外读：先找标识符，然后按优先级读取 (数组/函数 → 指针 → 基类型)
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const BestPractices = () => (
+                <div className="space-y-4">
+                    <div className="bg-gradient-to-r from-cyan-900/50 to-teal-900/50 rounded-lg p-6">
+                        <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>typedef 最佳实践</h3>
+                        <ul className="space-y-3 text-gray-300">
+                            <li className="flex items-start">
+                                <span className="text-cyan-400 mr-2">✓</span>
+                                <span><strong>为语义使用 typedef：</strong>类型别名应表达用途，如 Status、ErrorCode</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-cyan-400 mr-2">✓</span>
+                                <span><strong>为复杂类型使用 typedef：</strong>函数指针、复杂指针、结构体</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-cyan-400 mr-2">✓</span>
+                                <span><strong>使用 uintN_t/intN_t：</strong>需要精确宽度时始终使用 stdint 类型</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-cyan-400 mr-2">✓</span>
+                                <span><strong>命名约定：</strong>使用_t 后缀或 PascalCase 区分类型名</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-amber-400 mr-2">⚠️</span>
+                                <span><strong>避免指针 typedef：</strong>可能隐藏间接性，导致代码难以理解</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-amber-400 mr-2">⚠️</span>
+                                <span><strong>不要过度使用：</strong>保持类型系统透明，便于理解代码</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>完整示例：模块接口</h4>
+                        <pre className="text-xs font-mono text-gray-300">
+{`// sensor.h - 传感器模块接口
+#ifndef SENSOR_H
+#define SENSOR_H
+
+#include <stdint.h>
+#include <stddef.h>
+
+// 类型定义
+typedef enum {
+    SENSOR_OK = 0,
+    SENSOR_ERROR,
+    SENSOR_TIMEOUT
+} SensorStatus;
+
+typedef struct {
+    int32_t x;
+    int32_t y;
+    int32_t z;
+} AccelerometerData;
+
+typedef SensorStatus (*SensorInit)(void);
+typedef SensorStatus (*SensorRead)(void* data, size_t len);
+
+// 传感器驱动接口
+typedef struct {
+    SensorInit init;
+    SensorRead read;
+} SensorDriver;
+
+// 公共函数
+SensorStatus sensorInit(void);
+SensorStatus sensorReadData(AccelerometerData* data);
+
+#endif`}
+                        </pre>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch(currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-6">
+                                <div className="bg-gradient-to-r from-cyan-900/50 to-teal-900/50 rounded-lg p-6">
+                                    <h3 className="text-2xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>typedef 基础概念</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-cyan-400 mr-2">▸</span>
+                                            <span>为现有类型创建别名，不是新类型</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-cyan-400 mr-2">▸</span>
+                                            <span>提高代码可读性和可维护性</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-cyan-400 mr-2">▸</span>
+                                            <span>简化复杂类型声明</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-cyan-400 mr-2">▸</span>
+                                            <span>实现平台无关类型抽象</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300">
+{`// typedef 基础语法
+typedef existing_type new_type_name;
+
+// 示例
+typedef unsigned long uint32;
+typedef int Status;
+typedef struct { int x, y; } Point;
+
+// 使用
+uint32 counter;
+Status result;
+Point p;`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return <BasicTypedef />;
+                    case 2:
+                        return <StructTypedef />;
+                    case 3:
+                        return <PointerTypedef />;
+                    case 4:
+                        return <FunctionPointerTypedef />;
+                    case 5:
+                        return <ArrayTypedef />;
+                    case 6:
+                        return <StdintTypes />;
+                    case 7:
+                        return <BestPractices />;
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-6 flex items-center justify-between">
+                            <div>
+                                <h1 className="text-3xl font-bold" style={{ color: COLOR_MAP.primary }}>
+                                    1175 - typedef 高级用法
+                                </h1>
+                                <p className="text-gray-400 mt-1">C 语言核心 · 步骤 {currentStep + 1} / {steps.length}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setIsMuted(!isMuted)}
+                                    className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-cyan-600'} hover:opacity-80`}>
+                                    {isMuted ? '🔇 静音' : '🔊 语音'}
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className={`px-4 py-2 rounded ${isPlaying ? 'bg-cyan-600' : 'bg-gray-600'} hover:opacity-80`}>
+                                    {isPlaying ? '⏸ 暂停' : '▶ 继续'}
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-3 gap-6">
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>代码示例</h3>
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`// 基础 typedef
+typedef unsigned int uint;
+typedef int32_t Status;
+
+// 结构体
+typedef struct { int x, y; } Point;
+
+// 函数指针
+typedef int (*Callback)(int);
+
+// 数组
+typedef uint8_t Buffer[256];
+
+// 平台类型 (stdint.h)
+// int8_t, uint32_t, int64_t, uintptr_t`}
+                                    </pre>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>关键点</h3>
+                                    <ul className="space-y-2 text-sm text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-cyan-400 mr-2">•</span>
+                                            <span>创建类型别名，不是新类型</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-cyan-400 mr-2">•</span>
+                                            <span>简化复杂类型声明</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-cyan-400 mr-2">•</span>
+                                            <span>函数指针的最佳应用场景</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-cyan-400 mr-2">•</span>
+                                            <span>避免过度使用指针 typedef</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div className="col-span-1">
+                                <div className="bg-gray-800 rounded-lg p-6 h-full">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>
+                                        {steps[currentStep].title}
+                                    </h3>
+                                    {renderContent()}
+                                </div>
+                            </div>
+
+                            <div className="col-span-1 space-y-4">
+                                <BasicTypedef />
+                                <StructTypedef />
+                            </div>
+                        </div>
+
+                        <footer className="mt-8 flex justify-center gap-2">
+                            {steps.map((_, idx) => (
+                                <button key={idx} onClick={() => setCurrentStep(idx)}
+                                    className={`w-3 h-3 rounded-full transition-all ${idx === currentStep ? 'w-8' : ''}`}
+                                    style={{ backgroundColor: idx <= currentStep ? COLOR_MAP.primary : '#374151' }} />
+                            ))}
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

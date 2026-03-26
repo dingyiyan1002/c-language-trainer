@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1162 - ADC 模数转换器 - 嵌入式 C 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes sample { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.2); } }
+    @keyframes wave { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+    .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+    .animate-blink { animation: blink 0.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out forwards; }
+    .animate-scaleIn { animation: scaleIn 0.5s ease-out forwards; }
+    .animate-sample { animation: sample 1s ease-in-out infinite; }
+    .animate-wave { animation: wave 3s linear infinite; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#06b6d4',
+      secondary: '#22d3ee',
+      accent: '#67e8f9',
+      bg: '#164e63',
+      text: '#ecfeff',
+      border: '#0891b2'
+    };
+
+    const STEPS = [
+      { title: 'ADC 概述', voice: 'ADC 是 Analog-to-Digital Converter 的缩写，中文名为模数转换器。它将连续变化的模拟信号转换为离散的数字信号，是 MCU 与模拟世界沟通的桥梁。' },
+      { title: 'ADC 原理', voice: 'ADC 通过采样保持电路在特定时刻捕捉模拟电压，然后使用量化编码器将电压值转换为数字码。常见转换原理有逐次逼近型 SAR、积分型、闪速型等。' },
+      { title: '关键参数', voice: 'ADC 主要参数包括：分辨率决定精度，转换速率决定速度，参考电压决定量程，信噪比决定信号质量。STM32F4 的 ADC 是 12 位分辨率，最高 2.4MSPS 采样率。' },
+      { title: 'STM32 ADC 结构', voice: 'STM32 ADC 包含多个通道，支持规则组和注入组两种转换序列。规则组用于常规转换，注入组可打断规则组进行高优先级转换。' },
+      { title: '转换模式', voice: 'STM32 ADC 支持多种转换模式：单次转换、连续转换、扫描模式多通道采集、注入模式高优先级转换、间断模式分组转换。' },
+      { title: '触发源', voice: 'ADC 转换可由软件触发，也可由硬件触发。硬件触发源包括定时器更新事件、外部中断、定时器捕获比较等，实现精确定时采样。' },
+      { title: '数据对齐', voice: 'ADC 转换结果可以是左对齐或右对齐。右对齐时 LSB 对齐最低位，高位补零。左对齐时 MSB 对齐最高位，低位补零。通常使用右对齐方式。' },
+      { title: 'HAL 库使用', voice: 'STM32 HAL 库提供 HAL_ADC_Start 启动转换、HAL_ADC_PollForConversion 等待转换完成、HAL_ADC_GetValue 读取结果、HAL_ADC_Start_IT 中断方式、HAL_ADC_Start_DMA DMA 连续采集等函数。' }
+    ];
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [voiceStatus, setVoiceStatus] = useState('就绪');
+      const voiceEndTimerRef = useRef(null);
+
+      useEffect(() => {
+        if (!isPlaying) return;
+        const step = STEPS[currentStep];
+        setVoiceStatus('播放中...');
+
+        const utterance = new SpeechSynthesisUtterance(step.voice);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+
+        const voices = speechSynthesis.getVoices();
+        const xiaoxiao = voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('zh-CN'));
+        if (xiaoxiao) utterance.voice = xiaoxiao;
+
+        utterance.onend = () => {
+          setVoiceStatus('已完成');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            } else {
+              setIsPlaying(false);
+            }
+          }, 800);
+        };
+
+        utterance.onerror = () => {
+          setVoiceStatus('播放失败');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            }
+          }, 800);
+        };
+
+        speechSynthesis.speak(utterance);
+        return () => clearTimeout(voiceEndTimerRef.current);
+      }, [currentStep, isPlaying]);
+
+      const handlePlay = () => {
+        setCurrentStep(0);
+        setIsPlaying(true);
+        speechSynthesis.cancel();
+      };
+
+      const handlePause = () => {
+        setIsPlaying(false);
+        speechSynthesis.cancel();
+      };
+
+      const handleNext = () => {
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => prev + 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const handlePrev = () => {
+        if (currentStep > 0) {
+          setCurrentStep(prev => prev - 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const renderStepContent = () => {
+        switch(currentStep) {
+          case 0: return <Step0Overview />;
+          case 1: return <Step1Principle />;
+          case 2: return <Step2Parameters />;
+          case 3: return <Step3Structure />;
+          case 4: return <Step4Modes />;
+          case 5: return <Step5Trigger />;
+          case 6: return <Step6Alignment />;
+          case 7: return <Step7HALUsage />;
+          default: return <Step0Overview />;
+        }
+      };
+
+      return (
+        <div className="min-h-screen p-4" style={{ background: `linear-gradient(135deg, ${COLOR_MAP.bg} 0%, #0f172a 100%)` }}>
+          <div className="mb-4 flex items-center justify-between" style={{ backgroundColor: 'rgba(30, 41, 59, 0.8)', borderRadius: '12px', padding: '16px' }}>
+            <div>
+              <h1 className="text-2xl font-bold" style={{ color: COLOR_MAP.text }}>1162 - ADC 模数转换器</h1>
+              <p className="text-sm" style={{ color: COLOR_MAP.accent }}>Embedded C - Analog-to-Digital Converter</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-sm" style={{ color: COLOR_MAP.accent }}>
+                {voiceStatus} | 步骤 {currentStep + 1}/{STEPS.length}
+              </div>
+              <button onClick={handlePrev} disabled={currentStep === 0} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>上一个</button>
+              {!isPlaying ? (
+                <button onClick={handlePlay} className="px-4 py-2 rounded" style={{ backgroundColor: '#10b981', color: 'white' }}>播放</button>
+              ) : (
+                <button onClick={handlePause} className="px-4 py-2 rounded" style={{ backgroundColor: '#f59e0b', color: 'white' }}>暂停</button>
+              )}
+              <button onClick={handleNext} disabled={currentStep === STEPS.length - 1} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>下一个</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 h-[calc(100vh-150px)]">
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>代码示例</div>
+              <pre className="p-4 text-sm overflow-auto h-full text-gray-100 font-mono">
+                <code>{renderStepContent()}</code>
+              </pre>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>可视化动画</div>
+              <div className="p-4 h-full overflow-auto">
+                {renderVisualization()}
+              </div>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>解释说明</div>
+              <div className="p-4 space-y-3 h-full overflow-auto">
+                <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20` }}>
+                  <div className="font-bold mb-2" style={{ color: COLOR_MAP.text }}>{STEPS[currentStep].title}</div>
+                  <p style={{ color: COLOR_MAP.accent }}>{STEPS[currentStep].voice}</p>
+                </div>
+                {renderExplanation()}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function renderVisualization() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewViz />;
+        case 1: return <Step1PrincipleViz />;
+        case 2: return <Step2ParametersViz />;
+        case 3: return <Step3StructureViz />;
+        case 4: return <Step4ModesViz />;
+        case 5: return <Step5TriggerViz />;
+        case 6: return <Step6AlignmentViz />;
+        case 7: return <Step7HALUsageViz />;
+        default: return <Step0OverviewViz />;
+      }
+    }
+
+    function renderExplanation() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewExp />;
+        case 1: return <Step1PrincipleExp />;
+        case 2: return <Step2ParametersExp />;
+        case 3: return <Step3StructureExp />;
+        case 4: return <Step4ModesExp />;
+        case 5: return <Step5TriggerExp />;
+        case 6: return <Step6AlignmentExp />;
+        case 7: return <Step7HALUsageExp />;
+        default: return null;
+      }
+    }
+
+    function Step0Overview() {
+      return `/**
+ * ADC 模数转换器 - 概述
+ * Analog-to-Digital Converter
+ *
+ * 作用:
+ * - 将模拟信号转换为数字信号
+ * - MCU 与模拟世界的桥梁
+ * - 传感器信号采集必备
+ */
+
+// 常见应用
+#define TEMP_SENSOR     // 温度传感器
+#define LIGHT_SENSOR    // 光敏电阻/光电二极管
+#define BATTERY_VOLT    // 电池电压检测
+#define MOTOR_CURRENT   // 电机电流检测
+#define AUDIO_INPUT     // 音频信号采集
+#define POTENTIOMETER   // 电位器位置检测
+
+// STM32 ADC 特性
+// - 12 位分辨率 (4096 级)
+// - 最高 2.4MSPS 采样率
+// - 多个独立 ADC 模块
+// - 多种转换模式
+
+// 应用框图
+// 模拟信号 → 信号调理 → ADC → 数字信号 → MCU 处理`;
+    }
+
+    function Step0OverviewViz() {
+      return (
+        <div className="space-y-4">
+          <div className="text-center mb-4">
+            <div className="text-lg font-bold" style={{ color: COLOR_MAP.text }}>ADC 应用框图</div>
+          </div>
+          <div className="p-4 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="flex items-center justify-between">
+              <div className="p-3 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.primary}40`, border: `1px solid ${COLOR_MAP.primary}` }}>
+                <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>模拟信号源</div>
+                <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>温度/光照/电压</div>
+              </div>
+              <div className="flex items-center">
+                <div className="w-16 h-0.5" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="w-3 h-3 rotate-45 -mx-2" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+              </div>
+              <div className="p-3 rounded text-center animate-pulse" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                <div className="font-bold">ADC</div>
+                <div className="text-xs mt-1">模数转换器</div>
+              </div>
+              <div className="flex items-center">
+                <div className="w-3 h-3 rotate-45 -mx-2" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="w-16 h-0.5" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+              </div>
+              <div className="p-3 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}40`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>MCU</div>
+                <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>数字处理</div>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+                0.0V → 0
+              </div>
+              <div className="p-2 rounded text-center text-xs animate-blink" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                1.65V → 2048
+              </div>
+              <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+                3.3V → 4095
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step0OverviewExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>ADC 作用：</strong> 将现实世界的连续模拟信号 (温度、光照、电压等) 转换为 MCU 可处理的离散数字信号。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>应用场景：</strong> 温度传感器、光敏传感器、电池电压检测、电流检测、音频采集、电位器读取等。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>STM32 ADC：</strong> STM32F4 系列 ADC 为 12 位分辨率，输出电压值范围 0-4095，对应 0V 到参考电压 (通常 3.3V)。</p>
+        </div>
+      );
+    }
+
+    function Step1Principle() {
+      return `/**
+ * ADC 工作原理
+ */
+
+// ADC 转换流程
+// 1. 采样 (Sample)
+//    采样保持电路采集模拟电压
+//    在电容上保持电压值
+
+// 2. 保持 (Hold)
+//    断开输入，保持采样电压
+//    准备进行量化编码
+
+// 3. 量化 (Quantize)
+//    将连续电压分为离散等级
+//    12 位 ADC 有 4096 个等级
+
+// 4. 编码 (Encode)
+//    输出对应数字码
+//    0V → 0x000
+//    Vref/2 → 0x800 (2048)
+//    Vref → 0xFFF (4095)
+
+// 逐次逼近型 (SAR) ADC
+// 1. 从 MSB 开始逐位比较
+// 2. DAC 输出与输入比较
+// 3. 确定该位为 1 或 0
+// 4. 继续下一位直到 LSB
+
+// 转换结果计算
+// Digital = (Analog × 4095) / Vref`;
+    }
+
+    function Step1PrincipleViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>ADC 转换过程</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="grid grid-cols-4 gap-2 text-xs">
+              <div className="p-2 rounded text-center animate-pulse" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+                <div style={{ color: COLOR_MAP.text }}>采样</div>
+                <div style={{ color: COLOR_MAP.accent }}>Sample</div>
+              </div>
+              <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                <div style={{ color: COLOR_MAP.text }}>保持</div>
+                <div style={{ color: COLOR_MAP.accent }}>Hold</div>
+              </div>
+              <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.accent}30`, border: `1px solid ${COLOR_MAP.accent}` }}>
+                <div style={{ color: COLOR_MAP.text }}>量化</div>
+                <div style={{ color: COLOR_MAP.accent }}>Quantize</div>
+              </div>
+              <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}` }}>
+                <div style={{ color: COLOR_MAP.text }}>编码</div>
+                <div style={{ color: COLOR_MAP.accent }}>Encode</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.primary}` }}>
+            <div className="text-xs font-bold mb-2" style={{ color: COLOR_MAP.text }}>SAR 逐次逼近过程 (转换 2.0V)</div>
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between" style={{ color: COLOR_MAP.accent }}>
+                <span>第 1 位 (MSB): 比较 1.65V</span>
+                <span style={{ color: '#22c55e' }}>2.0V &gt; 1.65V → 1</span>
+              </div>
+              <div className="flex justify-between" style={{ color: COLOR_MAP.accent }}>
+                <span>第 2 位：比较 2.475V</span>
+                <span style={{ color: '#ef4444' }}>2.0V &lt; 2.475V → 0</span>
+              </div>
+              <div className="flex justify-between" style={{ color: COLOR_MAP.accent }}>
+                <span>第 3 位：比较 2.0625V</span>
+                <span style={{ color: '#ef4444' }}>2.0V &lt; 2.0625V → 0</span>
+              </div>
+              <div className="flex justify-between" style={{ color: COLOR_MAP.accent }}>
+                <span>第 4 位：比较 1.856V</span>
+                <span style={{ color: '#22c55e' }}>2.0V &gt; 1.856V → 1</span>
+              </div>
+              <div className="text-center mt-2" style={{ color: COLOR_MAP.text }}>继续 8 位...最终结果：10100... → 2458</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step1PrincipleExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>采样保持：</strong> 采样时电容跟踪输入电压，保持时断开输入保持电压值，确保转换期间电压稳定。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>SAR 原理：</strong> 逐次逼近型 ADC 从最高位开始，用内部 DAC 产生比较电压，逐位确定输出码。12 位 ADC 需要 12 个比较周期。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>量化误差：</strong> 由于数字化是离散的，存在±1LSB 的量化误差。12 位 ADC 在 3.3V 量程下 1LSB ≈ 0.8mV。</p>
+        </div>
+      );
+    }
+
+    function Step2Parameters() {
+      return `/**
+ * ADC 关键参数
+ */
+
+// 1. 分辨率 (Resolution)
+// 12 位 = 4096 级 (2^12)
+// 最小分辨电压 = Vref / 4096
+// 例如 Vref=3.3V: LSB = 3.3V/4096 ≈ 0.8mV
+
+// 2. 转换速率 (Conversion Rate)
+// 最高 2.4MSPS (每秒 240 万次转换)
+// 单次转换时间 = 1 / 采样率
+// 2.4MSPS → 0.42μs/次
+
+// 3. 参考电压 (Reference Voltage)
+// 决定输入量程
+// Vref+ = 3.3V (通常)
+// Vref- = 0V (GND)
+// 输入范围：0V ~ Vref+
+
+// 4. 信噪比 (SNR)
+// 信号与噪声的比值
+// STM32F4 ADC: SNR ≈ 70dB
+
+// 5. 采样时间 (Sampling Time)
+// 可选：3/15/28/56/84/112/239/480 周期
+// 采样时间越长，精度越高，速度越慢`;
+    }
+
+    function Step2ParametersViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>ADC 主要参数</div>
+          <div className="space-y-2">
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold" style={{ color: COLOR_MAP.text }}>分辨率</span>
+                <span className="text-xs" style={{ color: COLOR_MAP.accent }}>12 位 = 4096 级</span>
+              </div>
+              <div className="mt-1 flex gap-0.5">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <div key={i} className="flex-1 h-2 rounded animate-blink" style={{ backgroundColor: COLOR_MAP.primary, animationDelay: `${i * 50}ms` }}></div>
+                ))}
+              </div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold" style={{ color: COLOR_MAP.text }}>采样率</span>
+                <span className="text-xs" style={{ color: COLOR_MAP.accent }}>最高 2.4MSPS</span>
+              </div>
+              <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>单次转换：0.42μs</div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}` }}>
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold" style={{ color: COLOR_MAP.text }}>参考电压</span>
+                <span className="text-xs" style={{ color: COLOR_MAP.text }}>3.3V</span>
+              </div>
+              <div className="mt-1 h-2 rounded" style={{ background: `linear-gradient(to right, ${COLOR_MAP.bg}, ${COLOR_MAP.secondary})` }}></div>
+              <div className="flex justify-between text-xs mt-1" style={{ color: COLOR_MAP.accent }}>
+                <span>0V</span>
+                <span>3.3V</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step2ParametersExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>分辨率：</strong> 12 位 ADC 可将 0-3.3V 分为 4096 级，每级约 0.8mV。分辨率越高，能检测的电压变化越小。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>采样时间：</strong> 采样时间越长，电容充电越充分，精度越高但速度越慢。高速信号选短采样时间，高精度测量选长采样时间。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>参考电压：</strong> 决定输入量程。Vref 需稳定，否则转换结果会漂移。高精度应用可使用外部精密基准源。</p>
+        </div>
+      );
+    }
+
+    function Step3Structure() {
+      return `/**
+ * STM32 ADC 结构
+ */
+
+// STM32F4 ADC 框图
+// ┌─────────────────────────────────────┐
+// │  模拟通道多路复用器 (18 个通道)      │
+//  │  CH0~CH9: GPIO (PA0~PA7, PB0~PB1) │
+//  │  CH10~CH17: 内部信号               │
+//  │    - VREFINT (内部参考)            │
+//  │    - VBAT (电池电压)               │
+//  │    - Temperature (温度传感器)      │
+// └──────────────┬──────────────────────┘
+//                │
+// ┌──────────────▼──────────────────────┐
+// │         ADC 核心转换器              │
+// │   - 采样保持电路                    │
+// │   - SAR 逐次逼近转换器              │
+// │   - 12 位分辨率                     │
+// └──────────────┬──────────────────────┘
+//                │
+// ┌──────────────▼──────────────────────┐
+// │   规则组 / 注入组                   │
+// │   - 规则组：常规转换序列            │
+// │   - 注入组：可打断规则组            │
+// └──────────────┬──────────────────────┘
+//                │
+//         ┌──────┴──────┐
+//         │             │
+//    ┌────▼────┐  ┌────▼────┐
+//    │  DR 寄存器│  │中断/DMA │
+//    └─────────┘  └─────────┘`;
+    }
+
+    function Step3StructureViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>STM32 ADC 结构</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-2 text-xs">
+              <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+                <div className="font-bold mb-1" style={{ color: COLOR_MAP.text }}>通道多路复用器</div>
+                <div className="grid grid-cols-3 gap-1">
+                  {['CH0','CH1','CH2','CH3','CH4','CH5','CH6','CH7','CH8'].map((ch, i) => (
+                    <div key={i} className="p-1 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.bg}60`, color: COLOR_MAP.accent }}>{ch}</div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-center" style={{ color: COLOR_MAP.accent }}>↓</div>
+              <div className="p-2 rounded text-center animate-pulse" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                <div className="font-bold">ADC 核心 (SAR)</div>
+                <div>采样保持 + 12 位转换</div>
+              </div>
+              <div className="flex justify-center" style={{ color: COLOR_MAP.accent }}>↓</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                  <div className="font-bold" style={{ color: COLOR_MAP.text }}>规则组</div>
+                  <div style={{ color: COLOR_MAP.accent }}>常规转换</div>
+                </div>
+                <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.accent}30`, border: `1px solid ${COLOR_MAP.accent}` }}>
+                  <div className="font-bold" style={{ color: COLOR_MAP.text }}>注入组</div>
+                  <div style={{ color: COLOR_MAP.accent }}>高优先级</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step3StructureExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>模拟通道：</strong> STM32F4 有 18 个 ADC 通道，CH0-CH9 对应 GPIO 引脚，CH10-CH17 连接内部信号 (温度传感器、内部参考电压、电池电压)。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>规则组 vs 注入组：</strong> 规则组用于常规连续转换，可配置 DMA 自动传输。注入组优先级更高，可打断规则组转换，用于紧急测量。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>数据寄存器：</strong> 转换结果存入 DR 寄存器，可读访问。使用 DMA 时可自动传输到内存。</p>
+        </div>
+      );
+    }
+
+    function Step4Modes() {
+      return `/**
+ * ADC 转换模式
+ */
+
+// 1. 单次转换模式 (Single Conversion)
+// 转换一次后停止
+ADC_InitTypeDef.ADC_ContinuousConvMode = DISABLE;
+HAL_ADC_Start(&hadc);
+HAL_ADC_PollForConversion(&hadc, timeout);
+value = HAL_ADC_GetValue(&hadc);
+
+// 2. 连续转换模式 (Continuous)
+// 转换完成后自动开始下一次
+ADC_InitTypeDef.ADC_ContinuousConvMode = ENABLE;
+HAL_ADC_Start(&hadc);
+// 持续转换，不断读取
+
+// 3. 扫描模式 (Scan Mode)
+// 自动转换多个通道
+ADC_InitTypeDef.ADC_ScanConvMode = ENABLE;
+ADC_ConfigChannel(&hadc, CH0);
+ADC_ConfigChannel(&hadc, CH1);
+ADC_ConfigChannel(&hadc, CH2);
+// 自动按顺序转换 CH0→CH1→CH2
+
+// 4. 注入模式 (Injected)
+// 可打断规则组的高优先级转换
+
+// 5. 间断模式 (Discontinuous)
+// 每次触发转换部分通道`;
+    }
+
+    function Step4ModesViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>转换模式对比</div>
+          <div className="space-y-2 text-xs">
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div className="flex justify-between items-center mb-1">
+                <span style={{ color: COLOR_MAP.text }}>单次模式</span>
+                <span style={{ color: COLOR_MAP.accent }}>触发→转换→停止</span>
+              </div>
+              <div className="flex gap-1">
+                <div className="flex-1 h-4 rounded" style={{ backgroundColor: COLOR_MAP.bg }}></div>
+                <div className="flex-1 h-4 rounded animate-pulse" style={{ backgroundColor: COLOR_MAP.primary }}></div>
+                <div className="flex-1 h-4 rounded" style={{ backgroundColor: COLOR_MAP.bg }}></div>
+              </div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div className="flex justify-between items-center mb-1">
+                <span style={{ color: COLOR_MAP.text }}>连续模式</span>
+                <span style={{ color: COLOR_MAP.accent }}>持续转换</span>
+              </div>
+              <div className="flex gap-0.5">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <div key={i} className="flex-1 h-4 rounded animate-blink" style={{ backgroundColor: COLOR_MAP.secondary, animationDelay: `${i * 80}ms` }}></div>
+                ))}
+              </div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}` }}>
+              <div className="flex justify-between items-center mb-1">
+                <span style={{ color: COLOR_MAP.text }}>扫描模式</span>
+                <span style={{ color: COLOR_MAP.accent }}>CH0→CH1→CH2→...</span>
+              </div>
+              <div className="flex gap-1">
+                {['CH0','CH1','CH2','CH3'].map((ch, i) => (
+                  <div key={i} className="flex-1 h-4 rounded text-center text-xs" style={{ backgroundColor: i === 0 ? COLOR_MAP.accent : COLOR_MAP.bg, color: i === 0 ? '#0f172a' : COLOR_MAP.text }}>
+                    {ch}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step4ModesExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>单次模式：</strong> 适合低频采样或按需采样场景。启动转换→等待完成→读取结果→停止。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>连续模式：</strong> 适合连续监测场景。启动后自动循环转换，不断读取最新结果。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>扫描模式：</strong> 多通道采集时自动按顺序转换配置的通道，配合 DMA 可实现多通道自动采集。</p>
+        </div>
+      );
+    }
+
+    function Step5Trigger() {
+      return `/**
+ * ADC 触发源
+ */
+
+// 1. 软件触发
+HAL_ADC_Start(&hadc);              // 启动转换
+HAL_ADC_PollForConversion(&hadc);  // 等待完成
+
+// 2. 外部硬件触发
+// 定时器触发 (最常用)
+ADC_InitTypeDef.ADC_ExternalTrigConv = ADC_EXTERNALTRIGCONV_T1_TRGO;
+// 定时器更新事件自动触发 ADC
+
+// 3. 触发极性
+// 上升沿触发
+ADC_InitTypeDef.ADC_ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+// 下降沿触发
+ADC_InitTypeDef.ADC_ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_FALLING;
+// 双边沿触发
+ADC_InitTypeDef.ADC_ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISINGFALLING;
+
+// 可用触发源
+// - TIM1_TRGO, TIM2_TRGO, TIM3_TRGO
+// - TIM4_TRGO, TIM5_TRGO, TIM8_TRGO
+// - EXTI11 (外部中断)
+// - 软件触发
+
+// 定时器触发优势
+// 1. 精确定时采样
+// 2. CPU 无需干预
+// 3. 配合 DMA 实现零 CPU 占用`;
+    }
+
+    function Step5TriggerViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>触发源对比</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-3">
+              <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.primary}` }}>
+                <div className="font-bold text-xs mb-2" style={{ color: COLOR_MAP.text }}>软件触发</div>
+                <div className="flex items-center gap-2 text-xs">
+                  <div className="p-1 rounded" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>START</div>
+                  <div style={{ color: COLOR_MAP.accent }}>→</div>
+                  <div className="p-1 rounded animate-pulse" style={{ backgroundColor: COLOR_MAP.secondary, color: 'white' }}>转换</div>
+                  <div style={{ color: COLOR_MAP.accent }}>→</div>
+                  <div className="p-1 rounded" style={{ backgroundColor: COLOR_MAP.accent, color: '#0f172a' }}>完成</div>
+                </div>
+              </div>
+              <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                <div className="font-bold text-xs mb-2" style={{ color: COLOR_MAP.text }}>定时器触发</div>
+                <div className="flex items-center gap-1 text-xs">
+                  <div className="flex-1 p-1 rounded animate-blink" style={{ backgroundColor: '#22c55e', color: 'white' }}>TIM 更新</div>
+                  <div style={{ color: COLOR_MAP.accent }}>→</div>
+                  <div className="flex-1 p-1 rounded animate-pulse" style={{ backgroundColor: COLOR_MAP.secondary, color: 'white' }}>ADC 转换</div>
+                </div>
+                <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>精确定时 · 自动触发</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            定时器触发可实现精确定时采样，配合 DMA 实现零 CPU 占用采集
+          </div>
+        </div>
+      );
+    }
+
+    function Step5TriggerExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>软件触发：</strong> 最简单，调用 HAL_ADC_Start() 启动转换。适合按需采样或低频应用。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>定时器触发：</strong> 推荐方式。定时器产生周期性触发信号，ADC 自动开始转换。可实现精确采样率，如 1kHz、10kHz 等。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>触发极性：</strong> 可选择上升沿、下降沿或双边沿触发。通常使用上升沿触发。</p>
+        </div>
+      );
+    }
+
+    function Step6Alignment() {
+      return `/**
+ * ADC 数据对齐方式
+ */
+
+// 右对齐 (Right Alignment) - 默认
+// 12 位分辨率
+// 数据格式：0000 DDDDDDDDDDDD
+//            ↑    ↑
+//          MSB   LSB
+// 范围：0x000 ~ 0xFFF (0 ~ 4095)
+
+// 左对齐 (Left Alignment)
+// 数据格式：DDDDDDDDDDDD 0000
+//            ↑    ↑
+//          MSB   LSB
+// 范围：0x0000 ~ 0xFFF0
+
+// 配置示例
+ADC_InitTypeDef.ADC_DataAlign = ADC_DATAALIGN_RIGHT;  // 右对齐
+ADC_InitTypeDef.ADC_DataAlign = ADC_DATAALIGN_LEFT;   // 左对齐
+
+// 使用建议
+// 右对齐：直接使用，适合大多数应用
+// 左对齐：需要将结果视为 16 位数据时
+
+// 电压计算 (右对齐，Vref=3.3V)
+// voltage = (adc_value * 3.3f) / 4095.0f;
+// 例如：adc_value = 2048 → voltage = 1.65V`;
+    }
+
+    function Step6AlignmentViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>数据对齐方式</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>右对齐 (默认)</div>
+              <div className="font-mono text-xs space-y-1" style={{ color: COLOR_MAP.accent }}>
+                <div>16 位寄存器:</div>
+                <div className="flex gap-0.5 justify-center">
+                  {['0','0','0','0','D11','D10','D9','D8','D7','D6','D5','D4','D3','D2','D1','D0'].map((bit, i) => (
+                    <div key={i} className={`w-6 h-6 flex items-center justify-center rounded text-xs ${i < 4 ? '' : 'animate-blink'}`} style={{ backgroundColor: i < 4 ? COLOR_MAP.bg : COLOR_MAP.primary, color: i < 4 ? COLOR_MAP.accent : 'white', fontSize: '8px' }}>
+                      {bit}
+                    </div>
+                  ))}
+                </div>
+                <div className="text-center mt-1">0x0000 ~ 0x0FFF</div>
+              </div>
+            </div>
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `2px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>左对齐</div>
+              <div className="font-mono text-xs space-y-1" style={{ color: COLOR_MAP.accent }}>
+                <div>16 位寄存器:</div>
+                <div className="flex gap-0.5 justify-center">
+                  {['D11','D10','D9','D8','D7','D6','D5','D4','D3','D2','D1','D0','0','0','0','0'].map((bit, i) => (
+                    <div key={i} className={`w-6 h-6 flex items-center justify-center rounded text-xs ${i >= 12 ? '' : 'animate-blink'}`} style={{ backgroundColor: i >= 12 ? COLOR_MAP.bg : COLOR_MAP.secondary, color: i >= 12 ? COLOR_MAP.accent : 'white', fontSize: '8px' }}>
+                      {bit}
+                    </div>
+                  ))}
+                </div>
+                <div className="text-center mt-1">0x0000 ~ 0xFFF0</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            推荐使用右对齐，可直接使用 0-4095 的值计算电压
+          </div>
+        </div>
+      );
+    }
+
+    function Step6AlignmentExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>右对齐：</strong> 12 位数据放在最低位，高 4 位补零。范围 0x000-0xFFF (0-4095)。这是最常用的对齐方式。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>左对齐：</strong> 12 位数据放在最高位，低 4 位补零。范围 0x0000-0xFFF0。某些需要 16 位精度的应用可能用到。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>电压计算：</strong> 右对齐时，电压 = (ADC 值 × Vref) / 4095。例如 Vref=3.3V，ADC=2048 时，电压 = 2048×3.3/4095 ≈ 1.65V。</p>
+        </div>
+      );
+    }
+
+    function Step7HALUsage() {
+      return `/**
+ * STM32 HAL 库 ADC 使用
+ */
+
+// 初始化 (由 CubeMX 生成)
+ADC_HandleTypeDef hadc1;
+
+void MX_ADC1_Init(void) {
+    ADC_ChannelConfTypeDef sConfig = {0};
+
+    hadc1.Instance = ADC1;
+    hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+    hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+    hadc1.Init.ScanConvMode = DISABLE;
+    hadc1.Init.ContinuousConvMode = DISABLE;
+    hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+    hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+    hadc1.Init.NbrOfConversion = 1;
+
+    if (HAL_ADC_Init(&hadc1) != HAL_OK) {
+        Error_Handler();
+    }
+
+    // 配置通道
+    sConfig.Channel = ADC_CHANNEL_0;
+    sConfig.Rank = 1;
+    sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
+    if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+// 阻塞式采集
+HAL_ADC_Start(&hadc1);
+HAL_ADC_PollForConversion(&hadc1, timeout);
+uint32_t value = HAL_ADC_GetValue(&hadc1);
+HAL_ADC_Stop(&hadc1);
+
+// 中断方式
+HAL_ADC_Start_IT(&hadc1);
+// 回调：void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+
+// DMA 连续采集
+HAL_ADC_Start_DMA(&hadc1, &adcValue, 1);
+// 自动转换，DMA 自动传输到内存`;
+    }
+
+    function Step7HALUsageViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>HAL ADC API</div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-center text-xs mb-1" style={{ color: COLOR_MAP.text }}>阻塞式</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>Start</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>PollForConversion</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>GetValue</div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-center text-xs mb-1" style={{ color: COLOR_MAP.text }}>中断式</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>Start_IT</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>ConvCpltCallback</div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}` }}>
+              <div className="font-bold text-center text-xs mb-1" style={{ color: COLOR_MAP.text }}>DMA 式</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>Start_DMA</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>自动传输</div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}`, color: COLOR_MAP.accent }}>
+            初始化流程：HAL_ADC_Init() → ConfigChannel() → Start()
+          </div>
+        </div>
+      );
+    }
+
+    function Step7HALUsageExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>初始化：</strong> 使用 CubeMX 配置 ADC 参数 (时钟、分辨率、模式、触发源、对齐方式)，生成初始化代码。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>阻塞式：</strong> Start() 启动 → PollForConversion() 等待 → GetValue() 读取 → Stop() 停止。适合低频采样。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>DMA 方式：</strong> Start_DMA() 启动后，ADC 自动转换，DMA 自动传输结果到内存，CPU 完全解放。适合高速连续采集。</p>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

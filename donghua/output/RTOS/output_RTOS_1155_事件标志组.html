@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1155 - RTOS 事件标志组 | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .animate-flash { animation: flash 1s ease-in-out infinite; }
+    .highlight { box-shadow: 0 0 20px rgba(139, 92, 246, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(139, 92, 246, 0.2); border-left: 3px solid #8b5cf6; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#8b5cf6', primaryLight: '#a78bfa',
+      secondary: '#7c3aed', secondaryLight: '#8b5cf6',
+      accent: '#6d28d9', accentLight: '#a78bfa',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== RTOS 事件标志组 (Event Flags) =====
+// 多事件同步机制
+
+// 1. 事件标志组结构
+typedef struct {
+  uint32_t flags;             // 当前标志位 (32 位)
+  List_t waiters;             // 等待任务队列
+} EventGroup_t;
+
+// 2. 事件标志位定义
+#define EVENT_FLAG_0    (1 << 0)    // 0x01 - 数据就绪
+#define EVENT_FLAG_1    (1 << 1)    // 0x02 - 命令完成
+#define EVENT_FLAG_2    (1 << 2)    // 0x04 - 错误发生
+#define EVENT_FLAG_3    (1 << 3)    // 0x08 - 超时
+#define EVENT_FLAG_ALL  (0x0F)      // 所有标志位
+
+// 3. 创建事件标志组
+EventGroup_t* event_group_create(void) {
+  EventGroup_t *eg = malloc(sizeof(EventGroup_t));
+  eg->flags = 0;                  // 初始所有位清零
+  list_init(&eg->waiters);
+  return eg;
+}
+
+// 4. 设置事件标志 (置位)
+void event_group_set_bits(EventGroup_t *eg, uint32_t bits) {
+  __disable_irq();
+
+  eg->flags |= bits;              // 置位指定位
+
+  // 检查是否有等待任务的条件满足
+  for (TCB_t *t = eg->waiters.head; t; t = t->next) {
+    if (t->wait_type == WAIT_ANY) {
+      if (eg->flags & t->wait_mask) {
+        t->state = TASK_READY;
+        t->wait_result = eg->flags & t->wait_mask;
+      }
+    } else { // WAIT_ALL
+      if ((eg->flags & t->wait_mask) == t->wait_mask) {
+        t->state = TASK_READY;
+        t->wait_result = eg->flags & t->wait_mask;
+      }
+    }
+  }
+
+  __enable_irq();
+  schedule();
+}
+
+// 5. 清除事件标志 (清零)
+void event_group_clear_bits(EventGroup_t *eg, uint32_t bits) {
+  __disable_irq();
+  eg->flags &= ~bits;             // 清除指定位
+  __enable_irq();
+}
+
+// 6. 等待事件 (任意一个)
+uint32_t event_group_wait_any(EventGroup_t *eg, uint32_t mask, uint32_t timeout) {
+  __disable_irq();
+
+  if (eg->flags & mask) {         // 已有任意一位满足
+    uint32_t result = eg->flags & mask;
+    __enable_irq();
+    return result;
+  }
+
+  // 阻塞当前任务
+  current_task->wait_type = WAIT_ANY;
+  current_task->wait_mask = mask;
+  current_task->state = TASK_BLOCKED;
+  list_add(&eg->waiters, current_task);
+
+  __enable_irq();
+  schedule();
+
+  return current_task->wait_result;
+}
+
+// 7. 等待所有事件
+uint32_t event_group_wait_all(EventGroup_t *eg, uint32_t mask, uint32_t timeout) {
+  __disable_irq();
+
+  if ((eg->flags & mask) == mask) {  // 所有位都已满足
+    uint32_t result = eg->flags & mask;
+    __enable_irq();
+    return result;
+  }
+
+  // 阻塞当前任务
+  current_task->wait_type = WAIT_ALL;
+  current_task->wait_mask = mask;
+  current_task->state = TASK_BLOCKED;
+  list_add(&eg->waiters, current_task);
+
+  __enable_irq();
+  schedule();
+
+  return current_task->wait_result;
+}`;
+
+    const STEPS = [
+      {
+        title: "事件标志组概述",
+        codeHighlight: [3, 4, 5],
+        explanation: "事件标志组用于多事件同步，一个任务可以等待多个事件中的任意一个 (OR) 或全部 (AND)。32 位标志位可以表示 32 种独立事件。",
+        visualization: "overview"
+      },
+      {
+        title: "事件标志结构",
+        codeHighlight: [8, 9, 10, 11],
+        explanation: "事件标志组包含：32 位标志寄存器、等待任务队列。每个等待任务指定等待模式和掩码，当条件满足时自动唤醒。",
+        visualization: "structure"
+      },
+      {
+        title: "事件标志位定义",
+        codeHighlight: [14, 15, 16, 17, 18],
+        explanation: "每个标志位代表一种事件：数据就绪、命令完成、错误发生、超时等。使用位运算进行高效的设置/清除/检查操作。",
+        visualization: "flags"
+      },
+      {
+        title: "设置事件标志",
+        codeHighlight: [27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39],
+        explanation: "置位操作：1) flags |= bits 2) 遍历等待队列 3) 检查 WAIT_ANY/WAIT_ALL 条件 4) 满足条件则唤醒任务 5) 触发调度。",
+        visualization: "set"
+      },
+      {
+        title: "清除事件标志",
+        codeHighlight: [42, 43, 44, 45, 46],
+        explanation: "清除操作：flags &= ~bits。用于在处理完事件后重置标志位。清除操作不会唤醒任何任务。",
+        visualization: "clear"
+      },
+      {
+        title: "等待任意事件 (OR)",
+        codeHighlight: [49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60],
+        explanation: "WAIT_ANY 模式：只要 mask 中任意一位被设置就返回。适用于"多个触发源中任意一个发生即可"的场景。",
+        visualization: "waitany"
+      },
+      {
+        title: "等待所有事件 (AND)",
+        codeHighlight: [63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74],
+        explanation: "WAIT_ALL 模式：必须 mask 中所有位都被设置才返回。适用于"需要多个前置条件都满足"的场景。",
+        visualization: "waitall"
+      },
+      {
+        title: "应用场景",
+        codeHighlight: [1, 2],
+        explanation: "事件标志组用于：1) 多中断源同步 2) 复杂状态等待 3) 条件变量 4) 任务间协调。比信号量更适合多条件同步。",
+        visualization: "apps"
+      }
+    ];
+
+    function Overview({ step }) {
+      return (
+        <div className="space-y-4">
+          <div className="text-center mb-6">
+            <div className="text-6xl mb-4 animate-pulse">🚩</div>
+            <div className="text-purple-400 font-bold text-xl">事件标志组</div>
+            <div className="text-gray-400 text-sm mt-2">Event Flags Group</div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-purple-900/30 p-4 rounded-lg border border-purple-500">
+              <div className="text-2xl mb-2">🎯</div>
+              <div className="text-purple-300 font-bold text-sm">多事件同步</div>
+              <div className="text-gray-400 text-xs mt-1">32 位独立标志</div>
+            </div>
+            <div className="bg-green-900/30 p-4 rounded-lg border border-green-500">
+              <div className="text-2xl mb-2">🔀</div>
+              <div className="text-green-300 font-bold text-sm">OR/AND 模式</div>
+              <div className="text-gray-400 text-xs mt-1">任意/全部等待</div>
+            </div>
+            <div className="bg-blue-900/30 p-4 rounded-lg border border-blue-500">
+              <div className="text-2xl mb-2">⚡</div>
+              <div className="text-blue-300 font-bold text-sm">高效位运算</div>
+              <div className="text-gray-400 text-xs mt-1">单指令操作</div>
+            </div>
+            <div className="bg-yellow-900/30 p-4 rounded-lg border border-yellow-500">
+              <div className="text-2xl mb-2">🔄</div>
+              <div className="text-yellow-300 font-bold text-sm">自动唤醒</div>
+              <div className="text-gray-400 text-xs mt-1">条件满足即触发</div>
+            </div>
+          </div>
+          <div className="mt-6 p-4 bg-gradient-to-r from-purple-900/50 to-blue-900/50 rounded-lg border-2 border-purple-500">
+            <div className="text-center text-purple-300 font-bold">
+              🎯 一比多、多比一任务同步
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function EventStructure({ step }) {
+      const fields = [
+        { name: "flags", value: step >= 1 ? '0x0000000D' : '0x00000000', desc: "32 位标志寄存器", active: step >= 1 },
+        { name: "waiters", value: "[T1, T2]", desc: "等待任务队列", active: step >= 1 },
+      ];
+
+      return (
+        <div className="space-y-2">
+          <div className="text-center text-purple-400 font-bold mb-3">
+            事件标志组结构
+          </div>
+          {fields.map((f, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 p-3 rounded transition-all duration-300 ${
+                f.active ? 'bg-purple-900/50 border-l-4 border-purple-500' : 'bg-gray-800'
+              }`}
+            >
+              <span className="font-mono font-bold text-purple-300 w-24">{f.name}</span>
+              <span className="font-mono text-xs text-green-400 flex-1">{f.value}</span>
+              <span className="text-xs text-gray-500">{f.desc}</span>
+            </div>
+          ))}
+          {step >= 1 && (
+            <div className="mt-4">
+              <div className="text-gray-400 text-xs mb-2 text-center">32 位标志寄存器</div>
+              <div className="flex gap-1 justify-center flex-wrap">
+                {Array.from({ length: 32 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`w-4 h-6 rounded flex items-center justify-center text-xs font-mono ${
+                      step >= 1 && [0, 2, 3].includes(i)
+                        ? 'bg-green-500 text-white'
+                        : 'bg-gray-700 text-gray-500'
+                    }`}
+                  >
+                    {31 - i}
+                  </div>
+                ))}
+              </div>
+              <div className="text-center text-gray-400 text-xs mt-2">
+                当前值：0x0000000D (位 0,2,3 已设置)
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function FlagBits({ step }) {
+      const flags = [
+        { bit: 0, name: "EVENT_FLAG_0", desc: "数据就绪", value: 0x01 },
+        { bit: 1, name: "EVENT_FLAG_1", desc: "命令完成", value: 0x02 },
+        { bit: 2, name: "EVENT_FLAG_2", desc: "错误发生", value: 0x04 },
+        { bit: 3, name: "EVENT_FLAG_3", desc: "超时", value: 0x08 },
+      ];
+
+      return (
+        <div className="space-y-2">
+          <div className="text-center text-purple-400 font-bold mb-3">
+            事件标志位定义
+          </div>
+          {flags.map((f, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 p-3 rounded transition-all duration-300 ${
+                step >= 2 ? 'bg-purple-900/50 border-l-4 border-purple-500' : 'bg-gray-800'
+              }`}
+            >
+              <div className={`w-8 h-8 rounded flex items-center justify-center font-bold ${
+                step >= 2 ? 'bg-green-500 text-white animate-pulse' : 'bg-gray-700 text-gray-500'
+              }`}>
+                {f.bit}
+              </div>
+              <div className="flex-1">
+                <div className="font-mono text-purple-300 text-sm">{f.name}</div>
+                <div className="text-gray-400 text-xs">{f.desc}</div>
+              </div>
+              <div className="font-mono text-xs text-green-400">0x{f.value.toString(16).toUpperCase()}</div>
+            </div>
+          ))}
+          {step >= 2 && (
+            <div className="mt-4 p-3 bg-blue-900/30 rounded border border-blue-500">
+              <div className="text-blue-400 text-xs">
+                💡 32 位可以表示 32 种独立事件，使用位运算高效操作
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function SetEvent({ step }) {
+      const stages = [
+        { name: "flags |= bits", desc: "置位指定标志位", active: step >= 3 },
+        { name: "遍历等待队列", desc: "检查每个等待任务", active: step >= 3 },
+        { name: "WAIT_ANY 检查", desc: "flags & mask != 0", active: step >= 3 },
+        { name: "WAIT_ALL 检查", desc: "(flags & mask) == mask", active: step >= 3 },
+        { name: "唤醒满足条件的任务", desc: "state → READY", active: step >= 3 },
+        { name: "schedule() 调度", desc: "触发任务切换", active: step >= 3 },
+      ];
+
+      return (
+        <div className="space-y-3">
+          {stages.map((s, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 p-4 rounded-lg transition-all duration-500 ${
+                s.active ? 'bg-purple-900/50' : 'bg-gray-800'
+              }`}
+            >
+              <span className="text-2xl">{s.active ? '✅' : '⏳'}</span>
+              <div className="flex-1">
+                <div className={s.active ? 'text-purple-300' : 'text-gray-500'}>{s.name}</div>
+                <div className="text-xs text-gray-400 font-mono">{s.desc}</div>
+              </div>
+            </div>
+          ))}
+          {step >= 3 && (
+            <div className="mt-4 bg-gray-800 p-4 rounded-lg">
+              <div className="text-center text-gray-400 text-sm mb-3">设置事件效果</div>
+              <div className="flex justify-center items-center gap-2">
+                <div className="flex gap-1">
+                  {[0, 0, 0, 0].map((_, i) => (
+                    <div key={i} className={`w-10 h-12 rounded flex items-center justify-center ${step >= 3 ? 'bg-green-500' : 'bg-gray-700'}`}>
+                      {i === 0 || i === 2 || i === 3 ? '1' : '0'}
+                    </div>
+                  ))}
+                </div>
+                <span className="text-purple-400 text-2xl">←</span>
+                <div className="w-16 h-12 bg-purple-600 rounded flex items-center justify-center text-white text-xs font-bold">
+                  设置 0x0D
+                </div>
+              </div>
+              <div className="text-center text-gray-400 text-xs mt-3">
+                flags: 0x00 → 0x0D (位 0,2,3 置位)
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function ClearEvent({ step }) {
+      return (
+        <div className="space-y-4">
+          <div className="p-4 bg-purple-900/30 rounded-lg border border-purple-500">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">💡</span>
+              <div>
+                <div className="text-purple-300 font-bold text-sm">清除指定位</div>
+                <div className="text-gray-400 text-xs font-mono">flags &= ~bits</div>
+              </div>
+            </div>
+          </div>
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-center text-gray-400 text-sm mb-3">清除前</div>
+            <div className="flex justify-center gap-1 mb-4">
+              {[1, 0, 1, 1].map((b, i) => (
+                <div key={i} className="w-12 h-12 bg-green-500 rounded flex items-center justify-center text-white font-bold">
+                  {b}
+                </div>
+              ))}
+            </div>
+            <div className="text-center text-purple-400 text-2xl font-bold">↓ 清除 0x05</div>
+            <div className="text-center text-gray-400 text-sm mt-4 mb-3">清除后</div>
+            <div className="flex justify-center gap-1">
+              {[0, 0, 0, 1].map((b, i) => (
+                <div key={i} className={`w-12 h-12 rounded flex items-center justify-center font-bold ${b ? 'bg-green-500 text-white' : 'bg-gray-700 text-gray-500'}`}>
+                  {b}
+                </div>
+              ))}
+            </div>
+            <div className="text-center text-gray-400 text-xs mt-3">
+              flags: 0x0D & ~0x05 = 0x08
+            </div>
+          </div>
+          {step >= 4 && (
+            <div className="p-4 bg-yellow-900/30 rounded-lg border border-yellow-500">
+              <div className="text-yellow-400 text-xs">
+                ℹ️ 清除操作不会唤醒任何任务，仅重置标志位
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function WaitAny({ step }) {
+      return (
+        <div className="space-y-3">
+          <div className="p-4 bg-green-900/30 rounded-lg border border-green-500">
+            <div className="text-center text-green-300 font-bold mb-2">
+              WAIT_ANY 模式 (OR 操作)
+            </div>
+            <div className="text-gray-400 text-xs text-center font-mono">
+              if (flags & mask) return flags & mask;
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 p-3 bg-purple-900/30 rounded">
+              <span className="text-green-400">✓</span>
+              <span className="text-purple-300 text-sm">等待 mask = 0x03</span>
+            </div>
+            <div className="flex items-center gap-3 p-3 bg-purple-900/30 rounded">
+              <span className="text-green-400">✓</span>
+              <span className="text-purple-300 text-sm">flags = 0x05 (位 0 或位 1 满足)</span>
+            </div>
+            <div className="flex items-center gap-3 p-3 bg-green-900/30 rounded border border-green-500">
+              <span className="text-green-400">✓</span>
+              <span className="text-green-300 text-sm">返回 result = 0x01</span>
+            </div>
+          </div>
+          {step >= 5 && (
+            <div className="mt-4 p-4 bg-gradient-to-r from-green-900/50 to-blue-900/50 rounded-lg border-2 border-green-500">
+              <div className="text-center text-green-300 font-bold">
+                🎯 任意条件满足即返回
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function WaitAll({ step }) {
+      return (
+        <div className="space-y-3">
+          <div className="p-4 bg-blue-900/30 rounded-lg border border-blue-500">
+            <div className="text-center text-blue-300 font-bold mb-2">
+              WAIT_ALL 模式 (AND 操作)
+            </div>
+            <div className="text-gray-400 text-xs text-center font-mono">
+              if ((flags & mask) == mask) return flags & mask;
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 p-3 bg-purple-900/30 rounded">
+              <span className="text-blue-400">⏳</span>
+              <span className="text-purple-300 text-sm">等待 mask = 0x07</span>
+            </div>
+            <div className="flex items-center gap-3 p-3 bg-purple-900/30 rounded">
+              <span className="text-blue-400">⏳</span>
+              <span className="text-purple-300 text-sm">flags = 0x05 (位 0,2 已设置)</span>
+            </div>
+            <div className="flex items-center gap-3 p-3 bg-yellow-900/30 rounded border border-yellow-500">
+              <span className="text-yellow-400">⏸️</span>
+              <span className="text-yellow-300 text-sm">阻塞等待位 1 也被设置</span>
+            </div>
+          </div>
+          {step >= 6 && (
+            <div className="mt-4 bg-gray-800 p-4 rounded-lg">
+              <div className="text-center text-gray-400 text-sm mb-3">等待所有条件满足</div>
+              <div className="flex justify-center items-center gap-2">
+                <div className="flex gap-1">
+                  {[1, 0, 1, 0].map((b, i) => (
+                    <div key={i} className={`w-10 h-12 rounded flex items-center justify-center ${b ? 'bg-green-500' : 'bg-gray-700'}`}>
+                      {b}
+                    </div>
+                  ))}
+                </div>
+                <span className="text-blue-400 text-2xl">→</span>
+                <div className="flex gap-1">
+                  {[1, 1, 1, 0].map((b, i) => (
+                    <div key={i} className={`w-10 h-12 rounded flex items-center justify-center ${b ? 'bg-green-500 animate-pulse' : 'bg-gray-700'}`}>
+                      {b}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="text-center text-gray-400 text-xs mt-3">
+                位 1 被设置 → 任务唤醒
+              </div>
+            </div>
+          )}
+          {step >= 6 && (
+            <div className="mt-4 p-4 bg-gradient-to-r from-blue-900/50 to-green-900/50 rounded-lg border-2 border-blue-500">
+              <div className="text-center text-blue-300 font-bold">
+                🎯 所有条件满足才返回
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function Applications({ step }) {
+      const apps = [
+        { icon: "📡", name: "多中断源同步", desc: "等待多个中断中的任意一个", active: step >= 7 },
+        { icon: "🔗", name: "复杂状态等待", desc: "等待多个前置条件都满足", active: step >= 7 },
+        { icon: "🎛️", name: "条件变量", desc: "替代 POSIX 条件变量", active: step >= 7 },
+        { icon: "🤝", name: "任务间协调", desc: "多任务事件同步", active: step >= 7 },
+      ];
+
+      return (
+        <div className="space-y-3">
+          {apps.map((a, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 p-4 rounded-lg transition-all duration-300 ${
+                a.active ? 'bg-purple-900/50 border border-purple-500' : 'bg-gray-800'
+              }`}
+            >
+              <span className="text-3xl">{a.icon}</span>
+              <div className="flex-1">
+                <div className="font-bold text-purple-300">{a.name}</div>
+                <div className="text-xs text-gray-400">{a.desc}</div>
+              </div>
+            </div>
+          ))}
+          {step >= 7 && (
+            <div className="mt-4 p-4 bg-gradient-to-r from-purple-900/50 to-green-900/50 rounded-lg border-2 border-purple-500 text-center">
+              <div className="text-purple-300 font-bold">
+                🚩 事件标志组 = 多事件同步最佳选择
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function Visualization({ step, visualization }) {
+      switch(visualization) {
+        case 'overview': return <Overview step={step} />;
+        case 'structure': return <EventStructure step={step} />;
+        case 'flags': return <FlagBits step={step} />;
+        case 'set': return <SetEvent step={step} />;
+        case 'clear': return <ClearEvent step={step} />;
+        case 'waitany': return <WaitAny step={step} />;
+        case 'waitall': return <WaitAll step={step} />;
+        case 'apps': return <Applications step={step} />;
+        default: return null;
+      }
+    }
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPaused, setIsPaused] = useState(false);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [showCode, setShowCode] = useState(true);
+      const voiceEndTimerRef = useRef(null);
+      const stepRef = useRef(0);
+
+      const speak = useCallback((text) => {
+        if (!('speechSynthesis' in window)) return;
+
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        const voices = window.speechSynthesis.getVoices();
+        const zhVoice = voices.find(v =>
+          v.lang === 'zh-CN' ||
+          v.lang === 'zh-CN-XiaoxiaoNeural' ||
+          v.name.includes('Xiaoxiao') ||
+          v.name.includes('Chinese')
+        );
+        if (zhVoice) utterance.voice = zhVoice;
+
+        utterance.onend = () => {
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (!isPaused && isPlaying && stepRef.current < STEPS.length - 1) {
+              setCurrentStep(prev => {
+                stepRef.current = prev + 1;
+                return prev + 1;
+              });
+            }
+          }, 800);
+        };
+
+        utterance.onerror = (event) => {
+          console.warn('Speech synthesis error:', event.error);
+          if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (!isPaused && isPlaying && stepRef.current < STEPS.length - 1) {
+              setCurrentStep(prev => {
+                stepRef.current = prev + 1;
+                return prev + 1;
+              });
+            }
+          }, 800);
+        };
+
+        window.speechSynthesis.speak(utterance);
+      }, [isPaused, isPlaying]);
+
+      useEffect(() => {
+        stepRef.current = currentStep;
+      }, [currentStep]);
+
+      useEffect(() => {
+        const loadVoices = () => {
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.getVoices();
+          }
+        };
+
+        loadVoices();
+        if ('speechSynthesis' in window && window.speechSynthesis.onvoiceschanged !== undefined) {
+          window.speechSynthesis.onvoiceschanged = loadVoices;
+        }
+      }, []);
+
+      useEffect(() => {
+        const step = STEPS[currentStep];
+        if (step && isPlaying) {
+          speak(step.title + "。" + step.explanation);
+        }
+        return () => {
+          if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        };
+      }, [currentStep, isPlaying, speak]);
+
+      const handleStepClick = (index) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setCurrentStep(index);
+        stepRef.current = index;
+      };
+
+      const togglePlay = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsPlaying(!isPlaying);
+        if (!isPlaying && currentStep < STEPS.length - 1) {
+          setTimeout(() => setCurrentStep(prev => prev + 1), 100);
+        }
+      };
+
+      const togglePause = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsPaused(!isPaused);
+      };
+
+      const reset = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setCurrentStep(0);
+        stepRef.current = 0;
+        setIsPaused(false);
+        setIsPlaying(true);
+      };
+
+      const nextStep = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => {
+            stepRef.current = prev + 1;
+            return prev + 1;
+          });
+        }
+      };
+
+      const prevStep = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        if (currentStep > 0) {
+          setCurrentStep(prev => {
+            stepRef.current = prev - 1;
+            return prev - 1;
+          });
+        }
+      };
+
+      const currentStepData = STEPS[currentStep];
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="mb-4 text-center">
+            <h1 className="text-3xl font-bold mb-2" style={{ color: COLOR_MAP.primary }}>
+              1155 - RTOS 事件标志组
+            </h1>
+            <p className="text-gray-400">Embedded C Animation · 共 {STEPS.length} 步</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {showCode && (
+              <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4 overflow-auto" style={{ maxHeight: '70vh' }}>
+                <pre className="text-xs font-mono leading-relaxed">
+                  {CODE.split('\n').map((line, i) => (
+                    <div
+                      key={i}
+                      className={`code-line px-2 py-1 rounded ${
+                        currentStepData?.codeHighlight?.includes(i + 1) ? 'active' : ''
+                      }`}
+                    >
+                      <span className="text-gray-500 select-none w-8 inline-block">{i + 1}</span>
+                      <span className={currentStepData?.codeHighlight?.includes(i + 1) ? 'text-white' : 'text-gray-300'}>
+                        {line}
+                      </span>
+                    </div>
+                  ))}
+                </pre>
+              </div>
+            )}
+
+            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4" style={{ maxHeight: '70vh', overflow: 'auto' }}>
+              <h3 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.primary }}>
+                {currentStepData?.title}
+              </h3>
+              <Visualization step={currentStep} visualization={currentStepData?.visualization} />
+            </div>
+
+            <div className="lg:col-span-1 space-y-4">
+              <div className="bg-gray-800 rounded-lg p-4">
+                <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.primaryLight }}>
+                  说明
+                </h3>
+                <p className="text-gray-300 leading-relaxed">
+                  {currentStepData?.explanation}
+                </p>
+              </div>
+
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="flex flex-wrap gap-2">
+                  {STEPS.map((step, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleStepClick(index)}
+                      className={`px-3 py-2 rounded text-xs font-bold transition-all duration-300 ${
+                        index === currentStep
+                          ? 'bg-purple-600 text-white scale-105'
+                          : index < currentStep
+                          ? 'bg-purple-900/50 text-purple-300'
+                          : 'bg-gray-700 text-gray-400'
+                      }`}
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex justify-center gap-4">
+            <button onClick={reset} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors">
+              🔄 重置
+            </button>
+            <button onClick={prevStep} disabled={currentStep === 0} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50">
+              ⏮️ 上一步
+            </button>
+            <button onClick={togglePlay} className={`px-6 py-3 rounded-lg font-bold transition-colors ${isPlaying ? 'bg-purple-600 hover:bg-purple-700' : 'bg-green-600 hover:bg-green-700'}`}>
+              {isPlaying ? '⏸️ 暂停' : '▶️ 播放'}
+            </button>
+            <button onClick={togglePause} disabled={!isPlaying} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50">
+              {isPaused ? '▶️ 继续' : '⏯️ 挂起'}
+            </button>
+            <button onClick={nextStep} disabled={currentStep === STEPS.length - 1} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50">
+              下一步 ⏭️
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

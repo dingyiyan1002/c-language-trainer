@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1169 - const 限定符完整指南</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(59, 130, 246, 0.2); } 50% { background-color: rgba(59, 130, 246, 0.5); } }
+        @keyframes lockAnim { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-10deg); } 75% { transform: rotate(10deg); } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .animate-blink { animation: blink 1s steps(2) infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+        .animate-lock { animation: lockAnim 0.5s ease-in-out; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#3b82f6',
+            secondary: '#2563eb',
+            accent: '#60a5fa',
+            highlight: '#93c5fd',
+            bg: '#1e3a8a',
+            text: '#dbeafe'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const steps = [
+                { title: 'const 基础概念', voice: 'const 基础概念。const 是类型限定符，表示只读属性。const 对象不能被修改，任何尝试修改 const 对象的代码都会导致编译错误。const 提高代码安全性，向读者传达不可变意图，帮助编译器优化代码。' },
+                { title: 'const 变量定义', voice: 'const 变量定义。const 变量必须在定义时初始化，因为之后不能赋值。const 变量存储在只读数据段，尝试修改会导致运行时错误。const 常量比宏定义更安全，有类型检查，不污染命名空间。' },
+                { title: 'const 指针四种形式', voice: 'const 与指针组合有四种形式。常量指针，指针本身是常量，不能指向别处。指向常量的指针，不能通过指针修改值。指向常量的常量指针，两者都不可变。普通指针指向常量，可以重新赋值指针。' },
+                { title: 'const 函数参数', voice: 'const 函数参数。使用 const 修饰指针参数，表明函数不会修改参数指向的数据。这是重要的接口约定，让调用者放心传递数据。const 参数还能接受 const 和非 const 两种实参，提高函数通用性。' },
+                { title: 'const 函数返回值', voice: 'const 函数返回值。函数返回 const 指针，表示返回的数据不应被修改。常用于获取内部状态、配置数据等只读信息。返回 const 引用可以避免拷贝，同时防止外部修改内部数据。' },
+                { title: 'const 在结构体中', voice: 'const 在结构体中的应用。结构体成员可以是 const，表示初始化后不可修改。const 结构体变量所有成员都不可修改。结构体指针可以是 const，表示指针本身不可变。指向结构体的 const 指针，表示结构体内容不可变。' },
+                { title: 'const 最佳实践', voice: 'const 最佳实践。一，默认使用 const，除非需要修改。二，函数参数尽可能使用 const 指针。三，全局配置数据使用 const。四，接口文档明确 const 语义。五，const 与 volatile 组合用于硬件寄存器。' },
+                { title: 'const 常见误区', voice: 'const 常见误区。误区一，const 运行时也保护数据，实际上可以通过类型转换绕过。误区二，const 宏和 const 变量一样，实际上宏没有类型检查。误区三，const 函数参数不能传递非 const，实际上可以。正确理解 const 的编译时属性很重要。' }
+            ];
+
+            useEffect(() => {
+                if (!isPlaying) return;
+                const speak = () => {
+                    if (isMuted || !steps[currentStep]) return;
+                    const utterance = new SpeechSynthesisUtterance(steps[currentStep].voice);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak();
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    window.speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, isMuted]);
+
+            const ConstPointerForms = () => (
+                <div className="space-y-3">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>const 与指针的四种组合</h4>
+                        <div className="space-y-3">
+                            <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''} p-3 bg-blue-900/30 rounded border border-blue-600`}>
+                                <div className="font-mono text-blue-300 text-sm">const int *p</div>
+                                <div className="text-xs text-gray-400 mt-1">指向常量的指针 (Pointer to const)</div>
+                                <div className="text-xs text-gray-500 mt-1">可以改 p，不能改 *p</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`const int *p = &x;
+p = &y;    // ✓ 可以
+*p = 10;   // ✗ 编译错误`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''} p-3 bg-purple-900/30 rounded border border-purple-600`}>
+                                <div className="font-mono text-purple-300 text-sm">int * const p</div>
+                                <div className="text-xs text-gray-400 mt-1">常量指针 (Const pointer)</div>
+                                <div className="text-xs text-gray-500 mt-1">不能改 p，可以改 *p</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`int * const p = &x;
+p = &y;    // ✗ 编译错误
+*p = 10;   // ✓ 可以`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''} p-3 bg-emerald-900/30 rounded border border-emerald-600`}>
+                                <div className="font-mono text-emerald-300 text-sm">const int * const p</div>
+                                <div className="text-xs text-gray-400 mt-1">指向常量的常量指针</div>
+                                <div className="text-xs text-gray-500 mt-1">p 和 *p 都不能改</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`const int * const p = &x;
+p = &y;    // ✗ 编译错误
+*p = 10;   // ✗ 编译错误`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''} p-3 bg-amber-900/30 rounded border border-amber-600`}>
+                                <div className="font-mono text-amber-300 text-sm">const int *p (同 int const *p)</div>
+                                <div className="text-xs text-gray-400 mt-1">两种写法等价</div>
+                                <div className="text-xs text-gray-500 mt-1">const 在 * 之前修饰值，在 * 之后修饰指针</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const FunctionParams = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>const 函数参数</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className={`${currentStep >= 3 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-red-400 font-bold mb-2">❌ 无 const 保护</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`void printData(char *data) {
+    // 调用者担心 data 被修改
+    while (*data) {
+        printf("%c", *data);
+        data++;
+    }
+}`}
+                                </pre>
+                                <div className="mt-2 text-xs text-red-400">
+                                    ⚠️ 只能传递非 const 指针，限制了函数适用性
+                                </div>
+                            </div>
+                            <div className={`${currentStep >= 3 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">✓ 使用 const 保护</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`void printData(const char *data) {
+    // 承诺不修改 data，调用者放心
+    while (*data) {
+        printf("%c", *data);
+        data++;
+    }
+}`}
+                                </pre>
+                                <div className="mt-2 text-xs text-emerald-400">
+                                    ✓ 可接受 const 和非 const 两种实参
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const StructConst = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>const 在结构体中</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`typedef struct {
+    const uint32_t ID;      // 只读 ID
+    const char *name;       // 只读名称
+    uint32_t value;         // 可修改值
+} Config_t;
+
+// const 结构体变量
+const Config_t cfg = { .ID = 1, .name = "sys", .value = 100 };
+cfg.value = 200;  // ✗ 错误，整个结构体只读
+
+// 指向结构体的 const 指针
+const Config_t *pCfg = &cfg;
+pCfg->value = 200;  // ✗ 错误，通过 const 指针不能修改`}
+                            </pre>
+                            <div className="grid grid-cols-3 gap-2 mt-3">
+                                <div className="bg-blue-900/30 p-2 rounded text-center">
+                                    <div className="text-blue-300 text-xs font-bold">const 成员</div>
+                                    <div className="text-gray-400 text-xs mt-1">初始化后不可改</div>
+                                </div>
+                                <div className="bg-purple-900/30 p-2 rounded text-center">
+                                    <div className="text-purple-300 text-xs font-bold">const 变量</div>
+                                    <div className="text-gray-400 text-xs mt-1">所有成员只读</div>
+                                </div>
+                                <div className="bg-emerald-900/30 p-2 rounded text-center">
+                                    <div className="text-emerald-300 text-xs font-bold">const 指针</div>
+                                    <div className="text-gray-400 text-xs mt-1">指针本身不可变</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const ConstVolatile = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>const 与 volatile 组合</h4>
+                        <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 只读硬件状态寄存器
+volatile const uint32_t * const STATUS_REG =
+    (uint32_t *)0x40010000;
+
+// 分解说明:
+// volatile: 值可能被硬件修改，每次重新读取
+// const: 程序不能写入，只能读取
+// * const: 指针本身也是常量
+
+uint32_t readStatus(void) {
+    return *STATUS_REG;  // 每次读取硬件状态
+}
+
+// 错误示例:
+// *STATUS_REG = 0x01;  // ✗ const 禁止写入`}
+                        </pre>
+                        <div className="mt-3 p-3 bg-amber-900/30 rounded border border-amber-600">
+                            <p className="text-amber-300 text-sm">
+                                💡 volatile const = 只读但值可能变化，典型应用是硬件状态寄存器
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const BestPractices = () => (
+                <div className="space-y-4">
+                    <div className="bg-gradient-to-r from-blue-900/50 to-indigo-900/50 rounded-lg p-6">
+                        <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>const 最佳实践</h3>
+                        <ul className="space-y-3 text-gray-300">
+                            <li className="flex items-start">
+                                <span className="text-blue-400 mr-2">✓</span>
+                                <span><strong>默认 const：</strong>默认使用 const，除非确实需要修改</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-blue-400 mr-2">✓</span>
+                                <span><strong>参数 const：</strong>函数参数尽可能使用 const 指针</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-blue-400 mr-2">✓</span>
+                                <span><strong>配置数据 const：</strong>全局配置、查找表使用 const</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-blue-400 mr-2">✓</span>
+                                <span><strong>接口文档：</strong>明确 const 语义，说明是否修改参数</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-blue-400 mr-2">✓</span>
+                                <span><strong>const+volatile：</strong>只读硬件寄存器使用 volatile const</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>常见误区</h4>
+                        <ul className="space-y-2 text-sm text-gray-300">
+                            <li className="flex items-start">
+                                <span className="text-yellow-400 mr-2">⚠️</span>
+                                <span>const 只在编译时检查，运行时可通过类型转换绕过</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-yellow-400 mr-2">⚠️</span>
+                                <span>const 宏 (#define) 没有类型检查，优先使用 const 变量</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-yellow-400 mr-2">⚠️</span>
+                                <span>const 函数参数可以传递非 const 实参，这是合法的</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-yellow-400 mr-2">⚠️</span>
+                                <span>const 不保证数据真正只读，内存可能被其他途径修改</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch(currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-6">
+                                <div className="bg-gradient-to-r from-blue-900/50 to-indigo-900/50 rounded-lg p-6">
+                                    <h3 className="text-2xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>const 基础概念</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-blue-400 mr-2">▸</span>
+                                            <span>const 表示只读属性</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-blue-400 mr-2">▸</span>
+                                            <span>修改 const 对象导致编译错误</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-blue-400 mr-2">▸</span>
+                                            <span>提高代码安全性和可读性</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-blue-400 mr-2">▸</span>
+                                            <span>帮助编译器进行优化</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300">
+{`// const 变量定义
+const int MAX_SIZE = 100;
+const float PI = 3.14159f;
+
+// 尝试修改会导致编译错误
+// MAX_SIZE = 200;  // ✗ 错误
+
+// const 数组
+const char * const DAYS[] = {
+    "Sun", "Mon", "Tue", "Wed",
+    "Thu", "Fri", "Sat"
+};`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>const 变量定义</h4>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                            <div className="text-red-400 font-bold mb-2">❌ 错误用法</div>
+                                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`const int MAX;  // ✗ 未初始化
+MAX = 100;      // ✗ 不能赋值
+
+const int x;
+x = 5;          // ✗ 编译错误`}
+                                            </pre>
+                                        </div>
+                                        <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                            <div className="text-emerald-400 font-bold mb-2">✓ 正确用法</div>
+                                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`const int MAX = 100;  // ✓ 必须初始化
+const float PI = 3.14f;
+
+// 存储在 .rodata 段
+// 尝试修改会导致运行时错误`}
+                                            </pre>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 p-3 bg-blue-900/30 rounded border border-blue-600">
+                                        <p className="text-blue-300 text-sm">
+                                            💡 const 变量比 #define 宏更安全：有类型检查、有作用域、可调试
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 2:
+                        return <ConstPointerForms />;
+                    case 3:
+                        return <FunctionParams />;
+                    case 4:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>const 函数返回值</h4>
+                                    <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 返回 const 指针 - 表示返回的数据不应修改
+const char* getDeviceName(void) {
+    static const char name[] = "MyDevice";
+    return name;  // 调用者不能修改返回的字符串
+}
+
+// 返回 const 结构体指针 - 保护内部数据
+typedef struct {
+    int id;
+    char name[32];
+} Device;
+
+static Device dev = { .id = 1, .name = "sensor" };
+
+const Device* getDevice(void) {
+    return &dev;  // 只读访问
+}
+
+// 使用
+const Device *d = getDevice();
+// d->id = 2;  // ✗ 编译错误`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 5:
+                        return <StructConst />;
+                    case 6:
+                        return <BestPractices />;
+                    case 7:
+                        return <ConstVolatile />;
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-6 flex items-center justify-between">
+                            <div>
+                                <h1 className="text-3xl font-bold" style={{ color: COLOR_MAP.primary }}>
+                                    1169 - const 限定符完整指南
+                                </h1>
+                                <p className="text-gray-400 mt-1">C 语言核心 · 步骤 {currentStep + 1} / {steps.length}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setIsMuted(!isMuted)}
+                                    className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-blue-600'} hover:opacity-80`}>
+                                    {isMuted ? '🔇 静音' : '🔊 语音'}
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className={`px-4 py-2 rounded ${isPlaying ? 'bg-blue-600' : 'bg-gray-600'} hover:opacity-80`}>
+                                    {isPlaying ? '⏸ 暂停' : '▶ 继续'}
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-3 gap-6">
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>代码示例</h3>
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`// 基础 const
+const int MAX = 100;
+
+// const 指针
+const char *str = "hello";  // 指向常量
+char * const p = &var;       // 常量指针
+const int * const cp = &x;   // 指向常量的常量指针
+
+// const 参数
+void print(const char *s);
+
+// const 返回
+const char* getName(void);`}
+                                    </pre>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>记忆技巧</h3>
+                                    <ul className="space-y-2 text-sm text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-blue-400 mr-2">•</span>
+                                            <span>const 在 * 前 → 值不能改</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-blue-400 mr-2">•</span>
+                                            <span>const 在 * 后 → 指针不能改</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-blue-400 mr-2">•</span>
+                                            <span>两侧都有 const → 都不能改</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div className="col-span-1">
+                                <div className="bg-gray-800 rounded-lg p-6 h-full">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>
+                                        {steps[currentStep].title}
+                                    </h3>
+                                    {renderContent()}
+                                </div>
+                            </div>
+
+                            <div className="col-span-1 space-y-4">
+                                <ConstPointerForms />
+                                <FunctionParams />
+                            </div>
+                        </div>
+
+                        <footer className="mt-8 flex justify-center gap-2">
+                            {steps.map((_, idx) => (
+                                <button key={idx} onClick={() => setCurrentStep(idx)}
+                                    className={`w-3 h-3 rounded-full transition-all ${idx === currentStep ? 'w-8' : ''}`}
+                                    style={{ backgroundColor: idx <= currentStep ? COLOR_MAP.primary : '#374151' }} />
+                            ))}
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

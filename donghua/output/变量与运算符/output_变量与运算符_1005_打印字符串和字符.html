@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>打印字符串和字符 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#1e3a8a;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 320px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#7c3aed;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:500px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease;cursor:pointer}
+    .code-line:hover{background:rgba(255,255,255,0.1)}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-play:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(34,197,94,0.4)}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-pause:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(59,130,246,0.4)}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn-restart:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(245,158,11,0.4)}
+    .btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+    .var-card{background:linear-gradient(135deg,#f8fafc,#e2e8f0);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid #e2e8f0;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#3b82f6;box-shadow:0 0 20px rgba(59,130,246,0.3);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#1e40af;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .char-grid{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+    .char-box{width:48px;height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:3px solid #cbd5e1;border-radius:10px;background:white;font-family:'Consolas',monospace;font-size:18px;font-weight:700;transition:all 0.4s ease;position:relative}
+    .char-box.highlight{border-color:#3b82f6;background:linear-gradient(135deg,#eff6ff,#dbeafe);transform:scale(1.1);box-shadow:0 8px 20px rgba(59,130,246,0.4)}
+    .char-box.null{border-color:#f59e0b;background:linear-gradient(135deg,#fef3c7,#fde68a)}
+    .char-box.new{animation:charPop 0.5s ease}
+    @keyframes charPop{0%{transform:scale(0);opacity:0}50%{transform:scale(1.2)}100%{transform:scale(1)}}
+    .char-index{font-size:10px;color:#94a3b8;margin-top:4px}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:13px;color:#22d3ee;min-height:120px}
+    .terminal-line{margin-bottom:6px;word-break:break-all}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid #f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .step-indicator{background:linear-gradient(135deg,#1e293b,#0f172a);color:white;border-radius:12px;padding:12px 20px;text-align:center;font-weight:700;font-size:16px}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#6b7280;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+    @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.3);opacity:0.7}}
+    .memory-section{margin-top:20px}
+    .memory-title{color:#0891b2;font-weight:700;font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+    .memory-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+    .memory-cell{background:white;border-radius:10px;padding:12px;text-align:center;border:2px solid #e2e8f0;transition:all 0.3s ease}
+    .memory-cell.highlight{border-color:#8b5cf6;background:linear-gradient(135deg,#f3e8ff,#e9d5ff);transform:scale(1.05)}
+    .memory-addr{font-size:10px;color:#64748b;margin-bottom:4px}
+    .memory-value{font-size:16px;font-weight:700;color:#1e293b;font-family:'Consolas',monospace}
+    .string-preview{background:#1e293b;color:#4ade80;border-radius:8px;padding:12px;font-family:'Consolas',monospace;font-size:13px;margin-top:12px}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 5;
+    const PROG_NAME = "string_char";
+    const FILE_NAME = "string_char.c";
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',orange:'#f97316'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'',color:'#94a3b8'},
+      3:{step:1,text:'int main(void) {',color:'#3b82f6'},
+      4:{step:2,text:'    char device_name[] = "Sensor01";',color:'#3b82f6'},
+      5:{step:3,text:"    char status_char = 'O';",color:'#3b82f6'},
+      6:{step:4,text:'    printf("Device: %s\\n", device_name);',color:'#eab308'},
+      7:{step:4,text:'    printf("Status: %c\\n", status_char);',color:'#eab308'},
+      8:{step:4,text:'    printf("First: %c\\n", device_name[0]);',color:'#eab308'},
+      9:{step:5,text:'    return 0;',color:'#3b82f6'},
+      10:{step:5,text:'}',color:'#94a3b8'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，包含标准输入输出头文件 stdio.h，这是 C 语言进行输入输出的基础',
+      2:'定义字符数组 device_name，存储字符串 Sensor01，编译器自动在末尾添加反斜杠零表示字符串结束',
+      3:'定义字符变量 status_char，单引号表示单个字符字面量，赋值为大写字母 O',
+      4:'百分号 s 格式符输出字符串，从首地址开始直到反斜杠零，百分号 c 格式符输出单个字符',
+      5:'程序执行完毕，返回零表示正常退出'
+    };
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',memory:'M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    const VarCard = ({name,type,value,highlight,children}) => {
+      const prevRef = useRef(null);
+      const [animating,setAnimating] = useState(false);
+      useEffect(() => {
+        if(prevRef.current !== null && prevRef.current !== value) {
+          setAnimating(true);
+          const timer = setTimeout(() => setAnimating(false), 640);
+          return () => clearTimeout(timer);
+        }
+        prevRef.current = value;
+      },[value]);
+      return (
+        <div className={`var-card ${highlight ? 'highlight' : ''} ${animating ? 'new' : ''}`}>
+          <div className="var-header">
+            <span className="var-name">{name}</span>
+            <span className="var-type">{type}</span>
+          </div>
+          {children}
+        </div>
+      );
+    };
+    const CharBox = ({char,index,highlight,isNull}) => (
+      <div className={`char-box ${highlight ? 'highlight' : ''} ${isNull ? 'null' : ''}`}>
+        <span>{isNull ? '\\0' : char}</span>
+        <span className="char-index">{index}</span>
+      </div>
+    );
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [highlightIndex,setHighlightIndex] = useState(-1);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const deviceName = ['S','e','n','s','o','r','0','1','\\0'];
+      const statusChar = 'O';
+      const memoryMap = [
+        {addr:'0x1000',label:'device_name[0]',value:'S'},
+        {addr:'0x1001',label:'device_name[1]',value:'e'},
+        {addr:'0x1002',label:'device_name[2]',value:'n'}
+      ];
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 10; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 2) {
+          let idx = 0;
+          const highlightTimer = setInterval(() => {
+            if(idx <= 8) {
+              setHighlightIndex(idx);
+              idx++;
+            } else {
+              clearInterval(highlightTimer);
+            }
+          }, 200);
+          return () => clearInterval(highlightTimer);
+        }
+        if(step === 4) {
+          setTerminalLines([
+            'Device: Sensor01',
+            'Status: O',
+            'First: S'
+          ]);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setTerminalLines([]);
+        setHighlightIndex(-1);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>打印字符串和字符 - C 语言可视化</h1>
+            <p>字符数组 | 字符串字面量 | printf 格式化输出</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div className="step-indicator">步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                {FILE_NAME}
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8,9,10].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.memory} size={22} />
+                内存可视化
+              </div>
+              {step >= 2 && (
+                <VarCard name="device_name" type="char[9]" highlight={step === 2}>
+                  <div className="char-grid">
+                    {deviceName.map((char, idx) => (
+                      <CharBox
+                        key={idx}
+                        char={char}
+                        index={idx}
+                        highlight={highlightIndex === idx}
+                        isNull={char === '\\0'}
+                      />
+                    ))}
+                  </div>
+                  <div className="string-preview" style={{marginTop:12}}>
+                    字符串预览："{deviceName.slice(0, -1).join('')}"
+                  </div>
+                </VarCard>
+              )}
+              {step >= 3 && (
+                <VarCard name="status_char" type="char" highlight={step === 3}>
+                  <div style={{textAlign:'center',padding:20}}>
+                    <div className="char-box" style={{display:'inline-flex',borderColor:COLOR_MAP.orange,background:`linear-gradient(135deg,#fff7ed,#ffedd5)`}}>
+                      <span style={{fontSize:28}}>{statusChar}</span>
+                    </div>
+                    <div style={{marginTop:12,color:COLOR_MAP.orange,fontWeight:700}}>单引号 = 单个字符</div>
+                  </div>
+                </VarCard>
+              )}
+              {step >= 4 && (
+                <div className="memory-section">
+                  <div className="memory-title">
+                    <Icon path={I.speaker} size={18} />
+                    终端输出
+                  </div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.purple}}>头文件</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>#include &lt;stdio.h&gt; 包含标准输入输出函数，printf 用于格式化输出</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>字符数组</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>char device_name[] = "Sensor01" 定义字符数组，双引号字符串自动在末尾添加 '\\0' 结束符</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.orange}}>字符变量</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>char status_char = 'O' 单引号表示单个字符字面量，只能存储一个字符</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>格式化输出</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>%s 输出字符串 (读到 '\\0' 为止)，%c 输出单个字符，device_name[0] 访问第一个字符</p>
+              </div>
+              <div className={`explanation-card ${step >= 5 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.purple}}>程序结束</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>return 0 表示程序正常退出，返回码 0 代表成功</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

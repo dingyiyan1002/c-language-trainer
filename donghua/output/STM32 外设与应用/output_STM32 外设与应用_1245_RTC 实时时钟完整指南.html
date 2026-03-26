@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 RTC 实时时钟完整指南 - Real-Time Clock</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes tick { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        @keyframes second { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .tick-anim { animation: tick 1s ease-in-out; }
+        .active-step { background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#3b82f6', primaryLight: '#60a5fa', primaryDark: '#1d4ed8',
+            secondary: '#22c55e', success: '#10b981', warning: '#f59e0b',
+            clock: '#3b82f6', alarm: '#ef4444', backup: '#f59e0b', lsi: '#8b5cf6',
+            gradient: 'from-blue-500 via-blue-600 to-indigo-500'
+        };
+
+        const STEPS = [
+            {
+                title: 'RTC 基础',
+                voice: 'RTC 是实时时钟，提供年月日时分秒计时。STM32F103 的 RTC 由 LSE 或 HSE 分频驱动，独立于主系统，支持电池备份。断电后仍能继续计时。',
+                highlights: ['RTC', 'LSE 时钟', '电池备份', '独立运行', '年月日时分秒']
+            },
+            {
+                title: '时钟源',
+                voice: 'RTC 可选三种时钟源：LSE 外部 32.768 千赫兹晶振，精度高；HSI 分频，无需外部元件；LSI 内部低速时钟，精度较低。推荐使用 LSE 获得最高精度。',
+                highlights: ['LSE', '32.768kHz', 'HSI 分频', 'LSI', '精度对比']
+            },
+            {
+                title: '预分频',
+                voice: 'RTC 时钟需要经过预分频得到 1 赫兹的 RTC 秒脉冲。LSE 32.768 千赫兹需要 15 级分频。配置 PRL 预分频器，设置合适的分频系数。',
+                highlights: ['预分频', '1Hz 秒脉冲', '32768', 'PRL', '分频系数']
+            },
+            {
+                title: '时间设置',
+                voice: '设置时间需要进入配置模式，写入 RTC 计数器寄存器。计数器值为从 2000 年 1 月 1 日零点开始的秒数。退出配置模式后开始计数。',
+                highlights: ['配置模式', '计数器', '秒数', '2000 年起', '写入时间']
+            },
+            {
+                title: '闹钟功能',
+                voice: 'RTC 闹钟可设定特定时间产生中断。当计数器值等于闹钟寄存器值时，产生闹钟中断。支持秒、分、时、日任意组合匹配。',
+                highlights: ['闹钟中断', '计数器匹配', '秒分时日', '中断唤醒', 'ALR 寄存器']
+            },
+            {
+                title: '备份寄存器',
+                voice: '备份寄存器由 VBAT 供电，断电后数据不丢失。可用于存储RTC校准值、系统配置、运行时间等关键数据。共 10 个 32 位寄存器。',
+                highlights: ['VBAT 供电', '数据不丢失', '10 个寄存器', '32 位', '关键数据']
+            },
+            {
+                title: '低功耗',
+                voice: 'RTC 在停机和待机模式下仍可运行。使用电池供电，主电源断电后自动切换。闹钟事件可唤醒 MCU 从低功耗模式返回。',
+                highlights: ['停机模式', '待机模式', '电池供电', '自动切换', '唤醒 MCU']
+            },
+            {
+                title: '应用实例',
+                voice: '实际应用：电子时钟日历、定时开关控制、数据记录时间戳、定时唤醒系统。注意 LSE 起振时间和防干扰布局。',
+                highlights: ['电子时钟', '定时开关', '时间戳', '定时唤醒', 'LSE 布局']
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [currentTime, setCurrentTime] = React.useState(new Date(2026, 2, 21, 12, 30, 0));
+            const [isRunning, setIsRunning] = React.useState(false);
+            const [alarmTime, setAlarmTime] = React.useState({ hour: 8, minute: 0 });
+            const [alarmEnabled, setAlarmEnabled] = React.useState(false);
+            const [alarmTriggered, setAlarmTriggered] = React.useState(false);
+            const [clockSource, setClockSource] = React.useState('LSE');
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                const utterance = new SpeechSynthesisUtterance(STEPS[currentStep].voice);
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang.includes('zh-CN') && v.name.includes('Xiaoxiao'))
+                    || voices.find(v => v.lang.includes('zh-CN'))
+                    || voices.find(v => v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                if (isPlaying) speechSynthesis.speak(utterance);
+
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying]);
+
+            // RTC 计时
+            React.useEffect(() => {
+                if (!isRunning) return;
+                const interval = setInterval(() => {
+                    setCurrentTime(prev => {
+                        const newTime = new Date(prev);
+                        newTime.setSeconds(prev.getSeconds() + 1);
+
+                        // 检查闹钟
+                        if (alarmEnabled && !alarmTriggered) {
+                            if (newTime.getHours() === alarmTime.hour &&
+                                newTime.getMinutes() === alarmTime.minute &&
+                                newTime.getSeconds() === 0) {
+                                setAlarmTriggered(true);
+                            }
+                        }
+                        return newTime;
+                    });
+                }, 1000);
+                return () => clearInterval(interval);
+            }, [isRunning, alarmEnabled, alarmTime, alarmTriggered]);
+
+            const handlePlay = () => setIsPlaying(true);
+            const handlePause = () => {
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+            const handleRestart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+            };
+            const handleStepClick = (index) => {
+                setCurrentStep(index);
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+
+            const toggleRTC = () => {
+                setIsRunning(!isRunning);
+                setAlarmTriggered(false);
+            };
+
+            const resetTime = () => {
+                setCurrentTime(new Date(2026, 2, 21, 12, 30, 0));
+                setAlarmTriggered(false);
+            };
+
+            const setQuickAlarm = (hour, minute) => {
+                setAlarmTime({ hour, minute });
+                setAlarmEnabled(true);
+                setAlarmTriggered(false);
+            };
+
+            const formatTime = (date) => ({
+                hours: date.getHours().toString().padStart(2, '0'),
+                minutes: date.getMinutes().toString().padStart(2, '0'),
+                seconds: date.getSeconds().toString().padStart(2, '0'),
+                weekday: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()],
+                date: `${date.getFullYear()}-${(date.getMonth()+1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`
+            });
+
+            const timeFormatted = formatTime(currentTime);
+
+            const renderContent = () => {
+                switch (currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-blue-400">STM32 RTC 规格</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">时钟源</div>
+                                            <div className="text-2xl font-bold text-blue-400">LSE/HSI/LSI</div>
+                                            <div className="text-xs text-gray-400">32.768kHz 优先</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">备份供电</div>
+                                            <div className="text-2xl font-bold text-yellow-400">VBAT</div>
+                                            <div className="text-xs text-gray-400">电池/超级电容</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">备份寄存器</div>
+                                            <div className="text-2xl font-bold text-green-400">10×32 位</div>
+                                            <div className="text-xs text-gray-400">断电不丢失</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">闹钟</div>
+                                            <div className="text-2xl font-bold text-red-400">秒分时日</div>
+                                            <div className="text-xs text-gray-400">可配置匹配</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-blue-900 to-indigo-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">RTC 主要功能:</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 年月日时分秒日历</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 闰年自动补偿</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 闹钟中断</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 备份寄存器</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 低功耗运行</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-blue-400">RTC 时钟源选择</h3>
+                                    <div className="space-y-3">
+                                        <button
+                                            onClick={() => setClockSource('LSE')}
+                                            className={`w-full p-3 rounded-lg text-left transition-all ${
+                                                clockSource === 'LSE' ? 'bg-blue-900 ring-2 ring-blue-500' : 'bg-gray-900 hover:bg-gray-800'
+                                            }`}
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-blue-400">LSE 外部低速晶振</span>
+                                                <span className="text-xs text-gray-400">推荐 ✓</span>
+                                            </div>
+                                            <div className="mt-2 text-xs text-gray-400">32.768kHz 晶振，精度最高，需外部元件</div>
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <div className="flex-1 bg-gray-800 rounded h-2">
+                                                    <div className="bg-green-500 h-2 rounded" style={{ width: '95%' }}></div>
+                                                </div>
+                                                <span className="text-xs text-green-400">精度 95%</span>
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => setClockSource('HSI')}
+                                            className={`w-full p-3 rounded-lg text-left transition-all ${
+                                                clockSource === 'HSI' ? 'bg-purple-900 ring-2 ring-purple-500' : 'bg-gray-900 hover:bg-gray-800'
+                                            }`}
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-purple-400">HSI 分频</span>
+                                                <span className="text-xs text-gray-400">无需外部</span>
+                                            </div>
+                                            <div className="mt-2 text-xs text-gray-400">内部高速时钟分频，无需外部元件，精度中等</div>
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <div className="flex-1 bg-gray-800 rounded h-2">
+                                                    <div className="bg-yellow-500 h-2 rounded" style={{ width: '70%' }}></div>
+                                                </div>
+                                                <span className="text-xs text-yellow-400">精度 70%</span>
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => setClockSource('LSI')}
+                                            className={`w-full p-3 rounded-lg text-left transition-all ${
+                                                clockSource === 'LSI' ? 'bg-orange-900 ring-2 ring-orange-500' : 'bg-gray-900 hover:bg-gray-800'
+                                            }`}
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-orange-400">LSI 内部低速时钟</span>
+                                                <span className="text-xs text-gray-400">备用</span>
+                                            </div>
+                                            <div className="mt-2 text-xs text-gray-400">内部低速振荡器，精度较低，温度漂移大</div>
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <div className="flex-1 bg-gray-800 rounded h-2">
+                                                    <div className="bg-orange-500 h-2 rounded" style={{ width: '50%' }}></div>
+                                                </div>
+                                                <span className="text-xs text-orange-400">精度 50%</span>
+                                            </div>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="bg-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-blue-400">💡 选择建议</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 高精度应用：必须使用 LSE</li>
+                                        <li>• 成本敏感：HSI 分频</li>
+                                        <li>• LSE 故障：自动切换到 LSI</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 2:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-blue-400">预分频配置</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="flex items-center justify-center gap-2">
+                                            <div className="bg-blue-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">RTC 时钟</div>
+                                                <div className="font-bold text-blue-400">32.768 kHz</div>
+                                            </div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-purple-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">APR 预分频</div>
+                                                <div className="font-bold text-purple-400">/128</div>
+                                            </div>
+                                            <div className="text-purple-400">→</div>
+                                            <div className="bg-green-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">SPR 预分频</div>
+                                                <div className="font-bold text-green-400">/256</div>
+                                            </div>
+                                            <div className="text-green-400">→</div>
+                                            <div className="bg-yellow-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">秒脉冲</div>
+                                                <div className="font-bold text-yellow-400">1 Hz</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-gradient-to-r from-purple-900 to-green-900 rounded-lg p-4">
+                                        <h4 className="font-bold mb-2">📐 分频计算公式</h4>
+                                        <div className="font-mono text-sm bg-gray-900 rounded p-3">
+                                            RTC秒脉冲 = RTCCLK / ((APR+1) × (SPR+1))
+                                        </div>
+                                        <div className="mt-2 text-xs text-gray-300">
+                                            例：32768 / (128 × 256) = 1 Hz
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-green-400">分频器寄存器</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-purple-400 mb-1">RTCAPR (异步)</div>
+                                            <div className="text-xs text-gray-400">7 位，分频值 0-127</div>
+                                            <div className="text-xs font-mono text-green-400 mt-1">PRLH[6:0]</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-green-400 mb-1">RTCSPR (同步)</div>
+                                            <div className="text-xs text-gray-400">15 位，分频值 0-32767</div>
+                                            <div className="text-xs font-mono text-green-400 mt-1">PRLL[15:0]</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 3:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-blue-400">时间设置流程</h3>
+                                    <div className="space-y-3">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-blue-400">1. 等待 RSF=1</span>
+                                                <span className="text-xs font-mono text-gray-400">RTC→CRL&amp;0x08</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">等待寄存器同步完成</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-green-400">2. 进入配置模式</span>
+                                                <span className="text-xs font-mono text-gray-400">RTC→CRL |= 0x10</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">设置 CNF 位，允许修改时间</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-yellow-400">3. 写入计数器值</span>
+                                                <span className="text-xs font-mono text-gray-400">RTC→CNTH/CNTL</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">32 位秒数 (从 2000-01-01 00:00:00 开始)</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-red-400">4. 退出配置模式</span>
+                                                <span className="text-xs font-mono text-gray-400">RTC→CRL &amp;= ~0x10</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">清除 CNF 位，开始正常计数</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-yellow-900 rounded-lg p-4 border-2 border-yellow-500">
+                                    <h4 className="font-bold mb-2 text-yellow-400">⚠️ 重要提醒</h4>
+                                    <p className="text-sm text-gray-300">修改时间前必须等待 RSF 标志位置 1，确保寄存器已同步。修改后必须清除 CNF 位退出配置模式。</p>
+                                </div>
+                            </div>
+                        );
+                    case 4:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-red-400">闹钟配置</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="flex items-center justify-center gap-4">
+                                            <div className="bg-blue-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">RTC 计数器</div>
+                                                <div className="font-bold text-blue-400">CNTH/L</div>
+                                            </div>
+                                            <div className="text-blue-400">=</div>
+                                            <div className="bg-red-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">闹钟寄存器</div>
+                                                <div className="font-bold text-red-400">ALRH/L</div>
+                                            </div>
+                                            <div className="text-red-400">→</div>
+                                            <div className="bg-green-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">闹钟中断</div>
+                                                <div className="font-bold text-green-400">ALRF</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-blue-400 mb-1">秒匹配</div>
+                                            <div className="text-xs text-gray-400">ALR[7:0] 匹配计数器低 8 位</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-green-400 mb-1">分匹配</div>
+                                            <div className="text-xs text-gray-400">ALR[15:8] 匹配计数器中 8 位</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-yellow-400 mb-1">时匹配</div>
+                                            <div className="text-xs text-gray-400">ALR[23:16] 匹配计数器高 8 位</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-purple-400 mb-1">日匹配</div>
+                                            <div className="text-xs text-gray-400">ALR[31:24] 匹配天数值</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-red-900 to-green-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">⏰ 闹钟应用</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 定时开关机</li>
+                                        <li>• 定时数据采集</li>
+                                        <li>• 低功耗唤醒</li>
+                                        <li>• 定时提醒</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 5:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-yellow-400">备份寄存器</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="grid grid-cols-5 gap-2">
+                                            {Array(10).fill(0).map((_, i) => (
+                                                <div key={i} className="bg-yellow-900 rounded p-3 text-center">
+                                                    <div className="text-xs text-gray-400">BKP{i}</div>
+                                                    <div className="font-bold text-yellow-400">32 位</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-green-400 mb-1">数据保持</div>
+                                            <div className="text-xs text-gray-400">VBAT 供电，主电源断电后数据不丢失</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-blue-400 mb-1">应用场景</div>
+                                            <div className="text-xs text-gray-400">RTC 校准值、系统配置、运行时间、加密密钥</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-purple-400 mb-1">访问方式</div>
+                                            <div className="text-xs text-gray-400">BKP→DR{i} 寄存器读写</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-yellow-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-yellow-400">💾 典型应用</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• BKP0-1: RTC 校准参数</li>
+                                        <li>• BKP2-3: 系统配置标志</li>
+                                        <li>• BKP4-5: 运行时间累计</li>
+                                        <li>• BKP6-9: 用户数据</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 6:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-blue-400">低功耗模式</h3>
+                                    <div className="grid grid-cols-3 gap-4 mb-4">
+                                        <div className="bg-gray-900 rounded p-3 text-center">
+                                            <div className="text-xs text-gray-400">运行模式</div>
+                                            <div className="font-bold text-green-400">RUN</div>
+                                            <div className="text-xs text-gray-400 mt-2">RTC 运行</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3 text-center">
+                                            <div className="text-xs text-gray-400">停机模式</div>
+                                            <div className="font-bold text-yellow-400">STOP</div>
+                                            <div className="text-xs text-gray-400 mt-2">RTC 运行 ✓</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3 text-center">
+                                            <div className="text-xs text-gray-400">待机模式</div>
+                                            <div className="font-bold text-red-400">STANDBY</div>
+                                            <div className="text-xs text-gray-400 mt-2">RTC 运行 ✓</div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-gradient-to-r from-yellow-900 to-blue-900 rounded-lg p-4">
+                                        <h4 className="font-bold mb-2">🔋 电源切换</h4>
+                                        <p className="text-sm text-gray-300 mb-2">当 VBAT 引脚连接电池时：</p>
+                                        <ul className="space-y-1 text-sm">
+                                            <li>• 主电源正常：使用 VDD 供电</li>
+                                            <li>• 主电源断电：自动切换到 VBAT</li>
+                                            <li>• RTC 和备份寄存器持续运行</li>
+                                            <li>• 数据不会丢失</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div className="bg-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-blue-400">⚡ 唤醒源</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• RTC 闹钟中断</li>
+                                        <li>• 秒中断</li>
+                                        <li>• 外部中断 (EXTI)</li>
+                                        <li>• PVD 电源检测</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 7:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-blue-400">STM32 代码实现</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// RTC 初始化
+void RTC_Init(void) {
+    // 1. 使能电源和备份时钟
+    RCC->APB1ENR |= RCC_APB1ENR_PWREN;
+    RCC->APB1ENR |= RCC_APB1ENR_BKPEN;
+
+    // 2. 使能 LSE
+    RCC->BDCR |= RCC_BDCR_LSEON;
+    while (!(RCC->BDCR & RCC_BDCR_LSERDY));
+
+    // 3. 选择 LSE 作为 RTC 时钟
+    RCC->BDCR |= RCC_BDCR_RTCSEL_0;
+    RCC->BDCR |= RCC_BDCR_RTCEN;
+
+    // 4. 等待寄存器同步
+    while (!(RTC->CRL & RTC_CRL_RSF));
+
+    // 5. 进入配置模式
+    RTC->CRL |= RTC_CRL_CNF;
+
+    // 6. 设置预分频 32768
+    RTC->PRLH = 0;
+    RTC->PRLL = 32767;
+
+    // 7. 设置初始时间
+    RTC->CNTH = 0;
+    RTC->CNTL = 0;
+
+    // 8. 退出配置模式
+    RTC->CRL &= ~RTC_CRL_CNF;
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-green-400">时间读取函数</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// 等待同步
+void RTC_WaitSynchro(void) {
+    RTC->CRL &= ~RTC_CRL_RSF;
+    while (!(RTC->CRL & RTC_CRL_RSF));
+}
+
+// 读取当前时间 (秒数)
+uint32_t RTC_GetCounter(void) {
+    RTC_WaitSynchro();
+    return ((RTC->CNTH << 16) | RTC->CNTL);
+}
+
+// 闹钟中断服务函数
+void RTC_IRQHandler(void) {
+    if (RTC->CRL & RTC_CRL_ALRF) {
+        RTC->CRL &= ~RTC_CRL_ALRF;  // 清除标志
+        // 处理闹钟事件
+        Alarm_Callback();
+    }
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-green-900 to-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">🔧 实战技巧</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• LSE 起振时间：约 1 秒</li>
+                                        <li>• 布线：靠近 MCU，包地处理</li>
+                                        <li>• 负载电容：按晶振规格选择</li>
+                                        <li>• 校准：使用 TAMPER 引脚输出</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-4">
+                            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 via-blue-500 to-indigo-400 bg-clip-text text-transparent">
+                                STM32 RTC 实时时钟完整指南
+                            </h1>
+                            <p className="text-sm text-gray-400">LSE 时钟源 · 电池备份 · 闹钟中断 · 备份寄存器</p>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 justify-center">
+                            {!isPlaying ? (
+                                <button onClick={handlePlay} className="px-4 py-2 bg-green-600 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                                    <span>▶</span> 播放
+                                </button>
+                            ) : (
+                                <button onClick={handlePause} className="px-4 py-2 bg-yellow-600 rounded-lg hover:bg-yellow-700 transition-colors flex items-center gap-2">
+                                    <span>⏸</span> 暂停
+                                </button>
+                            )}
+                            <button onClick={handleRestart} className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+                                <span>🔄</span> 重新开始
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 overflow-x-auto justify-center">
+                            {STEPS.map((step, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => handleStepClick(index)}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                                        index === currentStep
+                                            ? `bg-gradient-to-r ${COLOR_MAP.gradient} text-white shadow-lg`
+                                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                    }`}
+                                >
+                                    {index + 1}. {step.title}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">代码区</h3>
+                                <div className="bg-gray-900 rounded p-3 font-mono text-xs overflow-x-auto">
+                                    <pre className="text-green-400">{`// RTC 操作函数
+void RTC_Init(void);
+void RTC_SetTime(uint32_t sec);
+uint32_t RTC_GetTime(void);
+void RTC_SetAlarm(uint32_t sec);
+void RTC_EnableAlarm(uint8_t enable);`}</pre>
+                                </div>
+                                <div className="mt-4">
+                                    <div className="text-xs text-gray-400 mb-2">RTC 状态:</div>
+                                    <div className={`text-center py-3 rounded font-bold ${isRunning ? 'bg-green-600 animate-pulse' : 'bg-gray-700'}`}>
+                                        {isRunning ? 'RTC 运行中' : 'RTC 已停止'}
+                                    </div>
+                                </div>
+                                {alarmTriggered && (
+                                    <div className="mt-4 bg-red-600 rounded p-3 text-center animate-pulse">
+                                        <div className="text-lg font-bold">⏰ 闹钟响!</div>
+                                        <button
+                                            onClick={() => setAlarmTriggered(false)}
+                                            className="mt-2 px-4 py-2 bg-white text-red-600 rounded text-sm font-bold"
+                                        >
+                                            停止闹钟
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">可视化区</h3>
+                                <div className="space-y-4">
+                                    {/* 数字时钟显示 */}
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="text-center mb-4">
+                                            <div className="text-xs text-gray-400">{timeFormatted.weekday}</div>
+                                            <div className="text-xs text-gray-400">{timeFormatted.date}</div>
+                                        </div>
+                                        <div className="flex justify-center items-center gap-2">
+                                            <div className="bg-blue-900 rounded-lg p-4 text-center">
+                                                <div className="text-4xl font-bold text-blue-400">{timeFormatted.hours}</div>
+                                                <div className="text-xs text-gray-400">时</div>
+                                            </div>
+                                            <div className="text-4xl text-blue-400 animate-pulse">:</div>
+                                            <div className="bg-blue-900 rounded-lg p-4 text-center">
+                                                <div className="text-4xl font-bold text-blue-400">{timeFormatted.minutes}</div>
+                                                <div className="text-xs text-gray-400">分</div>
+                                            </div>
+                                            <div className="text-4xl text-blue-400 animate-pulse">:</div>
+                                            <div className="bg-green-900 rounded-lg p-4 text-center">
+                                                <div className={`text-4xl font-bold ${timeFormatted.seconds === '00' ? 'text-green-400 tick-anim' : 'text-green-400'}`}>
+                                                    {timeFormatted.seconds}
+                                                </div>
+                                                <div className="text-xs text-gray-400">秒</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 控制按钮 */}
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            onClick={toggleRTC}
+                                            className={`py-3 rounded-lg font-bold transition-all ${
+                                                isRunning ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+                                            }`}
+                                        >
+                                            {isRunning ? '停止 RTC' : '启动 RTC'}
+                                        </button>
+                                        <button
+                                            onClick={resetTime}
+                                            className="bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold"
+                                        >
+                                            重置时间
+                                        </button>
+                                    </div>
+
+                                    {/* 闹钟设置 */}
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <span className="text-xs text-gray-400">闹钟</span>
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={alarmEnabled}
+                                                    onChange={(e) => setAlarmEnabled(e.target.checked)}
+                                                    className="w-4 h-4"
+                                                />
+                                                <span className="text-sm">使能</span>
+                                            </label>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2 mb-3">
+                                            <div>
+                                                <label className="text-xs text-gray-400">时</label>
+                                                <select
+                                                    value={alarmTime.hour}
+                                                    onChange={(e) => setAlarmTime({ ...alarmTime, hour: parseInt(e.target.value) })}
+                                                    className="w-full bg-gray-800 rounded px-2 py-1 text-sm"
+                                                >
+                                                    {Array(24).fill(0).map((_, i) => (
+                                                        <option key={i} value={i}>{i.toString().padStart(2, '0')}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400">分</label>
+                                                <select
+                                                    value={alarmTime.minute}
+                                                    onChange={(e) => setAlarmTime({ ...alarmTime, minute: parseInt(e.target.value) })}
+                                                    className="w-full bg-gray-800 rounded px-2 py-1 text-sm"
+                                                >
+                                                    {Array(60).fill(0).map((_, i) => (
+                                                        <option key={i} value={i}>{i.toString().padStart(2, '0')}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <button onClick={() => setQuickAlarm(8, 0)} className="bg-gray-800 hover:bg-gray-700 py-2 rounded text-xs">
+                                                08:00
+                                            </button>
+                                            <button onClick={() => setQuickAlarm(12, 0)} className="bg-gray-800 hover:bg-gray-700 py-2 rounded text-xs">
+                                                12:00
+                                            </button>
+                                            <button onClick={() => setQuickAlarm(18, 0)} className="bg-gray-800 hover:bg-gray-700 py-2 rounded text-xs">
+                                                18:00
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* 时钟源选择 */}
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="text-xs text-gray-400 mb-2">时钟源</div>
+                                        <div className="flex gap-2">
+                                            {['LSE', 'HSI', 'LSI'].map(src => (
+                                                <button
+                                                    key={src}
+                                                    onClick={() => setClockSource(src)}
+                                                    className={`flex-1 py-2 rounded text-xs font-bold transition-all ${
+                                                        clockSource === src
+                                                            ? src === 'LSE' ? 'bg-blue-600' : src === 'HSI' ? 'bg-purple-600' : 'bg-orange-600'
+                                                            : 'bg-gray-800 hover:bg-gray-700'
+                                                    }`}
+                                                >
+                                                    {src}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">说明区</h3>
+                                <div className="space-y-4">
+                                    <div className="bg-gradient-to-r from-blue-900 to-indigo-900 rounded-lg p-3">
+                                        <div className="font-bold text-blue-400 mb-2">步骤 {currentStep + 1}: {STEPS[currentStep].title}</div>
+                                        <div className="text-xs text-gray-300">{STEPS[currentStep].voice}</div>
+                                    </div>
+                                    {renderContent()}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="text-center mt-4 text-xs text-gray-500">
+                            STM32 RTC 实时时钟完整指南 | LSE 32.768kHz | 备份寄存器 | 遵循 SKILL.md v3.0 标准
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1206 - FLASH 闪存编程完整指南 - 嵌入式 C 语言可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(245, 158, 11, 0.2); } 50% { background-color: rgba(245, 158, 11, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes danger { 0%, 100% { background-color: rgba(239, 68, 68, 0.3); } 50% { background-color: rgba(239, 68, 68, 0.6); } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes program { 0% { background-color: rgba(16, 185, 129, 0.3); } 50% { background-color: rgba(16, 185, 129, 0.8); } 100% { background-color: rgba(16, 185, 129, 0.3); } }
+        @keyframes erase { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.5); } }
+        @keyframes verify { 0%, 100% { border-color: rgba(34, 197, 94, 0.3); } 50% { border-color: rgba(34, 197, 94, 0.9); } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .flow { animation: flow 2s infinite; }
+        .highlight { animation: highlight 2s infinite; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .countdown { animation: countdown 0.3s ease-out; }
+        .danger { animation: danger 1s infinite; }
+        .reset { animation: reset 1s linear; }
+        .program { animation: program 1s infinite; }
+        .erase { animation: erase 1s infinite; }
+        .verify { animation: verify 0.5s infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // 颜色主题：橙色/棕色渐变 (FLASH 存储)
+        const COLOR_MAP = {
+            primary: '#f59e0b',
+            secondary: '#d97706',
+            accent: '#fbbf24',
+            highlight: '#fcd34d',
+            danger: '#ef4444',
+            success: '#10b981'
+        };
+
+        const STEPS = [
+            {
+                title: "FLASH 闪存基础架构",
+                code: `// FLASH 存储器概述
+// STM32 FLASH 特性:
+// - 非易失性存储器 (断电数据不丢失)
+// - 用于存储程序代码和常量数据
+// - 按扇区 (Sector) 和页 (Page) 组织
+
+// FLASH 存储器映射 (以 STM32F4 为例):
+// 0x0800 0000 - FLASH 起始地址
+//   ├── Main Flash (1MB)
+//   │   ├── Sector 0-11 (16KB, 16KB, 16KB, 16KB, 64KB, 128KB...)
+//   │   └── 用于存储用户代码
+//   └── System Memory (Bootloader)
+//       └── 存储系统引导程序
+
+// FLASH 操作类型:
+// 1. 读操作 - 按字节/半字/字读取
+// 2. 写操作 - 必须先擦除再编程
+// 3. 擦除操作 - 扇区擦除或整片擦除`,
+                description: "FLASH 是非易失性存储器，用于存储程序代码和常量数据。STM32 的 FLASH 按扇区组织，不同扇区大小不同 (从 16KB 到 128KB)。FLASH 操作包括读、写、擦除三种，其中写操作必须先擦除目标区域。FLASH 从地址 0x08000000 开始映射。",
+                highlight: "FLASH 写操作必须先擦除，不能直接写入非 0xFF 的位置"
+            },
+            {
+                title: "FLASH 解锁与寄存器配置",
+                code: `// FLASH 关键寄存器:
+// FLASH_KEYR   - 密钥寄存器 (解锁用)
+// FLASH_OPTKEYR - 选项字节密钥寄存器
+// FLASH_SR     - 状态寄存器
+// FLASH_CR     - 控制寄存器
+// FLASH_AR     - 地址寄存器
+
+// 解锁 FLASH (上电后默认锁定)
+void FLASH_Unlock(void) {
+    FLASH->KEYR = 0x45670123;  // 密钥 1
+    FLASH->KEYR = 0xCDEF89AB;  // 密钥 2
+}
+
+// 锁定 FLASH (操作完成后必须锁定)
+void FLASH_Lock(void) {
+    FLASH->CR |= FLASH_CR_LOCK;
+}
+
+// 等待 FLASH 操作完成
+FLASH_Status FLASH_WaitForLastOperation(void) {
+    while(FLASH->SR & FLASH_SR_BSY);  // 等待忙碌位清零
+    return (FLASH->SR & FLASH_SR_EOP) ? SUCCESS : ERROR;
+}`,
+                description: "FLASH 操作前必须解锁，通过向 KEYR 写入特定密钥序列 (0x45670123 → 0xCDEF89AB) 来解锁。操作完成后必须重新锁定以防止误操作。所有 FLASH 操作都需要等待 BSY 位清零，表示操作完成。SR 寄存器包含错误标志如 WRPERR(写保护)、PGSERR(编程顺序)、PGPERR(编程宽度) 等。",
+                highlight: "忘记锁定 FLASH 可能导致意外写入，解锁后操作完成必须立即锁定"
+            },
+            {
+                title: "扇区擦除操作",
+                code: `// 扇区擦除 (Sector Erase)
+// 擦除前必须确保目标扇区未被写保护
+
+FLASH_Status FLASH_EraseSector(uint32_t Sector, uint32_t VoltageRange) {
+    // 1. 等待 FLASH 就绪
+    FLASH_WaitForLastOperation();
+
+    // 2. 设置扇区号和电压范围
+    FLASH->CR &= ~FLASH_CR_SNB;           // 清除原扇区号
+    FLASH->CR |= (Sector << 3);           // 设置新扇区号
+    FLASH->CR &= ~FLASH_CR_PSIZE;         // 清除原电压范围
+    FLASH->CR |= (VoltageRange << 8);     // 设置电压范围
+
+    // 3. 启动擦除
+    FLASH->CR |= FLASH_CR_SER;            // 扇区擦除使能
+    FLASH->CR |= FLASH_CR_STRT;           // 启动擦除
+
+    // 4. 等待完成
+    FLASH_WaitForLastOperation();
+
+    // 5. 清除标志
+    FLASH->CR &= ~FLASH_CR_SER;
+
+    return SUCCESS;
+}
+
+// 整片擦除 (Mass Erase) - 擦除所有扇区
+FLASH->CR |= FLASH_CR_MER;
+FLASH->CR |= FLASH_CR_STRT;`,
+                description: "扇区擦除将目标扇区所有位设置为 1(0xFF)。擦除操作需要指定扇区号 (0-11) 和电压范围 (x8/x16/x32 位)。擦除过程：设置扇区号→设置电压范围→启动 SER 位→置位 STRT 启动→等待完成。整片擦除使用 MER 位，会擦除整个主 FLASH 区域。",
+                highlight: "擦除操作不可逆，擦除前务必备份重要数据"
+            },
+            {
+                title: "FLASH 编程 (写入) 操作",
+                code: `// FLASH 编程 - 按字 (32 位) 写入
+// 编程前目标地址必须是已擦除状态 (0xFFFFFFFF)
+
+FLASH_Status FLASH_ProgramWord(uint32_t Address, uint32_t Data) {
+    FLASH_Status status;
+
+    // 1. 等待就绪
+    status = FLASH_WaitForLastOperation();
+    if(status != SUCCESS) return status;
+
+    // 2. 设置编程宽度 (32 位)
+    FLASH->CR &= ~FLASH_CR_PSIZE;
+    FLASH->CR |= FLASH_CR_PSIZE_1;  // x32 位
+
+    // 3. 启用编程
+    FLASH->CR |= FLASH_CR_PG;
+
+    // 4. 写入数据
+    *(__IO uint32_t*)Address = Data;
+
+    // 5. 等待完成
+    status = FLASH_WaitForLastOperation();
+
+    // 6. 清除标志
+    FLASH->CR &= ~FLASH_CR_PG;
+
+    return status;
+}
+
+// 按字节/半字写入类似，修改 PSIZE 即可
+// FLASH_CR_PSIZE_0 = x8 位，FLASH_CR_PSIZE_1 = x16 位`,
+                description: "FLASH 编程是将数据写入已擦除区域的操作。可以按字节 (x8)、半字 (x16)、字 (x32) 或双字 (x64) 写入。编程前目标地址必须是 0xFFFFFFFF 状态 (已擦除)。写入过程：设置编程宽度→置位 PG 位→写入数据→等待完成。如果目标地址未擦除，会产生 PGSERR 错误。",
+                highlight: "编程宽度必须与数据宽度匹配，32 位数据用 x32 模式"
+            },
+            {
+                title: "FLASH 读取操作与选项字节",
+                code: `// FLASH 读取 - 直接访问地址即可
+// FLASH 映射到 0x08000000，可直接指针访问
+
+uint32_t FLASH_ReadWord(uint32_t Address) {
+    return *(__IO uint32_t*)Address;
+}
+
+// 选项字节 (Option Bytes) 配置
+// 用于配置读保护、写保护、BOR 等级等
+
+// 解锁选项字节
+void FLASH_OB_Unlock(void) {
+    FLASH->OPTKEYR = 0x08192A3B;
+    FLASH->OPTKEYR = 0x4C5D6E7F;
+}
+
+// 配置读保护级别
+void FLASH_OB_RDP_Config(uint8_t RDP_Level) {
+    FLASH_OB_Unlock();
+    FLASH->OPTR &= ~FLASH_OPTR_RDP;
+    FLASH->OPTR |= (RDP_Level << 0);  // Level 0/1/2
+    FLASH->CR |= FLASH_CR_OPTSTRT;
+    FLASH_WaitForLastOperation();
+    FLASH_OB_Lock();
+}
+
+// 读保护级别:
+// Level 0: 无保护，可读写擦除
+// Level 1: 禁止外部访问，调试器锁定
+// Level 2: 芯片永久锁定，不可恢复`,
+                description: "FLASH 读取可直接通过指针访问 0x08000000 起始的地址。选项字节是特殊的 FLASH 区域，用于配置读保护、写保护、BOR(掉电复位) 等级等。选项字节修改需要专用密钥解锁，修改后需要启动 OPTSTRT 位编程。读保护 Level 1 可防止调试器读取 FLASH，Level 2 永久锁定芯片。",
+                highlight: "读保护 Level 2 不可恢复，使用时务必谨慎"
+            },
+            {
+                title: "FLASH 写保护配置",
+                code: `// 写保护 (Write Protection) - 防止意外修改特定扇区
+
+// 配置扇区写保护
+void FLASH_OB_WRP_Config(uint32_t WRPSector) {
+    FLASH_OB_Unlock();
+
+    // 设置写保护扇区掩码
+    FLASH->WRPR &= ~WRPSector;  // 0=保护，1=不保护
+
+    // 启动选项字节编程
+    FLASH->CR |= FLASH_CR_OPTSTRT;
+    FLASH_WaitForLastOperation();
+
+    FLASH_OB_Lock();
+}
+
+// 示例：保护扇区 0-3(Bootloader 区域)
+FLASH_OB_WRP_Config(~0x0F);  // 0xF=00001111，保护前 4 个扇区
+
+// 写保护效果:
+// - 受保护扇区无法通过 SWD/JTAG 修改
+// - 受保护扇区无法通过 IAP 修改
+// - 只有解除写保护后才能修改
+
+// 移除写保护
+void FLASH_OB_WRP_Remove(uint32_t WRPSector) {
+    FLASH_OB_Unlock();
+    FLASH->WRPR |= WRPSector;  // 1=不保护
+    FLASH->CR |= FLASH_CR_OPTSTRT;
+    FLASH_WaitForLastOperation();
+    FLASH_OB_Lock();
+}`,
+                description: "写保护用于保护关键代码区域 (如 Bootloader) 不被意外修改。写保护通过选项字节 WRPR 寄存器配置，每个位对应一个扇区。0 表示保护，1 表示不保护。受保护的扇区无法通过 SWD/JTAG 或 IAP 修改，只有解除保护后才能写入。Bootloader 区域通常设置写保护。",
+                highlight: "写保护通过选项字节实现，保护后无法通过正常方式修改"
+            },
+            {
+                title: "IAP 应用：在应用编程",
+                code: `// IAP (In-Application Programming) - 运行时更新固件
+
+// FLASH 分区示例:
+// 0x0800 0000 - Bootloader (16KB, 扇区 0)
+// 0x0800 4000 - Application A (240KB, 扇区 1-5)
+// 0x0804 0000 - Application B (240KB, 扇区 6-10)
+// 0x0807 C000 - 参数存储 (16KB, 扇区 11)
+
+// 跳转到应用程序
+typedef void (*pFunction)(void);
+uint32_t JumpAddress = *(__IO uint32_t*)(APPLICATION_ADDRESS + 4);
+pFunction Jump = (pFunction)JumpAddress;
+
+// 禁用中断
+__disable_irq();
+// 关闭所有 SysTick 等外设
+// 跳转到应用
+__set_MSP(*(__IO uint32_t*)APPLICATION_ADDRESS);
+Jump();
+
+// IAP 流程:
+// 1. 接收新固件 (UART/USB/CAN)
+// 2. 验证固件完整性 (CRC/Checksum)
+// 3. 擦除目标扇区
+// 4. 写入新固件
+// 5. 验证写入数据
+// 6. 跳转执行或等待重启`,
+                description: "IAP 允许在运行时更新固件，无需外部编程器。典型方案是将 FLASH 分为 Bootloader 和两个应用区 (A/B 备份)。Bootloader 负责接收新固件、验证、写入备份区，然后切换启动标志。双备份方案可在升级失败时回滚到旧版本。跳转应用前需要禁用中断并重置 MSP 栈指针。",
+                highlight: "IAP 升级失败会导致砖机，必须有回滚机制或看门狗保护"
+            },
+            {
+                title: "FLASH 编程最佳实践",
+                code: `// 1. 始终检查 FLASH 状态
+FLASH_Status status = FLASH_WaitForLastOperation();
+if(status != SUCCESS) {
+    // 处理错误：WRPERR/PGSERR/PGPERR
+    uint32_t error = FLASH->SR & 0xF0;
+}
+
+// 2. 大数据写入使用 DMA
+// 配置 DMA 从内存到 FLASH
+DMA->CPAR = (uint32_t)&FLASH->DR;
+DMA->CMAR = (uint32_t)buffer;
+DMA->CNDTR = data_size;
+
+// 3. 编程前检查地址是否已擦除
+uint32_t check = FLASH_ReadWord(addr);
+if(check != 0xFFFFFFFF) {
+    FLASH_EraseSector(sector, VoltageRange_3);
+}
+
+// 4. 写入后验证数据
+FLASH_ProgramWord(addr, data);
+if(FLASH_ReadWord(addr) != data) {
+    // 写入失败，重试或报错
+}
+
+// 5. 关键操作前备份数据
+// 特别是 Bootloader 和选项字节
+
+// 6. 使用 ECC/校验和验证固件完整性
+uint32_t CRC_Calculate(void *data, uint32_t size);`,
+                description: "FLASH 编程最佳实践包括：每次操作前检查状态寄存器；大数据量使用 DMA 提高效率；写入前确认目标已擦除；写入后验证数据正确性；关键区域操作前备份数据；使用 CRC 或校验和验证固件完整性。遵循这些实践可以避免 FLASH 操作失败导致系统崩溃。",
+                highlight: "FLASH 操作失败会导致系统变砖，必须验证每一步操作结果"
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [showCode, setShowCode] = useState(true);
+            const voiceEndTimerRef = useRef(null);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v =>
+                        v.lang === 'zh-CN' ||
+                        v.lang === 'zh-CN-XiaoxiaoNeural' ||
+                        v.lang.includes('Chinese')
+                    );
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.description + "。" + step.highlight);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep]);
+
+            // FLASH 扇区可视化
+            const FlashSectors = () => {
+                const sectors = [
+                    { id: 0, size: '16KB', start: '0x08000000', color: currentStep >= 2 ? 'bg-orange-500' : 'bg-gray-600' },
+                    { id: 1, size: '16KB', start: '0x08004000', color: currentStep >= 2 ? 'bg-orange-500' : 'bg-gray-600' },
+                    { id: 2, size: '16KB', start: '0x08008000', color: currentStep >= 2 ? 'bg-orange-500' : 'bg-gray-600' },
+                    { id: 3, size: '16KB', start: '0x0800C000', color: currentStep >= 2 ? 'bg-orange-500' : 'bg-gray-600' },
+                    { id: 4, size: '64KB', start: '0x08010000', color: currentStep >= 3 ? 'bg-green-600 program' : 'bg-gray-600' },
+                    { id: 5, size: '128KB', start: '0x08020000', color: 'bg-gray-600' },
+                    { id: 6, size: '128KB', start: '0x08040000', color: currentStep >= 6 ? 'bg-blue-600' : 'bg-gray-600' },
+                    { id: 7, size: '128KB', start: '0x08060000', color: currentStep >= 6 ? 'bg-blue-600' : 'bg-gray-600' },
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-orange-400 mb-3">FLASH 扇区布局</h3>
+                        <div className="space-y-1">
+                            {sectors.map((sector) => (
+                                <div key={sector.id} className={`h-8 rounded flex items-center px-2 text-xs transition-all ${sector.color}`}>
+                                    <span className="w-16">Sector{sector.id}</span>
+                                    <span className="w-12">{sector.size}</span>
+                                    <span className="text-gray-400 font-mono text-xs">{sector.start}</span>
+                                    {currentStep >= 2 && sector.id < 4 && (
+                                        <span className="ml-auto text-yellow-300">🔒</span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // FLASH 操作状态可视化
+            const OperationStatus = () => {
+                const operations = [
+                    { name: '解锁', status: currentStep >= 1, color: 'bg-green-500' },
+                    { name: '擦除', status: currentStep >= 2, color: 'bg-orange-500' },
+                    { name: '编程', status: currentStep >= 3, color: 'bg-blue-500' },
+                    { name: '验证', status: currentStep >= 4, color: 'bg-purple-500' },
+                    { name: '锁定', status: currentStep >= 1, color: 'bg-red-500' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-blue-400 mb-3">操作流程状态</h3>
+                        <div className="space-y-2">
+                            {operations.map((op, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                    <div className={`w-4 h-4 rounded-full ${op.status ? op.color + ' pulse' : 'bg-gray-600'}`}></div>
+                                    <span className="text-xs">{op.name}</span>
+                                    {op.status && <span className="text-green-400 text-xs">✓</span>}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // IAP 双备份可视化
+            const IAPVisual = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-3">IAP 双备份方案</h3>
+                        <div className="space-y-2 text-xs">
+                            <div className={`p-2 rounded ${currentStep >= 6 ? 'bg-green-900/50 border border-green-600' : 'bg-gray-700'}`}>
+                                <div className="flex justify-between">
+                                    <span>📦 Bootloader</span>
+                                    <span className="text-gray-400">16KB</span>
+                                </div>
+                            </div>
+                            <div className={`p-2 rounded ${currentStep >= 6 ? 'bg-blue-900/50 border border-blue-600' : 'bg-gray-700'}`}>
+                                <div className="flex justify-between">
+                                    <span>🔷 App A (运行中)</span>
+                                    <span className="text-gray-400">240KB</span>
+                                </div>
+                            </div>
+                            <div className={`p-2 rounded ${currentStep >= 6 ? 'bg-purple-900/50 border border-purple-600' : 'bg-gray-700'}`}>
+                                <div className="flex justify-between">
+                                    <span>🔶 App B (备份)</span>
+                                    <span className="text-gray-400">240KB</span>
+                                </div>
+                            </div>
+                            <div className={`p-2 rounded ${currentStep >= 6 ? 'bg-orange-900/50 border border-orange-600' : 'bg-gray-700'}`}>
+                                <div className="flex justify-between">
+                                    <span>⚙️ 参数区</span>
+                                    <span className="text-gray-400">16KB</span>
+                                </div>
+                            </div>
+                        </div>
+                        {currentStep >= 6 && (
+                            <div className="mt-3 text-xs text-center text-yellow-300">
+                                新固件 → App B → 验证 → 切换标志 → 重启
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
+            // 读保护级别可视化
+            const RDPPVisual = () => {
+                const levels = [
+                    { level: 0, name: '无保护', desc: '可读写', color: 'bg-green-600' },
+                    { level: 1, name: 'Level 1', desc: '调试锁定', color: 'bg-yellow-600' },
+                    { level: 2, name: 'Level 2', desc: '永久锁定', color: 'bg-red-600' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-red-400 mb-3">读保护级别</h3>
+                        <div className="space-y-2">
+                            {levels.map((l) => (
+                                <div key={l.level} className={`p-2 rounded ${l.color} ${currentStep >= 4 && l.level === 1 ? 'ring-2 ring-white' : ''}`}>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="font-bold">{l.name}</span>
+                                        <span>{l.desc}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        {currentStep >= 4 && (
+                            <div className="mt-2 text-xs text-red-400">
+                                ⚠️ Level 2 不可恢复!
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    {/* 头部 */}
+                    <div className="max-w-7xl mx-auto mb-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-orange-400">
+                                1206 - FLASH 闪存编程完整指南
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">
+                                    {isPlaying ? '暂停' : '播放'}
+                                </button>
+                                <button onClick={() => setShowCode(!showCode)} className="px-3 py-1 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                    {showCode ? '隐藏代码' : '显示代码'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div className="flex gap-1 mb-4">
+                            {STEPS.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentStep(i)}
+                                    className={`flex-1 h-2 rounded transition-all ${
+                                        i === currentStep ? 'bg-orange-500 scale-110' :
+                                        i < currentStep ? 'bg-orange-700' : 'bg-gray-600'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 主内容区 - 三列布局 */}
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* 左列：代码 */}
+                        {showCode && (
+                            <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                                <h2 className="text-sm font-bold text-orange-400 mb-2">
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap bg-gray-900 p-3 rounded">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        )}
+
+                        {/* 中列：可视化动画 */}
+                        <div className={`${showCode ? 'col-span-1' : 'col-span-2'} space-y-4`}>
+                            <FlashSectors />
+                            <div className="grid grid-cols-2 gap-4">
+                                <OperationStatus />
+                                {currentStep >= 6 ? <IAPVisual /> : <RDPPVisual />}
+                            </div>
+                        </div>
+
+                        {/* 右列：说明 */}
+                        <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                            <h3 className="text-sm font-bold text-blue-400 mb-2">说明</h3>
+                            <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                                {STEPS[currentStep].description}
+                            </p>
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2">
+                                <p className="text-xs text-yellow-300">
+                                    <span className="font-bold">💡 重点:</span> {STEPS[currentStep].highlight}
+                                </p>
+                            </div>
+
+                            {/* 导航按钮 */}
+                            <div className="flex gap-2 mt-4">
+                                <button
+                                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                                    disabled={currentStep === 0}
+                                    className="flex-1 py-2 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 text-xs"
+                                >
+                                    ← 上一步
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+                                    disabled={currentStep === STEPS.length - 1}
+                                    className="flex-1 py-2 bg-orange-600 rounded hover:bg-orange-500 disabled:opacity-50 text-xs"
+                                >
+                                    下一步 →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部摘要 */}
+                    <div className="max-w-7xl mx-auto mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-orange-400 mb-2">FLASH 编程核心要点</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-orange-400 font-bold">先擦后写</span>
+                                <p className="text-gray-400 mt-1">必须擦除才能编程</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-green-400 font-bold">及时锁定</span>
+                                <p className="text-gray-400 mt-1">操作完立即锁定</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-blue-400 font-bold">等待完成</span>
+                                <p className="text-gray-400 mt-1">BSY 位清零再继续</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-purple-400 font-bold">写后验证</span>
+                                <p className="text-gray-400 mt-1">读取确认写入正确</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

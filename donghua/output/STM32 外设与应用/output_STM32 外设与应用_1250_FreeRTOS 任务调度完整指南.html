@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 FreeRTOS 任务调度完整指南 - 实时操作系统可视化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // 8 个步骤 - 语音驱动自动播放
+        const STEPS = [
+            {
+                title: "FreeRTOS 基础",
+                code: `// FreeRTOS 实时操作系统
+// - 抢占式调度：高优先级任务优先
+// - 时间片轮转：同优先级轮流执行
+// - 任务状态：运行/就绪/阻塞/挂起
+
+// STM32 上的 FreeRTOS
+// - 最小栈空间：128 字 (简单任务)
+// - 推荐栈空间：256-512 字
+// - 系统滴答：1ms (1000Hz)
+
+// 任务优先级 (数字越大优先级越高)
+// - 空闲任务：优先级 0 (最低)
+// - 用户任务：优先级 1-14
+// - 系统任务：优先级 15 (最高)
+
+// 调度器类型
+// - 协作式：任务主动让出 CPU
+// - 抢占式：内核强制切换 (默认)`,
+                visualization: "freertos-basic",
+                explanation: "FreeRTOS 是轻量级实时操作系统，提供任务调度、同步、通信等功能。抢占式调度确保高优先级任务及时响应。每个任务有独立的栈空间和状态。"
+            },
+            {
+                title: "任务创建与删除",
+                code: `// 任务句柄
+TaskHandle_t taskHandle;
+
+// 创建任务
+xTaskCreate(
+    TaskFunction,      // 任务函数
+    "TaskName",        // 任务名称
+    256,               // 栈大小 (字)
+    NULL,              // 参数
+    2,                 // 优先级
+    &taskHandle        // 句柄
+);
+
+// 任务函数定义
+void TaskFunction(void *pvParameters) {
+    for (;;) {
+        // 任务代码
+        GPIO_SetBits(GPIOA, GPIO_Pin_5);
+        vTaskDelay(pdMS_TO_TICKS(100));  // 延时 100ms
+        GPIO_ResetBits(GPIOA, GPIO_Pin_5);
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+// 删除任务
+vTaskDelete(taskHandle);
+
+// 启动调度器
+vTaskStartScheduler();`,
+                visualization: "task-creation",
+                explanation: "使用 xTaskCreate 创建任务，需要指定任务函数、栈大小、优先级。任务函数必须是无限循环。vTaskDelay 让出 CPU 并阻塞指定时间。vTaskStartScheduler 启动多任务调度。"
+            },
+            {
+                title: "任务优先级调度",
+                code: `// 多任务优先级示例
+
+// 高优先级任务 (LED 闪烁)
+void HighPriorityTask(void *pv) {
+    for (;;) {
+        GPIO_ToggleBits(GPIOA, GPIO_Pin_5);
+        vTaskDelay(pdMS_TO_TICKS(50));  // 50ms
+    }
+}
+
+// 中优先级任务 (串口打印)
+void MediumPriorityTask(void *pv) {
+    for (;;) {
+        printf("Task running\\n");
+        vTaskDelay(pdMS_TO_TICKS(200));  // 200ms
+    }
+}
+
+// 低优先级任务 (传感器读取)
+void LowPriorityTask(void *pv) {
+    for (;;) {
+        sensor_read();
+        vTaskDelay(pdMS_TO_TICKS(500));  // 500ms
+    }
+}
+
+// 创建所有任务后启动调度器
+xTaskCreate(HighPriorityTask, "HI", 128, NULL, 3, NULL);
+xTaskCreate(MediumPriorityTask, "MED", 128, NULL, 2, NULL);
+xTaskCreate(LowPriorityTask, "LO", 256, NULL, 1, NULL);
+vTaskStartScheduler();`,
+                visualization: "priority-scheduling",
+                explanation: "优先级高的任务优先执行。当高优先级任务就绪时，立即抢占低优先级任务的 CPU。同优先级任务采用时间片轮转。合理分配优先级确保实时性。"
+            },
+            {
+                title: "信号量同步",
+                code: `// 二值信号量 (同步)
+SemaphoreHandle_t xBinarySemaphore;
+
+// 创建信号量
+xBinarySemaphore = xSemaphoreCreateBinary();
+
+// 任务 1: 释放信号量
+void ProducerTask(void *pv) {
+    for (;;) {
+        // 等待事件
+        WaitForEvent();
+        // 释放信号量
+        xSemaphoreGive(xBinarySemaphore);
+    }
+}
+
+// 任务 2: 获取信号量
+void ConsumerTask(void *pv) {
+    for (;;) {
+        // 等待信号量 (阻塞)
+        if (xSemaphoreTake(xBinarySemaphore, portMAX_DELAY)) {
+            // 处理事件
+            ProcessEvent();
+        }
+    }
+}
+
+// 计数信号量
+SemaphoreHandle_t xCountingSemaphore;
+xCountingSemaphore = xSemaphoreCreateCounting(10, 0);`,
+                visualization: "semaphore-sync",
+                explanation: "信号量用于任务间同步。二值信号量只有 0/1 两种状态，适合事件通知。计数信号量可以记录事件发生次数。xSemaphoreTake 阻塞直到信号量可用。"
+            },
+            {
+                title: "互斥锁保护",
+                code: `// 互斥锁 (资源保护)
+SemaphoreHandle_t xMutex;
+
+// 创建互斥锁
+xMutex = xSemaphoreCreateMutex();
+
+// 访问共享资源
+void AccessSharedResource(void *pv) {
+    for (;;) {
+        // 获取互斥锁 (等待)
+        if (xSemaphoreTake(xMutex, pdMS_TO_TICKS(100))) {
+            // 临界区：安全访问共享资源
+            shared_counter++;
+            shared_buffer[index] = data;
+            // 释放互斥锁
+            xSemaphoreGive(xMutex);
+        }
+    }
+}
+
+// 优先级继承：防止优先级反转
+// 互斥锁持有者临时提升优先级`,
+                visualization: "mutex-protection",
+                explanation: "互斥锁保护共享资源避免竞争条件。与信号量不同，互斥锁有优先级继承机制防止优先级反转。必须在持有锁后尽快释放，避免影响其他任务。"
+            },
+            {
+                title: "队列通信",
+                code: `// 队列 (任务间通信)
+QueueHandle_t xQueue;
+
+// 创建队列 (10 项，每项 4 字节)
+xQueue = xQueueCreate(10, sizeof(uint32_t));
+
+// 发送数据到队列 (队尾)
+void SenderTask(void *pv) {
+    for (;;) {
+        uint32_t data = sensor_read();
+        // 发送到队列 (阻塞 100ms)
+        xQueueSend(xQueue, &data, pdMS_TO_TICKS(100));
+    }
+}
+
+// 从队列接收数据
+void ReceiverTask(void *pv) {
+    for (;;) {
+        uint32_t data;
+        // 从队列接收 (阻塞等待)
+        if (xQueueReceive(xQueue, &data, portMAX_DELAY)) {
+            process_data(data);
+        }
+    }
+}
+
+// 中断中发送
+void EXTI_IRQHandler(void) {
+    BaseType_t xHigherPriorityTaskWoken;
+    xQueueSendFromISR(xQueue, &data, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}`,
+                visualization: "queue-communication",
+                explanation: "队列是任务间通信的安全方式。支持先进先出 (FIFO)。发送和接收都可以设置超时时间。中断中使用 FromISR 版本，并在需要时触发上下文切换。"
+            },
+            {
+                title: "软件定时器",
+                code: `// 软件定时器
+TimerHandle_t xTimer;
+
+// 定时器回调函数
+void TimerCallback(TimerHandle_t xTimer) {
+    // 定时器到期执行
+    GPIO_ToggleBits(GPIOA, GPIO_Pin_5);
+}
+
+// 创建定时器
+xTimer = xTimerCreate(
+    "MyTimer",           // 名称
+    pdMS_TO_TICKS(1000), // 周期 1000ms
+    pdTRUE,              // 自动重载
+    NULL,                // ID
+    TimerCallback        // 回调
+);
+
+// 启动定时器
+xTimerStart(xTimer, 0);
+
+// 一次性定时器
+xTimer = xTimerCreate("OneShot", pdMS_TO_TICKS(5000), pdFALSE, NULL, callback);
+xTimerStart(xTimer, 0);  // 5 秒后执行一次`,
+                visualization: "software-timer",
+                explanation: "软件定时器在到期时执行回调函数。支持周期性和一次性模式。回调函数在守护任务中执行，优先级由 configTIMER_TASK_PRIORITY 配置。适合周期性操作。"
+            },
+            {
+                title: "任务通知 (高效同步)",
+                code: `// 直接任务通知 (FreeRTOS V8.2+)
+
+// 任务 1: 发送通知
+void NotifierTask(void *pv) {
+    for (;;) {
+        WaitForEvent();
+        // 发送通知到指定任务
+        xTaskNotifyGive(hReceiverTask);
+    }
+}
+
+// 任务 2: 等待通知
+void ReceiverTask(void *pv) {
+    for (;;) {
+        // 等待通知 (阻塞)
+        ulNotificationValue = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        // 处理事件
+        ProcessEvent();
+    }
+}
+
+// 替代二值信号量，速度更快，内存更小
+// 32 位通知值，可用作计数器
+
+// 带值的通知
+xTaskNotify(hTask, 0x01, eSetBits);  // 设置位
+xTaskNotify(hTask, 100, eSetValue);  // 设置值`,
+                visualization: "task-notification",
+                explanation: "任务通知是最高效的同步方式，比信号量快 45%，内存占用更小。每个任务有 32 位通知寄存器。支持设置位、设置值、累加值等操作。推荐替代二值信号量。"
+            }
+        ];
+
+        // 颜色映射 - 紫色调
+        const COLOR_MAP = {
+            primary: '#8b5cf6',    // violet-500
+            secondary: '#7c3aed',  // violet-600
+            accent: '#3b82f6',     // blue-500
+            success: '#10b981',    // emerald-500
+            warning: '#f59e0b',    // amber-500
+            danger: '#ef4444',     // red-500
+            info: '#06b6d4',       // cyan-500
+            running: '#10b981',    // 运行中绿色
+            ready: '#3b82f6',      // 就绪蓝色
+            blocked: '#f59e0b',    // 阻塞黄色
+            suspended: '#6b7280',  // 挂起灰色
+            gradients: [
+                'from-violet-500 to-purple-500',
+                'from-blue-500 to-cyan-500',
+                'from-emerald-500 to-teal-500'
+            ]
+        };
+
+        // FreeRTOS 基础可视化
+        const FreertosBasic = ({ step }) => {
+            const [tasks, setTasks] = useState([
+                { id: 1, name: 'Task1', priority: 3, state: 'running' },
+                { id: 2, name: 'Task2', priority: 2, state: 'ready' },
+                { id: 3, name: 'Task3', priority: 1, state: 'blocked' },
+                { id: 4, name: 'Idle', priority: 0, state: 'ready' }
+            ]);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setTasks(prev => {
+                        const runningIdx = prev.findIndex(t => t.state === 'running');
+                        const readyTasks = prev.filter(t => t.state === 'ready' && t.priority > 0);
+                        if (runningIdx >= 0 && readyTasks.length > 0) {
+                            const newTasks = [...prev];
+                            newTasks[runningIdx].state = 'ready';
+                            const nextTask = readyTasks.reduce((max, t) => t.priority > max.priority ? t : max);
+                            const nextIdx = prev.findIndex(t => t.id === nextTask.id);
+                            newTasks[nextIdx].state = 'running';
+                            return newTasks;
+                        }
+                        return prev;
+                    });
+                }, 2000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const getStateColor = (state) => {
+                switch (state) {
+                    case 'running': return 'bg-green-100 text-green-800 border-green-500';
+                    case 'ready': return 'bg-blue-100 text-blue-800 border-blue-500';
+                    case 'blocked': return 'bg-yellow-100 text-yellow-800 border-yellow-500';
+                    case 'suspended': return 'bg-gray-100 text-gray-800 border-gray-500';
+                }
+            };
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        任务状态
+                    </div>
+                    {tasks.map((task) => (
+                        <div
+                            key={task.id}
+                            className={`p-3 rounded-lg border-2 transition-all ${getStateColor(task.state)}`}
+                        >
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <div className="font-semibold">{task.name}</div>
+                                    <div className="text-xs">优先级：{task.priority}</div>
+                                </div>
+                                <div className="text-sm font-bold capitalize">
+                                    {task.state === 'running' && '🏃 运行中'}
+                                    {task.state === 'ready' && '⏸️ 就绪'}
+                                    {task.state === 'blocked' && '🚫 阻塞'}
+                                    {task.state === 'suspended' && '⏹️ 挂起'}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    <div className="text-xs text-gray-500">
+                        <div>• 抢占式：高优先级优先</div>
+                        <div>• 轮转：同优先级轮流</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 任务创建可视化
+        const TaskCreation = ({ step }) => {
+            const [taskCreated, setTaskCreated] = useState(false);
+            const [stackUsage, setStackUsage] = useState(0);
+
+            useEffect(() => {
+                setTimeout(() => setTaskCreated(true), 1000);
+                setTimeout(() => setStackUsage(60), 2000);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className={`p-4 rounded-lg text-center transition-all ${
+                        taskCreated ? 'bg-green-100' : 'bg-gray-100'
+                    }`}>
+                        <div className="text-2xl mb-2">{taskCreated ? '✅' : '⏳'}</div>
+                        <div className="font-semibold">{taskCreated ? '任务已创建' : '创建中...'}</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-sm font-semibold mb-2">栈空间 (256 字)</div>
+                        <div className="w-full bg-gray-200 rounded-full h-4">
+                            <div
+                                className="bg-purple-500 h-4 rounded-full transition-all"
+                                style={{ width: `${stackUsage}%` }}
+                            />
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                            已使用：{Math.round(256 * stackUsage / 100)} 字
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-purple-50 p-2 rounded">
+                            <div>任务函数</div>
+                            <div className="font-mono">TaskFunction</div>
+                        </div>
+                        <div className="bg-purple-50 p-2 rounded">
+                            <div>优先级</div>
+                            <div className="font-bold">2</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 优先级调度可视化
+        const PriorityScheduling = ({ step }) => {
+            const [tasks, setTasks] = useState([
+                { id: 1, name: 'High', priority: 3, running: false },
+                { id: 2, name: 'Medium', priority: 2, running: false },
+                { id: 3, name: 'Low', priority: 1, running: false }
+            ]);
+
+            useEffect(() => {
+                const schedule = () => {
+                    // 高优先级运行
+                    setTasks(prev => prev.map(t => ({ ...t, running: t.id === 1 })));
+                    setTimeout(() => {
+                        // 中优先级运行 (高优先级阻塞)
+                        setTasks(prev => prev.map(t => ({ ...t, running: t.id === 2 })));
+                        setTimeout(() => {
+                            // 低优先级运行
+                            setTasks(prev => prev.map(t => ({ ...t, running: t.id === 3 })));
+                        }, 1500);
+                    }, 1500);
+                };
+                schedule();
+                const interval = setInterval(schedule, 4500);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-3">
+                    {tasks.map((task) => (
+                        <div
+                            key={task.id}
+                            className={`p-3 rounded-lg transition-all ${
+                                task.running ? 'bg-green-100 border-2 border-green-500 scale-105' : 'bg-gray-100'
+                            }`}
+                        >
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <span className="font-semibold">{task.name}</span>
+                                    <span className="text-xs ml-2 bg-purple-100 px-2 py-1 rounded">
+                                        优先级 {task.priority}
+                                    </span>
+                                </div>
+                                {task.running && (
+                                    <div className="text-green-600 font-bold animate-pulse">
+                                        🏃 运行
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                    <div className="text-xs text-gray-500 text-center">
+                        高优先级任务抢占低优先级
+                    </div>
+                </div>
+            );
+        };
+
+        // 信号量同步可视化
+        const SemaphoreSync = ({ step }) => {
+            const [semaphore, setSemaphore] = useState(0);
+            const [producerState, setProducerState] = useState('working');
+            const [consumerState, setConsumerState] = useState('waiting');
+
+            useEffect(() => {
+                const cycle = async () => {
+                    // 生产者工作
+                    setProducerState('working');
+                    setConsumerState('waiting');
+                    await sleep(1500);
+                    // 生产者释放信号量
+                    setProducerState('give');
+                    setSemaphore(1);
+                    await sleep(500);
+                    // 消费者获取信号量
+                    setConsumerState('take');
+                    setSemaphore(0);
+                    await sleep(1000);
+                    // 消费者处理
+                    setConsumerState('processing');
+                    await sleep(1500);
+                };
+                cycle();
+                const interval = setInterval(cycle, 4500);
+                return () => clearInterval(interval);
+            }, []);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        二值信号量同步
+                    </div>
+                    <div className={`p-3 rounded-lg text-center ${
+                        semaphore ? 'bg-green-100' : 'bg-gray-100'
+                    }`}>
+                        <div className="text-3xl">{semaphore ? '🟢 1' : '⚪ 0'}</div>
+                        <div className="text-sm">信号量状态</div>
+                    </div>
+                    <div className={`p-3 rounded-lg ${
+                        producerState === 'give' ? 'bg-green-100' : 'bg-blue-100'
+                    }`}>
+                        <div className="font-semibold">生产者</div>
+                        <div className="text-sm">
+                            {producerState === 'working' && '工作中...'}
+                            {producerState === 'give' && '📤 释放信号量'}
+                        </div>
+                    </div>
+                    <div className={`p-3 rounded-lg ${
+                        consumerState === 'take' || consumerState === 'processing' ? 'bg-green-100' : 'bg-yellow-100'
+                    }`}>
+                        <div className="font-semibold">消费者</div>
+                        <div className="text-sm">
+                            {consumerState === 'waiting' && '⏳ 等待信号量'}
+                            {consumerState === 'take' && '📥 获取信号量'}
+                            {consumerState === 'processing' && '⚙️ 处理事件'}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 互斥锁可视化
+        const MutexProtection = ({ step }) => {
+            const [mutexHeld, setMutexHeld] = useState(false);
+            const [holder, setHolder] = useState(null);
+            const [queue, setQueue] = useState([]);
+
+            useEffect(() => {
+                const access = async (taskId) => {
+                    if (!mutexHeld) {
+                        setMutexHeld(true);
+                        setHolder(taskId);
+                        await sleep(2000);
+                        setMutexHeld(false);
+                        setHolder(null);
+                    } else {
+                        setQueue(prev => [...prev, taskId]);
+                        await sleep(1000);
+                        setQueue(prev => prev.filter(id => id !== taskId));
+                    }
+                };
+
+                const interval = setInterval(() => {
+                    const task = Math.random() > 0.5 ? 'Task1' : 'Task2';
+                    access(task);
+                }, 2500);
+                return () => clearInterval(interval);
+            }, [mutexHeld]);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            return (
+                <div className="space-y-4">
+                    <div className={`p-4 rounded-lg text-center transition-all ${
+                        mutexHeld ? 'bg-red-100' : 'bg-green-100'
+                    }`}>
+                        <div className="text-2xl">{mutexHeld ? '🔒 已锁定' : '🔓 空闲'}</div>
+                        {holder && <div className="text-sm">{holder} 持有锁</div>}
+                    </div>
+                    <div className="space-y-2">
+                        <div className={`p-2 rounded ${holder === 'Task1' ? 'bg-purple-100' : 'bg-gray-100'}`}>
+                            Task1 {queue.includes('Task1') && '⏳ 等待'}
+                        </div>
+                        <div className={`p-2 rounded ${holder === 'Task2' ? 'bg-purple-100' : 'bg-gray-100'}`}>
+                            Task2 {queue.includes('Task2') && '⏳ 等待'}
+                        </div>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        <div>• 保护共享资源</div>
+                        <div>• 优先级继承防反转</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 队列通信可视化
+        const QueueCommunication = ({ step }) => {
+            const [queue, setQueue] = useState([]);
+            const [sentCount, setSentCount] = useState(0);
+            const [recvCount, setRecvCount] = useState(0);
+
+            useEffect(() => {
+                const sendInterval = setInterval(() => {
+                    if (queue.length < 10) {
+                        const data = Math.floor(Math.random() * 256);
+                        setQueue(prev => [...prev, data]);
+                        setSentCount(prev => prev + 1);
+                    }
+                }, 1000);
+
+                const recvInterval = setInterval(() => {
+                    if (queue.length > 0) {
+                        setQueue(prev => prev.slice(1));
+                        setRecvCount(prev => prev + 1);
+                    }
+                }, 1500);
+
+                return () => {
+                    clearInterval(sendInterval);
+                    clearInterval(recvInterval);
+                };
+            }, [queue]);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        队列 (10 项)
+                    </div>
+                    <div className="flex justify-center space-x-1 h-16 items-end">
+                        {queue.map((data, idx) => (
+                            <div
+                                key={idx}
+                                className="w-8 bg-purple-500 rounded text-white text-xs flex items-end justify-center pb-1"
+                                style={{ height: `${(idx + 1) * 10}%` }}
+                            >
+                                {data}
+                            </div>
+                        ))}
+                        {Array(10 - queue.length).fill(0).map((_, idx) => (
+                            <div key={idx} className="w-8 bg-gray-200 rounded" style={{ height: '4px' }} />
+                        ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-center">
+                        <div className="bg-blue-50 p-2 rounded">
+                            <div className="text-xs">已发送</div>
+                            <div className="font-bold text-blue-600">{sentCount}</div>
+                        </div>
+                        <div className="bg-green-50 p-2 rounded">
+                            <div className="text-xs">已接收</div>
+                            <div className="font-bold text-green-600">{recvCount}</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 软件定时器可视化
+        const SoftwareTimer = ({ step }) => {
+            const [timers, setTimers] = useState([
+                { id: 1, name: 'Timer1', period: 1000, remaining: 1000, autoReload: true },
+                { id: 2, name: 'Timer2', period: 2000, remaining: 2000, autoReload: false }
+            ]);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setTimers(prev => prev.map(timer => {
+                        let newRemaining = timer.remaining - 100;
+                        if (newRemaining <= 0) {
+                            // 回调触发
+                            return {
+                                ...timer,
+                                remaining: timer.autoReload ? timer.period : timer.period
+                            };
+                        }
+                        return { ...timer, remaining: newRemaining };
+                    }));
+                }, 100);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    {timers.map((timer) => (
+                        <div key={timer.id} className="bg-gray-50 rounded-lg p-4">
+                            <div className="flex justify-between items-center mb-2">
+                                <div className="font-semibold">{timer.name}</div>
+                                <div className="text-xs">
+                                    {timer.autoReload ? '🔄 周期' : '⏱️ 一次'}
+                                </div>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-3">
+                                <div
+                                    className="bg-purple-500 h-3 rounded-full transition-all"
+                                    style={{ width: `${(timer.remaining / timer.period) * 100}%` }}
+                                />
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                                {timer.remaining}ms / {timer.period}ms
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        // 任务通知可视化
+        const TaskNotification = ({ step }) => {
+            const [notificationValue, setNotificationValue] = useState(0);
+            const [eventCount, setEventCount] = useState(0);
+
+            useEffect(() => {
+                const notifyInterval = setInterval(() => {
+                    setNotificationValue(prev => prev + 1);
+                    setEventCount(prev => prev + 1);
+                }, 2000);
+                return () => clearInterval(notifyInterval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        直接任务通知
+                    </div>
+                    <div className="bg-purple-50 rounded-lg p-4 text-center">
+                        <div className="text-xs text-gray-500 mb-2">32 位通知寄存器</div>
+                        <div className="text-4xl font-mono font-bold text-purple-600">
+                            0x{notificationValue.toString(16).padStart(8, '0')}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-blue-50 p-3 rounded-lg text-center">
+                            <div className="text-xs">通知次数</div>
+                            <div className="text-2xl font-bold text-blue-600">{eventCount}</div>
+                        </div>
+                        <div className="bg-green-50 p-3 rounded-lg text-center">
+                            <div className="text-xs">等效于</div>
+                            <div className="text-sm font-bold">二值信号量</div>
+                        </div>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        <div>• 比信号量快 45%</div>
+                        <div>• 内存占用更小</div>
+                        <div>• 推荐替代信号量</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 主 App 组件
+        const App = () => {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                const voices = window.speechSynthesis.getVoices();
+                const xiaoXiao = voices.find(v => v.name.includes('XiaoXiao') || v.name.includes('zh-CN'));
+                if (xiaoXiao) utterance.voice = xiaoXiao;
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                window.speechSynthesis.speak(utterance);
+            }, [isMuted]);
+
+            useEffect(() => {
+                if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                speak(STEPS[currentStep].explanation);
+                return () => { if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current); };
+            }, [currentStep, speak]);
+
+            useEffect(() => {
+                const handleKeydown = (e) => {
+                    if (e.code === 'Space') { e.preventDefault(); setIsPlaying(prev => !prev); }
+                    else if (e.code === 'ArrowRight' && currentStep < STEPS.length - 1) setCurrentStep(prev => prev + 1);
+                    else if (e.code === 'ArrowLeft' && currentStep > 0) setCurrentStep(prev => prev - 1);
+                };
+                window.addEventListener('keydown', handleKeydown);
+                return () => window.removeEventListener('keydown', handleKeydown);
+            }, [currentStep]);
+
+            const renderVisualization = () => {
+                switch (STEPS[currentStep].visualization) {
+                    case 'freertos-basic': return <FreertosBasic step={STEPS[currentStep]} />;
+                    case 'task-creation': return <TaskCreation step={STEPS[currentStep]} />;
+                    case 'priority-scheduling': return <PriorityScheduling step={STEPS[currentStep]} />;
+                    case 'semaphore-sync': return <SemaphoreSync step={STEPS[currentStep]} />;
+                    case 'mutex-protection': return <MutexProtection step={STEPS[currentStep]} />;
+                    case 'queue-communication': return <QueueCommunication step={STEPS[currentStep]} />;
+                    case 'software-timer': return <SoftwareTimer step={STEPS[currentStep]} />;
+                    case 'task-notification': return <TaskNotification step={STEPS[currentStep]} />;
+                    default: return <div>可视化组件</div>;
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <h1 className="text-3xl font-bold text-center mb-6 bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+                            STM32 FreeRTOS 任务调度完整指南
+                        </h1>
+                        <div className="flex justify-center mb-6">
+                            <div className="flex space-x-2">
+                                {STEPS.map((_, idx) => (
+                                    <button key={idx} onClick={() => setCurrentStep(idx)}
+                                        className={`w-3 h-3 rounded-full transition-all ${
+                                            idx === currentStep ? 'bg-violet-600 scale-125' :
+                                            idx < currentStep ? 'bg-violet-400' : 'bg-gray-300'
+                                        }`} />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-violet-600 flex items-center">
+                                    <span className="mr-2">💻</span>{STEPS[currentStep].title}
+                                </h2>
+                                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-purple-600 flex items-center">
+                                    <span className="mr-2">🎨</span>可视化演示
+                                </h2>
+                                <div className="h-96 overflow-auto">{renderVisualization()}</div>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-cyan-600 flex items-center">
+                                    <span className="mr-2">📖</span>说明
+                                </h2>
+                                <p className="text-gray-700 leading-relaxed">{STEPS[currentStep].explanation}</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-center mt-6 space-x-4">
+                            <button onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0 ? 'bg-gray-200 text-gray-400' : 'bg-violet-600 text-white hover:bg-violet-700'
+                                }`}>⏮ 上一步</button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isPlaying ? 'bg-yellow-500 text-white' : 'bg-green-500 text-white'
+                                }`}>{isPlaying ? '⏸ 暂停' : '▶ 播放'}</button>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isMuted ? 'bg-red-500 text-white' : 'bg-violet-500 text-white'
+                                }`}>{isMuted ? '🔇 取消静音' : '🔊 静音'}</button>
+                            <button onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1 ? 'bg-gray-200 text-gray-400' : 'bg-violet-600 text-white hover:bg-violet-700'
+                                }`}>下一步 ⏭</button>
+                        </div>
+                        <div className="text-center mt-4 text-sm text-gray-500">快捷键：空格 播放/暂停 | ← → 切换步骤</div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

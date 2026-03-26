@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NVIC 中断控制器完整指南 - 嵌入式 C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes flow { 0% { stroke-dashoffset: 100; } 100% { stroke-dashoffset: 0; } }
+        @keyframes highlight { 0%, 100% { fill: #ef4444; } 50% { fill: #fbbf24; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes interrupt { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+        @keyframes prioritize { 0% { y: 0; } 50% { y: -10; } 100% { y: 0; } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-flow { animation: flow 1.5s linear infinite; }
+        .animate-highlight { animation: highlight 1s infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-interrupt { animation: interrupt 0.3s ease-in-out infinite; }
+        .animate-prioritize { animation: prioritize 1s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#ef4444',
+            secondary: '#f97316',
+            accent: '#fbbf24',
+            success: '#22c55e',
+            danger: '#dc2626',
+            info: '#6366f1'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [activeInterrupt, setActiveInterrupt] = React.useState(-1);
+            const [priorityLevel, setPriorityLevel] = React.useState(2);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const STEPS = [
+                {
+                    title: "NVIC 中断控制器基础",
+                    code: `// NVIC (Nested Vectored Interrupt Controller)
+// 嵌套向量中断控制器 - ARM Cortex-M 核心组件
+
+// NVIC 核心功能
+// 1. 中断请求管理 (IRQ 0-239)
+// 2. 优先级分组 (抢占 + 响应)
+// 3. 中断嵌套 (高优先级打断低优先级)
+// 4. 向量表 (直接跳转到 ISR)
+
+// 中断类型
+// 1. 系统异常 (SysTick、PendSV、SVCall)
+// 2. 外部中断 (GPIO、UART、SPI 等外设)
+
+// 中断处理流程
+// 1. 外设产生中断请求
+// 2. NVIC 仲裁优先级
+// 3. 保存现场 (R0-R3, R12, LR, PC, xPSR)
+// 4. 跳转到中断向量表
+// 5. 执行 ISR(中断服务函数)
+// 6. 恢复现场，返回主程序
+
+// 关键寄存器
+// ISER: 中断使能寄存器
+// ICER: 中断清除寄存器
+// ISPR: 中断挂起寄存器
+// IPR: 中断优先级寄存器`,
+                    explanation: "NVIC 是 ARM Cortex-M 的中断管理核心。支持最多 240 个外部中断，可配置优先级分组实现嵌套。中断发生时自动保存现场，执行 ISR 后恢复。向量表直接存储 ISR 地址，实现快速响应。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <defs>
+                                <linearGradient id="nvicGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stopColor={COLOR_MAP.primary} />
+                                    <stop offset="100%" stopColor={COLOR_MAP.secondary} />
+                                </linearGradient>
+                            </defs>
+                            <text x="200" y="25" fill={COLOR_MAP.accent} fontSize="12" textAnchor="middle">NVIC 中断处理流程</text>
+                            {/* 外设中断源 */}
+                            <rect x="20" y="35" width="100" height="120" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="70" y="55" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle" fontWeight="bold">中断源</text>
+                            {/* 中断请求线 */}
+                            <rect x="35" y="65" width="70" height="18" fill="#374151" stroke={COLOR_MAP.danger} rx="3" />
+                            <text x="70" y="77" fill={COLOR_MAP.danger} fontSize="8" textAnchor="middle">IRQ0</text>
+                            <rect x="35" y="86" width="70" height="18" fill="#374151" stroke={COLOR_MAP.accent} rx="3" />
+                            <text x="70" y="98" fill={COLOR_MAP.accent} fontSize="8" textAnchor="middle">IRQ1</text>
+                            <rect x="35" y="107" width="70" height="18" fill="#374151" stroke={COLOR_MAP.success} rx="3" />
+                            <text x="70" y="119" fill={COLOR_MAP.success} fontSize="8" textAnchor="middle">IRQ2</text>
+                            {/* 中断请求箭头 */}
+                            <line x1="120" y1="95" x2="140" y2="95" stroke={COLOR_MAP.danger} strokeWidth="2" className="animate-flow" strokeDasharray="3,3" />
+                            {/* NVIC 控制器 */}
+                            <rect x="145" y="50" width="110" height="90" fill="#1f2937" stroke="url(#nvicGrad)" strokeWidth="3" rx="8" />
+                            <text x="200" y="70" fill={COLOR_MAP.primary} fontSize="11" textAnchor="middle" fontWeight="bold">NVIC</text>
+                            <text x="200" y="85" fill="#9ca3af" fontSize="8" textAnchor="middle">中断仲裁</text>
+                            {/* 优先级队列 */}
+                            <rect x="160" y="95" width="80" height="35" fill="#374151" stroke={COLOR_MAP.accent} rx="3" />
+                            <text x="200" y="115" fill={COLOR_MAP.accent} fontSize="8" textAnchor="middle">优先级队列</text>
+                            {/* 向量表 */}
+                            <rect x="270" y="35" width="110" height="60" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="325" y="55" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">向量表</text>
+                            <rect x="285" y="65" width="35" height="20" fill="#374151" stroke={COLOR_MAP.info} rx="2" />
+                            <text x="302" y="78" fill={COLOR_MAP.info} fontSize="6" textAnchor="middle">IRQ0</text>
+                            <rect x="325" y="65" width="35" height="20" fill={COLOR_MAP.accent} opacity="0.8" rx="2" />
+                            <text x="342" y="78" fill={COLOR_MAP.accent} fontSize="6" textAnchor="middle">IRQ1</text>
+                            {/* 中断响应箭头 */}
+                            <line x1="255" y1="95" x2="270" y2="95" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            {/* CPU 核心 */}
+                            <rect x="270" y="110" width="110" height="45" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="325" y="135" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">Cortex-M CPU</text>
+                            {/* 现场保存 */}
+                            <text x="325" y="150" fill="#9ca3af" fontSize="7" textAnchor="middle">R0-R3, R12, LR, PC, xPSR</text>
+                            {/* 中断标志 */}
+                            <circle cx="70" cy="76" r="5" fill={activeInterrupt === 0 ? COLOR_MAP.danger : '#374151'} className={activeInterrupt === 0 ? 'animate-blink' : ''} />
+                            <circle cx="70" cy="95" r="5" fill={activeInterrupt === 1 ? COLOR_MAP.accent : '#374151'} className={activeInterrupt === 1 ? 'animate-blink' : ''} />
+                            <circle cx="70" cy="116" r="5" fill={activeInterrupt === 2 ? COLOR_MAP.success : '#374151'} className={activeInterrupt === 2 ? 'animate-blink' : ''} />
+                            {/* 中断选择按钮 */}
+                            <rect x="20" y="165" width="100" height="25" fill={COLOR_MAP.danger} rx="5"
+                                onClick={() => setActiveInterrupt(0)} style={{cursor: 'pointer'}} />
+                            <text x="70" y="182" fill="white" fontSize="9" textAnchor="middle">触发 IRQ0</text>
+                            <rect x="130" y="165" width="100" height="25" fill={COLOR_MAP.accent} rx="5"
+                                onClick={() => setActiveInterrupt(1)} style={{cursor: 'pointer'}} />
+                            <text x="180" y="182" fill="white" fontSize="9" textAnchor="middle">触发 IRQ1</text>
+                            <rect x="240" y="165" width="70" height="25" fill={COLOR_MAP.success} rx="5"
+                                onClick={() => setActiveInterrupt(2)} style={{cursor: 'pointer'}} />
+                            <text x="275" y="182" fill="white" fontSize="9" textAnchor="middle">触发 IRQ2</text>
+                            <rect x="320" y="165" width="60" height="25" fill="#6b7280" rx="5"
+                                onClick={() => setActiveInterrupt(-1)} style={{cursor: 'pointer'}} />
+                            <text x="350" y="182" fill="white" fontSize="9" textAnchor="middle">清除</text>
+                            {/* 当前状态 */}
+                            <rect x="20" y="200" width="360" height="60" fill="#1f2937" stroke={activeInterrupt >= 0 ? COLOR_MAP.success : '#6b7280'} rx="8" />
+                            <text x="180" y="220" fill={activeInterrupt >= 0 ? COLOR_MAP.success : '#9ca3af'} fontSize="10" textAnchor="middle" fontWeight="bold">
+                                {activeInterrupt >= 0 ? '中断处理中...' : '等待中断...'}
+                            </text>
+                            <text x="180" y="240" fill="#9ca3af" fontSize="9" textAnchor="middle">
+                                {activeInterrupt >= 0 ? `正在处理 IRQ${activeInterrupt} → 保存现场 → 执行 ISR → 恢复现场` : '系统正常运行，NVIC 监控中断请求'}
+                            </text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "中断优先级分组",
+                    code: `// 中断优先级分组配置
+// STM32 使用 4 位表示优先级 (0-15)
+
+// SCB->AIRCR 寄存器配置
+// 优先级分组：抢占优先级 + 响应优先级 (亚优先级)
+
+void NVIC_PriorityGroupConfig(uint32_t group) {
+    SCB->AIRCR = (SCB->AIRCR & ~SCB_AIRCR_PRIGROUP_Msk) | group;
+}
+
+// 5 种优先级分组
+// Group 0: 0 位抢占，4 位响应 (0-15)
+// Group 1: 1 位抢占，3 位响应 (0-7)
+// Group 2: 2 位抢占，2 位响应 (0-3) ← 最常用
+// Group 3: 3 位抢占，1 位响应 (0-1)
+// Group 4: 4 位抢占，0 位响应 (0-15)
+
+// 示例：Group 2 配置
+NVIC_PriorityGroupConfig(NVIC_PRIORITYGROUP_2);
+// 抢占优先级：0-3 (4 级)
+// 响应优先级：0-3 (4 级)
+
+// 配置中断优先级
+NVIC_InitTypeDef NVIC_InitStructure;
+NVIC_InitStructure.NVIC_IRQChannel = USART1_IRQn;
+NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+NVIC_InitStructure.NVIC_IRQChannelSubPriority = 2;
+NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+NVIC_Init(&NVIC_InitStructure);`,
+                    explanation: "优先级分组决定抢占优先级和响应优先级的位数分配。抢占优先级决定能否打断正在处理的中断，响应优先级决定同优先级时的处理顺序。Group 2 最常用，提供 4 级抢占和 4 级响应。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.primary} fontSize="12" textAnchor="middle">中断优先级分组配置</text>
+                            {/* 优先级位分配 */}
+                            <rect x="20" y="35" width="170" height="100" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="105" y="55" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle" fontWeight="bold">4 位优先级分配</text>
+                            {/* 位图 */}
+                            <rect x="40" y="65" width="120" height="30" fill="#374151" stroke={COLOR_MAP.accent} rx="3" />
+                            <rect x="40" y="65" width={60 * priorityLevel / 4} height="30" fill={COLOR_MAP.primary} opacity="0.6" rx="3" />
+                            <text x="70" y="85" fill="white" fontSize="9" textAnchor="middle">抢占</text>
+                            <text x="130" y="85" fill={COLOR_MAP.accent} fontSize="9" textAnchor="middle">响应</text>
+                            <text x="50" y="105" fill={COLOR_MAP.primary} fontSize="9">0-{Math.pow(2, priorityLevel)-1}</text>
+                            <text x="110" y="105" fill={COLOR_MAP.accent} fontSize="9">0-{Math.pow(2, 4-priorityLevel)-1}</text>
+                            {/* 分组选择 */}
+                            <rect x="130" y="115" width="50" height="15" fill={priorityLevel === 0 ? COLOR_MAP.success : '#374151'} rx="2"
+                                onClick={() => setPriorityLevel(0)} style={{cursor: 'pointer'}} />
+                            <text x="155" y="126" fill="white" fontSize="7" textAnchor="middle">G0</text>
+                            <rect x="185" y="115" width="50" height="15" fill={priorityLevel === 1 ? COLOR_MAP.success : '#374151'} rx="2"
+                                onClick={() => setPriorityLevel(1)} style={{cursor: 'pointer'}} />
+                            <text x="210" y="126" fill="white" fontSize="7" textAnchor="middle">G1</text>
+                            <rect x="40" y="115" width="50" height="15" fill={priorityLevel === 2 ? COLOR_MAP.success : '#374151'} rx="2"
+                                onClick={() => setPriorityLevel(2)} style={{cursor: 'pointer'}} />
+                            <text x="65" y="126" fill="white" fontSize="7" textAnchor="middle">G2</text>
+                            <rect x="240" y="115" width="50" height="15" fill={priorityLevel === 3 ? COLOR_MAP.success : '#374151'} rx="2"
+                                onClick={() => setPriorityLevel(3)} style={{cursor: 'pointer'}} />
+                            <text x="265" y="126" fill="white" fontSize="7" textAnchor="middle">G3</text>
+                            {/* 优先级队列 */}
+                            <rect x="200" y="35" width="180" height="100" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="290" y="55" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">中断优先级队列</text>
+                            {/* 中断条目 */}
+                            <rect x="215" y="65" width="150" height="18" fill={COLOR_MAP.primary} rx="3" className="animate-prioritize" style={{animationDelay: '0s'}} />
+                            <text x="230" y="77" fill="white" fontSize="8">IRQ0 (抢占=0,响应=1)</text>
+                            <rect x="215" y="86" width="150" height="18" fill={COLOR_MAP.secondary} opacity="0.8" rx="3" className="animate-prioritize" style={{animationDelay: '0.1s'}} />
+                            <text x="230" y="98" fill="white" fontSize="8">IRQ1 (抢占=1,响应=0)</text>
+                            <rect x="215" y="107" width="150" height="18" fill={COLOR_MAP.accent} opacity="0.6" rx="3" className="animate-prioritize" style={{animationDelay: '0.2s'}} />
+                            <text x="230" y="119" fill="white" fontSize="8">IRQ2 (抢占=2,响应=2)</text>
+                            <text x="290" y="130" fill="#9ca3af" fontSize="8" textAnchor="middle">↑ 优先级递减</text>
+                            {/* 嵌套示意 */}
+                            <rect x="20" y="145" width="360" height="115" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="200" y="165" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">中断嵌套示意 (高优先级打断低优先级)</text>
+                            {/* 时间轴 */}
+                            <line x1="35" y1="180" x2="365" y2="180" stroke="#6b7280" strokeWidth="1" />
+                            {/* 低优先级中断 */}
+                            <rect x="50" y="180" width="120" height="35" fill={COLOR_MAP.accent} opacity="0.6" rx="3" />
+                            <text x="110" y="200" fill="white" fontSize="8" textAnchor="middle">低优先级 ISR</text>
+                            {/* 高优先级中断插入 */}
+                            <rect x="140" y="180" width="60" height="35" fill={COLOR_MAP.primary} rx="3" />
+                            <text x="170" y="200" fill="white" fontSize="8" textAnchor="middle">高优先级</text>
+                            {/* 继续执行 */}
+                            <rect x="200" y="180" width="50" height="35" fill={COLOR_MAP.accent} opacity="0.6" rx="3" />
+                            <text x="225" y="200" fill="white" fontSize="8" textAnchor="middle">继续</text>
+                            {/* 时间标记 */}
+                            <text x="50" y="225" fill="#9ca3af" fontSize="7">t0</text>
+                            <text x="140" y="225" fill={COLOR_MAP.primary} fontSize="7">t1(打断)</text>
+                            <text x="200" y="225" fill="#9ca3af" fontSize="7">t2</text>
+                            <text x="250" y="225" fill="#9ca3af" fontSize="7">t3</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "中断使能与配置",
+                    code: `// 中断使能与配置
+
+// 1. 使能特定中断
+NVIC_EnableIRQ(IRQn_Type IRQn);
+// 例：NVIC_EnableIRQ(USART1_IRQn);
+
+// 2. 禁用特定中断
+NVIC_DisableIRQ(IRQn_Type IRQn);
+
+// 3. 软件触发中断
+NVIC_SetPendingIRQ(IRQn_Type IRQn);
+
+// 4. 清除挂起中断
+NVIC_ClearPendingIRQ(IRQn_Type IRQn);
+
+// 5. 获取中断激活状态
+uint32_t NVIC_GetActive(IRQn_Type IRQn);
+
+// 完整配置示例
+void EXTI0_IRQHandler_Config(void) {
+    // 配置优先级分组
+    NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_2);
+
+    // 配置 EXTI0 中断
+    NVIC_InitTypeDef NVIC_InitStruct;
+    NVIC_InitStruct.NVIC_IRQChannel = EXTI0_IRQn;
+    NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_InitStruct.NVIC_IRQChannelPreemptionPriority = 1;
+    NVIC_InitStruct.NVIC_IRQChannelSubPriority = 1;
+    NVIC_Init(&NVIC_InitStruct);
+}
+
+// 中断服务函数 (在 startup 文件中声明)
+void EXTI0_IRQHandler(void) {
+    if (EXTI->PR & EXTI_PR_PR0) {
+        // 处理中断
+        GPIO_Toggle();
+        // 清除中断标志
+        EXTI->PR = EXTI_PR_PR0;
+    }
+}`,
+                    explanation: "NVIC 提供标准 API 配置中断：EnableIRQ 使能、DisableIRQ 禁用、SetPendingIRQ 软件触发、ClearPendingIRQ 清除挂起。完整配置需设置优先级分组、抢占优先级、响应优先级和中断通道。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.secondary} fontSize="12" textAnchor="middle">中断使能与配置 API</text>
+                            {/* API 函数列表 */}
+                            <rect x="20" y="35" width="170" height="110" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="105" y="55" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle" fontWeight="bold">NVIC 配置 API</text>
+                            <rect x="35" y="65" width="140" height="18" fill="#374151" stroke={COLOR_MAP.success} rx="3" />
+                            <text x="105" y="77" fill={COLOR_MAP.success} fontSize="8" textAnchor="middle" fontFamily="monospace">EnableIRQ()</text>
+                            <rect x="35" y="86" width="140" height="18" fill="#374151" stroke={COLOR_MAP.danger} rx="3" />
+                            <text x="105" y="98" fill={COLOR_MAP.danger} fontSize="8" textAnchor="middle" fontFamily="monospace">DisableIRQ()</text>
+                            <rect x="35" y="105" width="140" height="18" fill="#374151" stroke={COLOR_MAP.accent} rx="3" />
+                            <text x="105" y="117" fill={COLOR_MAP.accent} fontSize="8" textAnchor="middle" fontFamily="monospace">SetPendingIRQ()</text>
+                            <rect x="35" y="124" width="140" height="18" fill="#374151" stroke={COLOR_MAP.primary} rx="3" />
+                            <text x="105" y="136" fill={COLOR_MAP.primary} fontSize="8" textAnchor="middle" fontFamily="monospace">ClearPendingIRQ()</text>
+                            {/* 配置流程 */}
+                            <rect x="200" y="35" width="180" height="110" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="290" y="55" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">配置流程</text>
+                            <rect x="215" y="65" width="70" height="25" fill="#374151" stroke={COLOR_MAP.info} rx="3" />
+                            <text x="250" y="80" fill="white" fontSize="7" textAnchor="middle">1. 优先级分组</text>
+                            <line x1="285" y1="77" x2="300" y2="77" stroke="#6b7280" strokeWidth="1" />
+                            <rect x="305" y="65" width="70" height="25" fill="#374151" stroke={COLOR_MAP.accent} rx="3" />
+                            <text x="340" y="80" fill="white" fontSize="7" textAnchor="middle">2. 配置通道</text>
+                            <line x1="340" y1="90" x2="340" y2="100" stroke="#6b7280" strokeWidth="1" />
+                            <rect x="260" y="105" width="70" height="35" fill={COLOR_MAP.success} rx="3" />
+                            <text x="295" y="120" fill="white" fontSize="7" textAnchor="middle">3. 使能中断</text>
+                            <text x="295" y="135" fill="white" fontSize="7" textAnchor="middle" fontFamily="monospace">NVIC_Init()</text>
+                            {/* 中断标志寄存器 */}
+                            <rect x="20" y="155" width="170" height="65" fill="#1f2937" stroke={COLOR_MAP.accent} rx="8" />
+                            <text x="105" y="175" fill={COLOR_MAP.accent} fontSize="10" textAnchor="middle" fontWeight="bold">中断标志状态</text>
+                            <rect x="35" y="185" width="40" height="25" fill={COLOR_MAP.success} rx="3" />
+                            <text x="55" y="200" fill="white" fontSize="7" textAnchor="middle">使能</text>
+                            <rect x="85" y="185" width="40" height="25" fill="#374151" rx="3" />
+                            <text x="105" y="200" fill="#9ca3af" fontSize="7" textAnchor="middle">挂起</text>
+                            <rect x="135" y="185" width="40" height="25" fill={COLOR_MAP.primary} rx="3" />
+                            <text x="155" y="200" fill="white" fontSize="7" textAnchor="middle">激活</text>
+                            {/* ISR 执行流程 */}
+                            <rect x="200" y="155" width="180" height="65" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="290" y="175" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">ISR 执行流程</text>
+                            <text x="215" y="195" fill="#9ca3af" fontSize="8">检查标志 → 清除标志 → 处理 → 返回</text>
+                            <text x="215" y="210" fill={COLOR_MAP.info} fontSize="8" fontFamily="monospace">if (PR) { PR=0; handler(); }</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "EXTI 外部中断",
+                    code: `// EXTI 外部中断配置 (GPIO 中断)
+
+void EXTI0_Config(void) {
+    // 1. 使能时钟
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    // 2. 配置 GPIO 为输入
+    GPIOA->CRL &= ~0x0F;
+    GPIOA->CRL |= 0x08;  // 上拉输入
+
+    // 3. 配置 EXTI 线 0 连接到 PA0
+    AFIO->EXTICR[0] &= ~0x0F;
+    AFIO->EXTICR[0] |= 0x00;  // PA0
+
+    // 4. 配置中断触发边沿
+    EXTI->RTSR |= EXTI_RTSR_TR0;   // 上升沿
+    EXTI->FTSR &= ~EXTI_FTSR_TR0;  // 非下降沿
+
+    // 5. 使能 EXTI 中断
+    EXTI->IMR |= EXTI_IMR_MR0;
+
+    // 6. 配置 NVIC
+    NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_2);
+    NVIC_Init(EXTI0_IRQn, 1, 1, ENABLE);
+}
+
+// 中断服务函数
+void EXTI0_IRQHandler(void) {
+    if (EXTI->PR & EXTI_PR_PR0) {
+        // 处理中断 (LED 翻转)
+        GPIOA->ODR ^= (1 << 0);
+        // 清除中断标志 (写 1 清除)
+        EXTI->PR = EXTI_PR_PR0;
+    }
+}`,
+                    explanation: "EXTI 外部中断用于检测 GPIO 边沿变化。配置步骤：使能时钟→配置 GPIO→映射 EXTI 线→配置触发边沿→使能中断→配置 NVIC。中断服务函数需检查并清除对应标志位。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.info} fontSize="12" textAnchor="middle">EXTI 外部中断配置</text>
+                            {/* GPIO 输入 */}
+                            <rect x="20" y="35" width="80" height="70" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="60" y="55" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">GPIOA</text>
+                            <circle cx="60" cy="75" r="8" fill={activeInterrupt >= 0 ? COLOR_MAP.danger : '#374151'} className={activeInterrupt >= 0 ? 'animate-blink' : ''} />
+                            <text x="60" y="80" fill="white" fontSize="8" textAnchor="middle">PA0</text>
+                            <text x="60" y="95" fill="#9ca3af" fontSize="7" textAnchor="middle">上拉输入</text>
+                            {/* 信号线 */}
+                            <line x1="100" y1="70" x2="120" y2="70" stroke={COLOR_MAP.danger} strokeWidth="2" className="animate-flow" strokeDasharray="3,3" />
+                            {/* EXTI 控制器 */}
+                            <rect x="125" y="35" width="90" height="70" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="170" y="55" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">EXTI</text>
+                            <text x="170" y="70" fill="#9ca3af" fontSize="8" textAnchor="middle">线 0 (PA0)</text>
+                            <rect x="140" y="80" width="60" height="15" fill={activeInterrupt >= 0 ? COLOR_MAP.accent : '#374151'} rx="2" />
+                            <text x="170" y="91" fill="white" fontSize="7" textAnchor="middle">{activeInterrupt >= 0 ? '边沿检测' : '等待'}</text>
+                            {/* 边沿配置 */}
+                            <rect x="230" y="35" width="150" height="35" fill="#1f2937" stroke={COLOR_MAP.accent} rx="6" />
+                            <text x="305" y="55" fill={COLOR_MAP.accent} fontSize="9" textAnchor="middle" fontWeight="bold">触发边沿配置</text>
+                            <rect x="245" y="60" width="40" height="20" fill={COLOR_MAP.success} rx="3" />
+                            <text x="265" y="74" fill="white" fontSize="7" textAnchor="middle">↑ 上升沿</text>
+                            <rect x="295" y="60" width="40" height="20" fill="#374151" rx="3" />
+                            <text x="315" y="74" fill="#9ca3af" fontSize="7" textAnchor="middle">↓ 下降沿</rect>
+                            {/* 中断信号到 NVIC */}
+                            <line x1="215" y1="70" x2="230" y2="70" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                            {/* 输入波形 */}
+                            <rect x="20" y="115" width="360" height="70" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="200" y="135" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle" fontWeight="bold">输入信号波形 (PA0)</text>
+                            <polyline points="35,155 60,155 60,130 85,130 85,155 110,155 110,130 135,130 135,155 160,155"
+                                fill="none" stroke={COLOR_MAP.danger} strokeWidth="2" />
+                            {/* 中断点标记 */}
+                            <circle cx="60" cy="142" r="5" fill={activeInterrupt >= 0 ? COLOR_MAP.danger : '#374151'} className="animate-blink" />
+                            <circle cx="110" cy="142" r="5" fill={activeInterrupt >= 0 ? COLOR_MAP.danger : '#374151'} className="animate-blink" />
+                            <text x="60" y="175" fill={COLOR_MAP.danger} fontSize="8" textAnchor="middle">中断点</text>
+                            <text x="110" y="175" fill={COLOR_MAP.danger} fontSize="8" textAnchor="middle">中断点</text>
+                            {/* LED 输出 */}
+                            <rect x="20" y="195" width="80" height="65" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="60" y="215" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">LED 输出</text>
+                            <circle cx="60" cy="240" r="12" fill={activeInterrupt >= 0 ? COLOR_MAP.success : '#374151'} className={activeInterrupt >= 0 ? 'animate-pulse' : ''} />
+                            <text x="60" y="265" fill="white" fontSize="8" textAnchor="middle">{activeInterrupt >= 0 ? '翻转' : '保持'}</text>
+                            {/* NVIC 配置 */}
+                            <rect x="115" y="195" width="120" height="65" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="175" y="215" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">NVIC 配置</text>
+                            <text x="130" y="235" fill="#9ca3af" fontSize="8">抢占：1</text>
+                            <text x="180" y="235" fill="#9ca3af" fontSize="8">响应：1</text>
+                            <text x="220" y="235" fill={COLOR_MAP.success} fontSize="8">使能</text>
+                            {/* ISR 流程 */}
+                            <rect x="250" y="195" width="130" height="65" fill="#1f2937" stroke={COLOR_MAP.accent} rx="8" />
+                            <text x="315" y="215" fill={COLOR_MAP.accent} fontSize="10" textAnchor="middle" fontWeight="bold">ISR 流程</text>
+                            <text x="265" y="235" fill="#9ca3af" fontSize="7" fontFamily="monospace">if (PR&PR0) {</text>
+                            <text x="275" y="247" fill="#9ca3af" fontSize="7" fontFamily="monospace">toggle(); PR=PR0;</text>
+                            <text x="265" y="259" fill="#9ca3af" fontSize="7" fontFamily="monospace">}</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "SysTick 系统定时器",
+                    code: `// SysTick 系统定时器 (Cortex-M 内核外设)
+// 提供精确的 1ms 延时和操作系统节拍
+
+// SysTick 寄存器
+// CTRL: 控制寄存器
+// LOAD: 重装载值
+// VAL: 当前值
+// CAL: 校准值
+
+void SysTick_Init(uint32_t ms) {
+    // 配置 1ms 中断 (假设系统时钟 72MHz)
+    // 72MHz / 8 = 9MHz (9000 计数/ms)
+    // 或直接 72MHz / 1000 = 72000 计数/ms
+
+    SysTick->LOAD = 72000 - 1;     // 1ms@72MHz
+    SysTick->VAL = 0;               // 清除当前值
+    SysTick->CTRL = 0;              // 先禁用
+
+    // 配置: 处理器时钟，使能中断，使能
+    SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk |
+                    SysTick_CTRL_TICKINT_Msk |
+                    SysTick_CTRL_ENABLE_Msk;
+
+    // 设置优先级 (最低)
+    NVIC_SetPriority(SysTick_IRQn, 0x0F);
+}
+
+// SysTick 中断服务函数
+void SysTick_Handler(void) {
+    // 操作系统节拍计数
+    osTick++;
+    // 或执行周期性任务
+    Check_Watchdog();
+}`,
+                    explanation: "SysTick 是 Cortex-M 内核的 24 位递减定时器。用于产生精确延时和操作系统节拍。配置 LOAD 决定中断周期，CTRL 配置时钟源和使能。优先级通常设为最低，避免影响关键中断。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.primary} fontSize="12" textAnchor="middle">SysTick 系统定时器</text>
+                            {/* SysTick 框图 */}
+                            <rect x="30" y="35" width="140" height="90" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="100" y="55" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">SysTick 定时器</text>
+                            {/* 递减计数器 */}
+                            <rect x="45" y="65" width="70" height="40" fill="#374151" stroke={COLOR_MAP.accent} rx="3" />
+                            <text x="80" y="85" fill={COLOR_MAP.accent} fontSize="9" textAnchor="middle" fontWeight="bold">COUNT</text>
+                            <text x="80" y="100" fill="#fbbf24" fontSize="14" textAnchor="middle" fontWeight="bold">{counterValue % 72000}</text>
+                            {/* LOAD 寄存器 */}
+                            <rect x="125" y="65" width="35" height="20" fill="#374151" stroke={COLOR_MAP.info} rx="2" />
+                            <text x="142" y="78" fill={COLOR_MAP.info} fontSize="7" textAnchor="middle">LOAD</text>
+                            <text x="142" y="88" fill="#fbbf24" fontSize="7" textAnchor="middle">72000</text>
+                            <line x1="115" y1="85" x2="125" y2="85" stroke={COLOR_MAP.info} strokeWidth="1" />
+                            {/* CTRL 寄存器 */}
+                            <rect x="45" y="115" width="70" height="20" fill={COLOR_MAP.success} rx="2" />
+                            <text x="80" y="128" fill="white" fontSize="7" textAnchor="middle">CTRL: ENABLE</text>
+                            {/* 时钟源 */}
+                            <line x1="30" y1="105" x2="45" y2="105" stroke={COLOR_MAP.info} strokeWidth="2" />
+                            <text x="25" y="110" fill={COLOR_MAP.info} fontSize="7">HCLK/8</text>
+                            {/* 中断输出 */}
+                            <line x1="170" y1="105" x2="190" y2="105" stroke={COLOR_MAP.danger} strokeWidth="2" className="animate-flow" strokeDasharray="3,3" />
+                            <text x="180" y="100" fill={COLOR_MAP.danger} fontSize="7">IRQ</text>
+                            {/* 延时函数 */}
+                            <rect x="200" y="35" width="180" height="60" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="290" y="55" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">精确延时应用</text>
+                            <text x="215" y="75" fill="#9ca3af" fontSize="8" fontFamily="monospace">Delay_ms(100) {`{`}</text>
+                            <text x="225" y="88" fill="#9ca3af" fontSize="7" fontFamily="monospace">uint32_t start = ms_tick;</text>
+                            <text x="225" y="100" fill="#9ca3af" fontSize="7" fontFamily="monospace">while ((ms_tick - start) &lt; 100);</text>
+                            {/* 节拍计数器 */}
+                            <rect x="215" y="105" width="60" height="25" fill={COLOR_MAP.accent} rx="3" />
+                            <text x="245" y="121" fill="white" fontSize="8" textAnchor="middle">ms_tick</text>
+                            <text x="270" y="121" fill={COLOR_MAP.accent} fontSize="10">{counterValue / 72}</text>
+                            {/* 波形示意 */}
+                            <rect x="30" y="135" width="340" height="70" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="200" y="155" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle" fontWeight="bold">1ms 中断脉冲波形</text>
+                            {/* 脉冲序列 */}
+                            {[0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240, 260, 280, 300, 320, 340].map((x, i) => (
+                                <g key={i}>
+                                    <line x1={45 + x} y1="165" x2={45 + x} y2="180" stroke={COLOR_MAP.danger} strokeWidth="2" />
+                                    <line x1={45 + x} y1="180" x2={55 + x} y2="180" stroke={COLOR_MAP.danger} strokeWidth="2" />
+                                </g>
+                            ))}
+                            <text x="45" y="195" fill="#9ca3af" fontSize="7">t=0</text>
+                            <text x="355" y="195" fill="#9ca3af" fontSize="7">t=18ms</text>
+                            {/* 配置要点 */}
+                            <rect x="30" y="215" width="160" height="50" fill="#1f2937" stroke={COLOR_MAP.primary} rx="6" />
+                            <text x="110" y="235" fill={COLOR_MAP.primary} fontSize="9" textAnchor="middle" fontWeight="bold">配置要点</text>
+                            <text x="45" y="250" fill="#9ca3af" fontSize="7">• LOAD = 周期 -1</text>
+                            <text x="45" y="262" fill="#9ca3af" fontSize="7">• VAL = 0 清除</text>
+                            {/* 应用场景 */}
+                            <rect x="200" y="215" width="170" height="50" fill="#1f2937" stroke={COLOR_MAP.success} rx="6" />
+                            <text x="285" y="235" fill={COLOR_MAP.success} fontSize="9" textAnchor="middle" fontWeight="bold">应用场景</text>
+                            <text x="215" y="250" fill="#9ca3af" fontSize="7">• 操作系统节拍</text>
+                            <text x="215" y="262" fill="#9ca3af" fontSize="7">• 精确延时</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "中断应用实例",
+                    code: `// 综合应用实例：多中断协同工作
+
+// 系统配置
+void System_Init(void) {
+    // 1. 配置 SysTick (1ms 节拍)
+    SysTick_Init(1);
+
+    // 2. 配置 EXTI (按键中断)
+    EXTI0_Config();
+
+    // 3. 配置 USART1 中断接收
+    USART1_IRQn_Config();
+
+    // 4. 配置 TIM2 中断 (10ms 任务)
+    TIM2_IRQn_Config();
+}
+
+// 各中断服务函数
+void SysTick_Handler(void) {
+    system_ms++;  // 系统时间
+}
+
+void EXTI0_IRQHandler(void) {
+    if (EXTI->PR & EXTI_PR_PR0) {
+        key_pressed = 1;  // 按键标志
+        EXTI->PR = EXTI_PR_PR0;
+    }
+}
+
+void USART1_IRQHandler(void) {
+    if (USART1->SR & USART_SR_RXNE) {
+        rx_data = USART1->DR;  // 读取数据
+        Process_UART(rx_data);
+    }
+}
+
+void TIM2_IRQHandler(void) {
+    if (TIM2->SR & TIM_SR_UIF) {
+        Task_10ms();  // 周期性任务
+        TIM2->SR &= ~TIM_SR_UIF;
+    }
+}`,
+                    explanation: "多中断协同工作：SysTick 提供系统时间基准，EXTI 响应外部事件，UART 处理数据接收，TIM 执行周期任务。合理配置优先级确保关键中断及时响应。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.accent} fontSize="12" textAnchor="middle">多中断协同工作实例</text>
+                            {/* SysTick */}
+                            <rect x="20" y="35" width="80" height="50" fill="#1f2937" stroke={COLOR_MAP.info} rx="6" />
+                            <text x="60" y="55" fill={COLOR_MAP.info} fontSize="9" textAnchor="middle" fontWeight="bold">SysTick</text>
+                            <text x="60" y="70" fill="white" fontSize="8" textAnchor="middle">1ms 节拍</text>
+                            <circle cx="60" cy="80" r="5" fill={COLOR_MAP.success} className="animate-pulse" />
+                            {/* EXTI */}
+                            <rect x="110" y="35" width="80" height="50" fill="#1f2937" stroke={COLOR_MAP.danger} rx="6" />
+                            <text x="150" y="55" fill={COLOR_MAP.danger} fontSize="9" textAnchor="middle" fontWeight="bold">EXTI0</text>
+                            <text x="150" y="70" fill="white" fontSize="8" textAnchor="middle">按键中断</text>
+                            <circle cx="150" cy="80" r="5" fill={activeInterrupt >= 0 ? COLOR_MAP.danger : '#374151'} className={activeInterrupt >= 0 ? 'animate-blink' : ''} />
+                            {/* USART */}
+                            <rect x="200" y="35" width="80" height="50" fill="#1f2937" stroke={COLOR_MAP.accent} rx="6" />
+                            <text x="240" y="55" fill={COLOR_MAP.accent} fontSize="9" textAnchor="middle" fontWeight="bold">USART1</text>
+                            <text x="240" y="70" fill="white" fontSize="8" textAnchor="middle">数据接收</text>
+                            {/* TIM */}
+                            <rect x="290" y="35" width="80" height="50" fill="#1f2937" stroke={COLOR_MAP.primary} rx="6" />
+                            <text x="330" y="55" fill={COLOR_MAP.primary} fontSize="9" textAnchor="middle" fontWeight="bold">TIM2</text>
+                            <text x="330" y="70" fill="white" fontSize="8" textAnchor="middle">10ms 任务</text>
+                            {/* 优先级排列 */}
+                            <rect x="20" y="95" width="360" height="60" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="200" y="115" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">中断优先级排列 (由高到低)</text>
+                            <rect x="35" y="125" width="70" height="20" fill={COLOR_MAP.danger} rx="3" />
+                            <text x="70" y="138" fill="white" fontSize="8" textAnchor="middle">EXTI0(抢占 0)</text>
+                            <rect x="115" y="125" width="70" height="20" fill={COLOR_MAP.accent} opacity="0.8" rx="3" />
+                            <text x="150" y="138" fill="white" fontSize="8" textAnchor="middle">USART1(抢占 1)</text>
+                            <rect x="195" y="125" width="70" height="20" fill={COLOR_MAP.primary} opacity="0.6" rx="3" />
+                            <text x="230" y="138" fill="white" fontSize="8" textAnchor="middle">TIM2(抢占 2)</text>
+                            <rect x="275" y="125" width="70" height="20" fill={COLOR_MAP.info} opacity="0.4" rx="3" />
+                            <text x="310" y="138" fill="white" fontSize="8" textAnchor="middle">SysTick(最低)</text>
+                            {/* 时间轴示意 */}
+                            <rect x="20" y="165" width="360" height="95" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="200" y="185" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">中断执行时序</text>
+                            {/* 时间线 */}
+                            <line x1="35" y1="200" x2="365" y2="200" stroke="#6b7280" strokeWidth="1" />
+                            {/* SysTick 脉冲 */}
+                            {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((x, i) => (
+                                <line key={i} x1={35 + x} y1="200" x2={35 + x} y2="210" stroke={COLOR_MAP.info} strokeWidth="1" />
+                            ))}
+                            {/* EXTI 中断块 */}
+                            <rect x="80" y="200" width="40" height="25" fill={COLOR_MAP.danger} rx="2" />
+                            <text x="100" y="215" fill="white" fontSize="7" textAnchor="middle">EXTI</text>
+                            {/* USART 中断块 */}
+                            <rect x="170" y="200" width="50" height="20" fill={COLOR_MAP.accent} opacity="0.7" rx="2" />
+                            <text x="195" y="213" fill="white" fontSize="6" textAnchor="middle">UART</text>
+                            {/* TIM 中断块 */}
+                            <rect x="260" y="200" width="40" height="18" fill={COLOR_MAP.primary} opacity="0.6" rx="2" />
+                            <text x="280" y="211" fill="white" fontSize="6" textAnchor="middle">TIM</text>
+                            {/* 主程序 */}
+                            <rect x="35" y="230" width="320" height="20" fill={COLOR_MAP.success} opacity="0.3" rx="2" />
+                            <text x="195" y="243" fill={COLOR_MAP.success} fontSize="8" textAnchor="middle">主程序 (被中断打断)</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "中断总结与最佳实践",
+                    code: `// 中断编程最佳实践
+
+// 1. ISR 编写原则
+// - 快进快出 (执行时间尽可能短)
+// - 只处理紧急事务，复杂处理交给主循环
+// - 使用 volatile 修饰共享变量
+// - 避免在 ISR 中使用 printf/延时
+
+// 2. 临界区保护
+// 访问共享资源时关闭中断
+void Critical_Section(void) {
+    __disable_irq();  // 关中断
+    // 访问共享资源
+    shared_data = new_value;
+    __enable_irq();  // 开中断
+}
+
+// 3. 优先级配置原则
+// - 时间关键中断：高优先级
+// - 数据量大的中断：低优先级
+// - SysTick：最低优先级
+
+// 4. 中断标志清除
+// - 先读取数据，再清除标志
+// - 写 1 清除的标志不能写 0
+// - 确保中断不会重复触发
+
+// 5. 调试技巧
+// - 使用 IDE 断点查看 ISR 调用
+// - 检查中断嵌套深度
+// - 测量 ISR 执行时间`,
+                    explanation: "中断编程关键原则：ISR 快进快出，临界区保护共享资源，合理配置优先级，正确清除标志。调试时关注 ISR 执行时间和嵌套深度。volatile 修饰共享变量防止编译器优化。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            <text x="200" y="25" fill={COLOR_MAP.accent} fontSize="12" textAnchor="middle">中断总结与最佳实践</text>
+                            {/* ISR 原则 */}
+                            <rect x="20" y="35" width="170" height="80" fill="#1f2937" stroke={COLOR_MAP.success} rx="8" />
+                            <text x="105" y="55" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle" fontWeight="bold">ISR 编写原则</text>
+                            <text x="35" y="75" fill="#9ca3af" fontSize="8">• 快进快出 ✓</text>
+                            <text x="35" y="90" fill="#9ca3af" fontSize="8">• 只处理紧急事务</text>
+                            <text x="35" y="105" fill="#9ca3af" fontSize="8">• volatile 共享变量</text>
+                            <text x="35" y="120" fill={COLOR_MAP.danger} fontSize="8">✗ 避免 printf/延时</text>
+                            {/* 临界区 */}
+                            <rect x="200" y="35" width="180" height="55" fill="#1f2937" stroke={COLOR_MAP.primary} rx="8" />
+                            <text x="290" y="55" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle" fontWeight="bold">临界区保护</text>
+                            <text x="215" y="75" fill="#9ca3af" fontSize="7" fontFamily="monospace">__disable_irq();</text>
+                            <text x="215" y="87" fill={COLOR_MAP.accent} fontSize="7" fontFamily="monospace">shared_data = val;</text>
+                            <text x="215" y="99" fill="#9ca3af" fontSize="7" fontFamily="monospace">__enable_irq();</text>
+                            {/* 优先级金字塔 */}
+                            <rect x="20" y="125" width="170" height="90" fill="#1f2937" stroke={COLOR_MAP.info} rx="8" />
+                            <text x="105" y="145" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle" fontWeight="bold">优先级金字塔</text>
+                            {/* 金字塔 */}
+                            <polygon points="105,155 40,205 170,205" fill="none" stroke="#6b7280" strokeWidth="1" />
+                            <rect x="75" y="160" width="60" height="12" fill={COLOR_MAP.danger} rx="2" />
+                            <text x="105" y="169" fill="white" fontSize="7" textAnchor="middle">EXTI(紧急)</text>
+                            <rect x="65" y="175" width="80" height="12" fill={COLOR_MAP.accent} opacity="0.7" rx="2" />
+                            <text x="105" y="184" fill="white" fontSize="7" textAnchor="middle">UART(数据)</text>
+                            <rect x="55" y="190" width="100" height="12" fill={COLOR_MAP.primary} opacity="0.4" rx="2" />
+                            <text x="105" y="199" fill="white" fontSize="7" textAnchor="middle">TIM/SysTick(周期)</text>
+                            {/* 调试清单 */}
+                            <rect x="200" y="100" width="180" height="115" fill="#1f2937" stroke={COLOR_MAP.accent} rx="8" />
+                            <text x="290" y="120" fill={COLOR_MAP.accent} fontSize="10" textAnchor="middle" fontWeight="bold">调试检查清单</text>
+                            <text x="215" y="140" fill={COLOR_MAP.success} fontSize="8">✓ ISR 执行时间 &lt; 100μs</text>
+                            <text x="215" y="155" fill={COLOR_MAP.success} fontSize="8">✓ 标志正确清除</text>
+                            <text x="215" y="170" fill={COLOR_MAP.success} fontSize="8">✓ 共享变量 volatile</text>
+                            <text x="215" y="185" fill={COLOR_MAP.success} fontSize="8">✓ 优先级合理配置</text>
+                            <text x="215" y="200" fill={COLOR_MAP.success} fontSize="8">✓ 嵌套深度合理</text>
+                            <text x="215" y="215" fill={COLOR_MAP.success} fontSize="8">✓ 无死锁风险</text>
+                        </svg>
+                    )
+                }
+            ];
+
+            const [counterValue, setCounterValue] = React.useState(0);
+
+            React.useEffect(() => {
+                const speak = (text) => {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v => v.lang.includes('zh-CN') && v.name.includes('Xiaoxiao'))
+                        || voices.find(v => v.lang.includes('zh-CN'))
+                        || voices[0];
+                    if (zhVoice) utterance.voice = zhVoice;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev + 1) % STEPS.length);
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev + 1) % STEPS.length);
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak(STEPS[currentStep].title);
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [currentStep]);
+
+            React.useEffect(() => {
+                const timer = setInterval(() => {
+                    setCounterValue(prev => (prev + 1) % 72000);
+                }, 1);
+                return () => clearInterval(timer);
+            }, []);
+
+            return (
+                <div class="flex flex-col h-screen bg-gray-900 text-white">
+                    <div class="flex-1 flex overflow-hidden">
+                        {/* 左侧：代码区 */}
+                        <div class="w-1/3 border-r border-gray-700 flex flex-col bg-gray-800">
+                            <div class="p-3 border-b border-gray-700 bg-gray-900">
+                                <h2 class="text-lg font-bold text-red-400">💻 代码示例</h2>
+                            </div>
+                            <div class="flex-1 overflow-auto p-4">
+                                <pre class="text-sm text-green-400 font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        </div>
+
+                        {/* 中间：可视化区 */}
+                        <div class="w-1/3 border-r border-gray-700 flex flex-col">
+                            <div class="p-3 border-b border-gray-700 bg-gray-900">
+                                <h2 class="text-lg font-bold text-orange-400">🎬 可视化动画</h2>
+                            </div>
+                            <div class="flex-1 p-4 bg-gray-800">
+                                {STEPS[currentStep].renderVisual()}
+                            </div>
+                        </div>
+
+                        {/* 右侧：解释区 */}
+                        <div class="w-1/3 flex flex-col bg-gray-800">
+                            <div class="p-3 border-b border-gray-700 bg-gray-900">
+                                <h2 class="text-lg font-bold text-yellow-400">📖 原理解析</h2>
+                            </div>
+                            <div class="flex-1 overflow-auto p-4">
+                                <p class="text-base text-gray-300 leading-relaxed">
+                                    {STEPS[currentStep].explanation}
+                                </p>
+                                <div class="mt-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
+                                    <h3 class="text-sm font-bold text-red-400 mb-2">📌 关键要点</h3>
+                                    <ul class="text-sm text-gray-400 space-y-1 list-disc list-inside">
+                                        {currentStep === 0 && <li>NVIC 管理 240 个外部中断</li>}
+                                        {currentStep === 0 && <li>向量表直接存储 ISR 地址</li>}
+                                        {currentStep === 0 && <li>中断自动保存恢复现场</li>}
+                                        {currentStep === 1 && <li>Group 2 最常用 (4 级抢占 +4 级响应)</li>}
+                                        {currentStep === 1 && <li>抢占优先级决定能否打断</li>}
+                                        {currentStep === 1 && <li>响应优先级决定同优先级的顺序</li>}
+                                        {currentStep === 2 && <li>EnableIRQ 使能中断</li>}
+                                        {currentStep === 2 && <li>SetPendingIRQ 软件触发</li>}
+                                        {currentStep === 2 && <li>ClearPendingIRQ 清除挂起</li>}
+                                        {currentStep === 3 && <li>EXTI 检测 GPIO 边沿</li>}
+                                        {currentStep === 3 && <li>配置触发边沿 (上升沿/下降沿)</li>}
+                                        {currentStep === 3 && <li>ISR 需清除中断标志</li>}
+                                        {currentStep === 4 && <li>SysTick 是 24 位递减定时器</li>}
+                                        {currentStep === 4 && <li>LOAD 决定中断周期</li>}
+                                        {currentStep === 4 && <li>用于系统节拍和精确延时</li>}
+                                        {currentStep === 5 && <li>多中断协同工作</li>}
+                                        {currentStep === 5 && <li>SysTick 提供时间基准</li>}
+                                        {currentStep === 5 && <li>EXTI 响应外部事件</li>}
+                                        {currentStep === 6 && <li>ISR 快进快出</li>}
+                                        {currentStep === 6 && <li>volatile 修饰共享变量</li>}
+                                        {currentStep === 6 && <li>临界区保护共享资源</li>}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部控制栏 */}
+                    <div class="border-t border-gray-700 bg-gray-800 p-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-4">
+                                <span class="text-sm text-gray-400">步骤 {currentStep + 1} / {STEPS.length}</span>
+                                <div class="flex space-x-2">
+                                    {STEPS.map((_, i) => (
+                                        <button key={i} onClick={() => setCurrentStep(i)}
+                                            className={`w-3 h-3 rounded-full transition-all ${i === currentStep ? 'bg-red-400 scale-125' : 'bg-gray-600'}`}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                            <div class="flex space-x-3">
+                                <button onClick={() => setCurrentStep((prev - 1 + STEPS.length) % STEPS.length)}
+                                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">
+                                    ⏮ 上一步
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-sm transition-colors">
+                                    {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                                </button>
+                                <button onClick={() => setCurrentStep((prev + 1) % STEPS.length)}
+                                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">
+                                    下一步 ⏭
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

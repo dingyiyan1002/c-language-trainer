@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 USART 串口通信完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(30px); } }
+        @keyframes highlight { 0%, 100% { background-color: #8b5cf6; } 50% { background-color: #a78bfa; } }
+        @keyframes transmit { 0% { transform: translateX(0); opacity: 1; } 100% { transform: translateX(100%); opacity: 0; } }
+        @keyframes receive { 0% { transform: translateX(100%); opacity: 0; } 100% { transform: translateX(0); opacity: 1; } }
+        @keyframes bit { 0%, 100% { height: 20%; } 50% { height: 80%; } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s ease-in-out infinite; }
+        .animate-highlight { animation: highlight 2s ease-in-out infinite; }
+        .animate-transmit { animation: transmit 1s linear infinite; }
+        .animate-receive { animation: receive 1s linear infinite; }
+        .animate-bit { animation: bit 0.5s ease-in-out infinite; }
+
+        .uart-frame { transition: all 0.3s ease; }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#8b5cf6',
+            secondary: '#a78bfa',
+            accent: '#c4b5fd',
+            highlight: '#ddd6fe',
+            text: '#f3e8ff',
+            bg: '#5b21b6'
+        };
+
+        const STEPS = [
+            { title: "USART 基础", subtitle: "异步串行通信原理" },
+            { title: "波特率配置", subtitle: "BRR 寄存器计算" },
+            { title: "数据帧格式", subtitle: "起始位 + 数据 + 校验 + 停止位" },
+            { title: "发送数据", subtitle: "TDR/DR 寄存器与 TC/ TXE 标志" },
+            { title: "接收数据", subtitle: "RDR/DR 寄存器与 RXNE 标志" },
+            { title: "中断接收", subtitle: "RXNE 中断处理" },
+            { title: "DMA 传输", subtitle: "高效大批量数据传输" },
+            { title: "printf 重定向", subtitle: "fputc 实现串口打印" }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [baudRate, setBaudRate] = React.useState(115200);
+            const [txData, setTxData] = React.useState('');
+            const [rxData, setRxData] = React.useState('');
+            const [txBuffer, setTxBuffer] = React.useState([]);
+            const [rxBuffer, setRxBuffer] = React.useState([]);
+            const [isTransmitting, setIsTransmitting] = React.useState(false);
+            const [isReceiving, setIsReceiving] = React.useState(false);
+            const [useDma, setUseDma] = React.useState(false);
+            const [useInterrupt, setUseInterrupt] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const transmitData = (data) => {
+                setIsTransmitting(true);
+                const chars = data.split('');
+                chars.forEach((char, i) => {
+                    setTimeout(() => {
+                        setTxBuffer(prev => [...prev, { char, id: i }]);
+                        setTimeout(() => {
+                            setTxBuffer(prev => prev.filter(item => item.id !== i));
+                            if (i === chars.length - 1) {
+                                setIsTransmitting(false);
+                                // Auto receive simulation
+                                setTimeout(() => receiveData(data), 200);
+                            }
+                        }, 100);
+                    }, i * 150);
+                });
+            };
+
+            const receiveData = (data) => {
+                setIsReceiving(true);
+                const chars = data.split('');
+                chars.forEach((char, i) => {
+                    setTimeout(() => {
+                        setRxBuffer(prev => [...prev, { char, id: i }]);
+                        setRxData(prev => prev + char);
+                        if (i === chars.length - 1) {
+                            setIsReceiving(false);
+                        }
+                    }, i * 150);
+                });
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    setTimeout(() => {
+                        const narration = [
+                            "USART 是通用异步收发传输器。TX 发送线、RX 接收线、GND 地线，三线制。空闲状态为高电平，起始位拉低，然后发送数据位 ( LSB 先行),可选校验位，最后停止位。",
+                            "波特率由 BRR 寄存器设定。BRR = 时钟频率 / 波特率。如 72MHz 时钟下 115200 波特率：BRR = 72000000/115200 = 625 = 0x271。USARTDIV 整数部分存高 12 位，小数部分存低 4 位。",
+                            "数据帧格式：1 个起始位 (低电平)+8 个数据位 + 可选校验位 (奇/偶)+1 个停止位 (高电平)。常用配置：8N1(8 数据位、无校验、1 停止位)。",
+                            "发送数据：写入 TDR(或 DR) 寄存器，硬件自动添加起始位、停止位并串行发送。TXE 标志表示 DR 为空可写下一个数据，TC 标志表示发送完成 (包括移位寄存器)。",
+                            "接收数据：RXNE 标志表示数据已收到 (在 RDR/DR 中)。读取 DR 后 RXNE 自动清除。ORE 标志表示上一个数据未读取时新数据已到，发生溢出错误。",
+                            "中断接收：使能 RXNE 中断，每次收到数据触发 ISR。在 ISR 中读取 DR 清除标志，数据存入环形缓冲区。主循环从缓冲区取数据处理。避免在 ISR 中处理耗时操作。",
+                            "DMA 传输：DMA 直接在外设和内存间传输数据，无需 CPU 干预。DMA1_Channel2 对应 USART2_TX，DMA1_Channel6 对应 USART2_RX。适合大批量数据，显著降低 CPU 负载。",
+                            "printf 重定向：重写 fputc 函数，通过 USART 发送字符。添加# include <stdio.h>,实现 int fputc(int ch, FILE* f)。即可使用 printf 输出到串口，方便调试。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const calculateBRR = (clock, baud) => {
+                return (clock / baud).toFixed(0);
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-purple-900 to-indigo-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 USART 串口通信完整指南</h1>
+                            <p className="text-purple-200 text-lg">波特率配置、中断/DMA 传输与 printf 重定向</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-purple-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-purple-700 text-purple-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-purple-500/30">
+                                <h3 className="text-xl font-bold text-purple-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// USART 引脚定义
+// USART1: TX=PA9, RX=PA10
+// USART2: TX=PA2, RX=PA3
+// USART3: TX=PB10, RX=PB11
+
+// 信号电平 (TTL)
+// 逻辑 1 (Mark): 高电平 (3.3V)
+// 逻辑 0 (Space): 低电平 (0V)
+
+// 数据帧 (8N1)
+// [起始位 0][D0][D1][D2][D3][D4][D5][D6][D7][停止位 1]
+// LSB 先行，共 10 位`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 波特率配置 (72MHz 时钟)
+// BRR = f_CLK / 波特率
+// BRR 高 12 位=整数，低 4 位=小数
+
+void USART_Init(void) {
+    // 115200 波特率
+    // BRR = 72000000 / 115200 = 625 = 0x271
+    USART1->BRR = 0x271;
+
+    // 9600 波特率
+    // BRR = 72000000 / 9600 = 7500 = 0x1D4C
+    // USART1->BRR = 0x1D4C;
+
+    // 配置：8 数据位、无校验、1 停止位
+    USART1->CR1 = USART_CR1_TE | USART_CR1_RE;
+    USART1->CR2 = USART_CR2_STOP_0;  // 1 停止位
+    USART1->CR1 |= USART_CR1_UE;     // 使能 USART
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 数据帧格式配置
+// CR1: 数据位长度
+USART1->CR1 &= ~USART_CR1_M;  // 8 数据位
+// USART1->CR1 |= USART_CR1_M;  // 9 数据位
+
+// CR1: 校验位
+// USART1->CR1 |= USART_CR1_PCE;  // 使能校验
+// USART1->CR1 &= ~USART_CR1_PS;  // 偶校验
+// USART1->CR1 |= USART_CR1_PS;   // 奇校验
+
+// CR2: 停止位
+USART1->CR2 &= ~USART_CR2_STOP;  // 1 停止位
+// CR2 STOP 位：00=1, 01=0.5, 10=2, 11=1.5`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 发送单个字符
+void USART_SendChar(USART_TypeDef* USARTx, char ch) {
+    // 等待 TXE (发送数据寄存器空)
+    while (!(USARTx->ISR & USART_ISR_TXE));
+
+    // 写入数据
+    USARTx->TDR = ch;
+
+    // 等待 TC (发送完成)
+    while (!(USARTx->ISR & USART_ISR_TC));
+}
+
+// 发送字符串
+void USART_SendString(USART_TypeDef* USARTx, char* str) {
+    while (*str) {
+        USART_SendChar(USARTx, *str++);
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 接收单个字符 (轮询)
+char USART_RecvChar(USART_TypeDef* USARTx) {
+    // 等待 RXNE (接收数据寄存器非空)
+    while (!(USARTx->ISR & USART_ISR_RXNE));
+
+    // 读取数据 (自动清除 RXNE)
+    return USARTx->RDR;
+}
+
+// 检查溢出错误
+if (USARTx->ISR & USART_ISR_ORE) {
+    // 清除 ORE: 先读 SR 再读 DR
+    volatile uint32_t sr = USARTx->ISR;
+    volatile uint32_t dr = USARTx->RDR;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 中断接收配置
+void USART_IRQ_Init(void) {
+    USART1->CR1 |= USART_CR1_RXNEIE;  // 使能 RXNE 中断
+    NVIC_EnableIRQ(USART1_IRQn);
+    NVIC_SetPriority(USART1_IRQn, 2);
+}
+
+// 环形缓冲区
+#define RX_BUF_SIZE 64
+char rx_buffer[RX_BUF_SIZE];
+volatile uint16_t rx_head = 0, rx_tail = 0;
+
+void USART1_IRQHandler(void) {
+    if (USART1->ISR & USART_ISR_RXNE) {
+        rx_buffer[rx_head++] = USART1->RDR;
+        rx_head %= RX_BUF_SIZE;
+    }
+}
+
+char USART_GetChar(void) {
+    while (rx_head == rx_tail);  // 等待数据
+    char ch = rx_buffer[rx_tail++];
+    rx_tail %= RX_BUF_SIZE;
+    return ch;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// DMA 发送配置
+void USART_DMA_Init(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
+
+    // DMA2_Channel7: USART1_TX
+    DMA2_Channel7->CPAR = (uint32_t)&USART1->TDR;
+    DMA2_Channel7->CMAR = (uint32_t)tx_buffer;
+    DMA2_Channel7->CNDTR = TX_BUF_SIZE;
+    DMA2_Channel7->CCR = DMA_CCR_DIR | DMA_CCR_MINC |
+                         DMA_CCR_PL_0 | DMA_CCR_EN;
+
+    // USART 使能 DMA
+    USART1->CR3 |= USART_CR3_DMAT;
+}
+
+// DMA 接收配置类似，使用 DMA_CCR_DIR (外设到内存)`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// printf 重定向
+#include <stdio.h>
+
+// 重定向 fputc 到 USART
+int fputc(int ch, FILE* f) {
+    while (!(USART1->ISR & USART_ISR_TXE));
+    USART1->TDR = ch;
+    while (!(USART1->ISR & USART_ISR_TC));
+    return ch;
+}
+
+// 使用
+printf("Hello, STM32!\\n");
+printf("Value: %d\\n", value);
+printf("Hex: 0x%02X\\n", data);
+
+// 注意：添加 microLIB 或使用 --use-micro LIB`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => transmitData(txData || 'Hello')}
+                                            disabled={isTransmitting || isReceiving}
+                                            className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition disabled:opacity-50"
+                                        >
+                                            ▶️ 发送测试
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setTxData('');
+                                                setRxData('');
+                                                setTxBuffer([]);
+                                                setRxBuffer([]);
+                                            }}
+                                            className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            🔄 清空
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-purple-500/30">
+                                <h3 className="text-xl font-bold text-purple-400 mb-4">🔬 串口通信可视化</h3>
+                                <div className="space-y-4">
+                                    {/* 波特率计算器 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-purple-300 mb-3">波特率计算</h4>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="text-xs text-gray-400">时钟频率 (MHz)</label>
+                                                <div className="text-white">72</div>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400">目标波特率</label>
+                                                <select
+                                                    value={baudRate}
+                                                    onChange={(e) => setBaudRate(parseInt(e.target.value))}
+                                                    className="w-full bg-gray-700 text-white px-2 py-1 rounded"
+                                                >
+                                                    <option value="9600">9600</option>
+                                                    <option value="19200">19200</option>
+                                                    <option value="38400">38400</option>
+                                                    <option value="57600">57600</option>
+                                                    <option value="115200">115200</option>
+                                                    <option value="921600">921600</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="mt-3 text-center">
+                                            <span className="text-gray-400">BRR = </span>
+                                            <span className="text-purple-400 font-bold">0x{calculateBRR(72000000, baudRate)}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* 数据帧可视化 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-purple-300 mb-3">数据帧格式 (8N1)</h4>
+                                        <div className="flex">
+                                            <div className="w-8 h-12 bg-red-500 rounded flex items-center justify-center text-xs text-white">起</div>
+                                            {[...Array(8)].map((_, i) => (
+                                                <div key={i} className="w-8 h-12 bg-blue-500 rounded flex items-center justify-center text-xs text-white border-l border-gray-700">
+                                                    D{i}
+                                                </div>
+                                            ))}
+                                            <div className="w-8 h-12 bg-yellow-500 rounded flex items-center justify-center text-xs text-white">校</div>
+                                            <div className="w-8 h-12 bg-green-500 rounded flex items-center justify-center text-xs text-white">停</div>
+                                        </div>
+                                    </div>
+
+                                    {/* 发送缓冲区 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-purple-300 mb-3">
+                                            TX 发送 {isTransmitting && <span className="text-green-400 animate-pulse">▶️ 发送中...</span>}
+                                        </h4>
+                                        <div className="flex gap-1 h-12 items-center">
+                                            {txBuffer.map((item, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="w-10 h-10 bg-green-500 rounded flex items-center justify-center text-white font-bold animate-transmit"
+                                                >
+                                                    {item.char}
+                                                </div>
+                                            ))}
+                                            {!isTransmitting && txBuffer.length === 0 && (
+                                                <span className="text-gray-500 text-sm">等待发送...</span>
+                                            )}
+                                        </div>
+                                        <input
+                                            type="text"
+                                            value={txData}
+                                            onChange={(e) => setTxData(e.target.value)}
+                                            placeholder="输入要发送的数据"
+                                            className="w-full mt-2 bg-gray-700 text-white px-3 py-2 rounded"
+                                        />
+                                    </div>
+
+                                    {/* 接收缓冲区 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-purple-300 mb-3">
+                                            RX 接收 {isReceiving && <span className="text-green-400 animate-pulse">▶️ 接收中...</span>}
+                                        </h4>
+                                        <div className="flex gap-1 h-12 items-center">
+                                            {rxBuffer.map((item, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="w-10 h-10 bg-blue-500 rounded flex items-center justify-center text-white font-bold animate-scaleIn"
+                                                >
+                                                    {item.char}
+                                                </div>
+                                            ))}
+                                            {!isReceiving && rxBuffer.length === 0 && (
+                                                <span className="text-gray-500 text-sm">等待接收...</span>
+                                            )}
+                                        </div>
+                                        <div className="mt-2 p-2 bg-gray-700 rounded min-h-8">
+                                            <span className="text-gray-400">接收数据：</span>
+                                            <span className="text-white">{rxData || '-'}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* 传输模式选择 */}
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setUseDma(!useDma)}
+                                            className={`flex-1 py-2 rounded transition ${
+                                                useDma
+                                                    ? 'bg-purple-600 text-white'
+                                                    : 'bg-gray-700 text-gray-400'
+                                            }`}
+                                        >
+                                            DMA
+                                        </button>
+                                        <button
+                                            onClick={() => setUseInterrupt(!useInterrupt)}
+                                            className={`flex-1 py-2 rounded transition ${
+                                                useInterrupt
+                                                    ? 'bg-purple-600 text-white'
+                                                    : 'bg-gray-700 text-gray-400'
+                                            }`}
+                                        >
+                                            中断
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-purple-500/30">
+                                <h3 className="text-xl font-bold text-purple-400 mb-4">📖 配置指南</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    {currentStep === 0 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 USART 基础</h4>
+                                            <p>异步串行通信，无需时钟线。TX/RX 交叉连接 (TX 接 RX)。空闲高电平，起始位拉低同步，LSB 先行，停止位拉高结束。常用 8N1 格式。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 波特率配置</h4>
+                                            <p>BRR = f_CLK / baud。72MHz 下 115200 波特率 BRR=0x271。高 12 位整数，低 4 位小数。波特率误差应小于 3%。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 数据帧</h4>
+                                            <p>起始位 (1)+ 数据位 (8)+ 校验位 (可选)+ 停止位 (1)。CR1_M 控制数据位长度，CR1_PCE/PS 控制校验，CR2_STOP 控制停止位。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 发送数据</h4>
+                                            <p>写 TDR 启动发送。TXE 空标志可写下一个，TC 完成标志表示移位寄存器也发送完毕。轮询 TC 确保发送完成。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 接收数据</h4>
+                                            <p>RXNE 标志表示数据到达。读 RDR 自动清除 RXNE。ORE 溢出标志需先读 SR 再读 DR 清除。及时处理避免溢出。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 中断接收</h4>
+                                            <p>使能 RXNEIE，每次接收触发 ISR。ISR 中快速读 DR 存环形缓冲。主循环从缓冲取数据。避免 ISR 中耗时操作。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 DMA 传输</h4>
+                                            <p>DMA 直接传输数据无需 CPU 干预。配置外设地址 (TDR/RDR)、内存地址、传输数量。使能 DMA 通道和 USART_DMA 位。适合大数据量。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 printf 重定向</h4>
+                                            <p>重写 fputc 函数，通过 USART 发送。即可使用标准 printf 输出。方便调试，可格式化输出各种数据类型。</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-purple-600 hover:bg-purple-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-purple-500/30">
+                            <h2 className="text-2xl font-bold text-purple-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

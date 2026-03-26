@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1138 - 重入函数和线程安全 | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .highlight { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(59, 130, 246, 0.2); border-left: 3px solid #3b82f6; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#3b82f6', primaryLight: '#60a5fa',
+      secondary: '#2563eb', secondaryLight: '#60a5fa',
+      accent: '#14b8a6', accentLight: '#2dd4bf',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== 重入函数和线程安全 =====
+// 可被中断/并发调用而不产生数据损坏
+
+// 1. 非重入函数 (使用静态变量) ❌
+char* itoa(int n) {
+  static char buf[12];  // ❌ 共享状态!
+  // ... 转换代码
+  return buf;
+}
+
+// 中断中调用会导致数据损坏!
+
+// 2. 重入函数版本 ✅
+char* itoa_r(int n, char* buf) {
+  // buf 由调用者提供，无共享状态
+  // ... 转换代码
+  return buf;
+}
+
+// 3. 线程安全的计数器 ✅
+typedef struct {
+  volatile int count;
+} Counter;
+
+void counter_inc(Counter* c) {
+  c->count++;  // 原子操作或关中断保护
+}
+
+// 4. 使用信号量保护共享资源
+void shared_update(void) {
+  sem_wait(&sem);
+  // 临界区：访问共享数据
+  sem_post(&sem);
+}`;
+
+    const VOICE_TEXT_MAP = {
+      1: "第一千一百三十八题，重入函数和线程安全。",
+      2: "非重入函数使用静态变量等共享状态，被中断重入时会导致数据损坏。",
+      3: "重入函数不使用全局或静态变量，所有数据通过参数传递，可安全重入。",
+      4: "重入版本 itoa_r 由调用者提供缓冲区，消除了共享状态，可安全用于中断。",
+      5: "线程安全的计数器使用 volatile 确保每次读取内存，配合原子操作或关中断。",
+      6: "信号量是保护共享资源的经典机制，确保临界区互斥访问。",
+      7: "应用：中断服务程序、RTOS 任务、多核并发、回调函数。",
+      8: "设计原则：避免共享状态、使用局部变量、保护临界区、文档标注。"
+    };
+
+    const MAX_STEPS = 8;
+
+    function App() {
+      const [step, setStep] = useState(1);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+      const [voiceRate, setVoiceRate] = useState(1);
+      const voiceEndTimerRef = useRef(null);
+
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if (voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if (!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if (voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate]);
+
+      useEffect(() => {
+        if (isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+
+      const handleStepChange = (newStep) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsVoicePlaying(false);
+        setStep(newStep);
+      };
+
+      const togglePlay = () => {
+        if (step >= MAX_STEPS) {
+          handleStepChange(1);
+          setTimeout(() => setIsPlaying(true), 100);
+        } else {
+          setIsPlaying(!isPlaying);
+        }
+      };
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="bg-gradient-to-r from-blue-900/50 via-indigo-900/50 to-blue-900/50 rounded-xl p-6 mb-4 border border-blue-700/50">
+            <h1 className="text-3xl font-bold text-blue-400 mb-2">1138 - 重入函数和线程安全</h1>
+            <p className="text-blue-300 text-sm">可重入性 / 共享状态 / 临界区保护</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-blue-700/30">
+              <h2 className="text-lg font-semibold text-blue-400 mb-3">代码展示</h2>
+              <pre className="text-xs text-gray-300 overflow-x-auto bg-gray-900/50 p-3 rounded-lg font-mono leading-relaxed">
+                {CODE.split('\n').map((line, i) => (
+                  <div key={i} className={`code-line ${
+                    (step === 2 && i >= 4 && i <= 10) ||
+                    (step === 3 && i >= 13 && i <= 13) ||
+                    (step === 4 && i >= 14 && i <= 18) ||
+                    (step === 5 && i >= 21 && i <= 27) ||
+                    (step === 6 && i >= 30 && i <= 35) ||
+                    (step === 7 && i >= 4 && i <= 35)
+                    ? 'active' : ''
+                  }`}>{line || '\u00A0'}</div>
+                ))}
+              </pre>
+            </div>
+
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-blue-700/30">
+              <h2 className="text-lg font-semibold text-blue-400 mb-3">可视化演示</h2>
+              <div className="space-y-4">
+                {step === 1 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 rounded-lg border border-blue-500/30">
+                    <p className="text-blue-300 text-sm font-medium mb-2">💡 重入函数和线程安全</p>
+                    <p className="text-xs text-gray-400">重入函数可被中断或并发调用而不损坏数据，是嵌入式系统和并发编程的基础要求。</p>
+                  </div>
+                )}
+                {step === 2 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 rounded-lg border border-blue-500/30">
+                    <p className="text-blue-300 text-sm font-medium mb-2">❌ 非重入函数的问题</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-red-900/20 rounded border border-red-500/30 font-mono text-xs">
+                        <div>char* itoa(int n) {'{'}</div>
+                        <div className="text-red-400">&nbsp;&nbsp;static char buf[12];</div>
+                        <div>&nbsp;&nbsp;// ... 转换代码</div>
+                        <div>&nbsp;&nbsp;return buf;</div>
+                        <div>{'}'}</div>
+                      </div>
+                      <div className="text-red-400 text-center text-xs">
+                        静态缓冲区是共享状态，中断中调用会覆盖!
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 3 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 rounded-lg border border-blue-500/30">
+                    <p className="text-blue-300 text-sm font-medium mb-2">重入性问题演示</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30">
+                          <div className="text-blue-400 text-xs">主程序</div>
+                          <div className="text-gray-400 text-xs mt-1">调用 itoa(123)</div>
+                          <div className="text-gray-400 text-xs">buf = "123"</div>
+                        </div>
+                        <div className="p-2 bg-red-900/20 rounded border border-red-500/30">
+                          <div className="text-red-400 text-xs">中断</div>
+                          <div className="text-gray-400 text-xs mt-1">调用 itoa(456)</div>
+                          <div className="text-gray-400 text-xs">buf = "456" ❌</div>
+                        </div>
+                      </div>
+                      <div className="text-red-400 text-center text-xs">
+                        返回时 buf 内容已被中断修改!
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 4 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 rounded-lg border border-blue-500/30">
+                    <p className="text-blue-300 text-sm font-medium mb-2">✅ 重入函数版本</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-green-900/20 rounded border border-green-500/30 font-mono text-xs">
+                        <div>char* itoa_r(int n, char* buf) {'{'}</div>
+                        <div className="text-gray-500">&nbsp;&nbsp;// buf 由调用者提供</div>
+                        <div>&nbsp;&nbsp;// ... 转换代码</div>
+                        <div>&nbsp;&nbsp;return buf;</div>
+                        <div>{'}'}</div>
+                      </div>
+                      <div className="text-green-400 text-center text-xs">
+                        无共享状态，每个调用者使用自己的缓冲区
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                          <div className="text-green-400 text-xs">主程序</div>
+                          <div className="text-gray-400 text-xs mt-1">char buf1[12];</div>
+                          <div className="text-gray-400 text-xs">itoa_r(123, buf1)</div>
+                        </div>
+                        <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                          <div className="text-green-400 text-xs">中断</div>
+                          <div className="text-gray-400 text-xs mt-1">char buf2[12];</div>
+                          <div className="text-gray-400 text-xs">itoa_r(456, buf2)</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 5 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 rounded-lg border border-blue-500/30">
+                    <p className="text-blue-300 text-sm font-medium mb-2">线程安全的计数器</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono text-xs">
+                        <div>typedef struct {'{'}</div>
+                        <div>&nbsp;&nbsp;<span className="text-blue-400">volatile</span> int count;</div>
+                        <div>{'}'} Counter;</div>
+                      </div>
+                      <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30 font-mono text-xs">
+                        <div>void counter_inc(Counter* c) {'{'}</div>
+                        <div>&nbsp;&nbsp;// 原子操作或关中断</div>
+                        <div>&nbsp;&nbsp;c->count++;</div>
+                        <div>{'}'}</div>
+                      </div>
+                      <div className="text-blue-400 text-center text-xs">
+                        volatile 确保每次从内存读取，不被优化
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 6 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 rounded-lg border border-blue-500/30">
+                    <p className="text-blue-300 text-sm font-medium mb-2">信号量保护临界区</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded text-xs">
+                        <div>void shared_update(void) {'{'}</div>
+                        <div className="text-green-400">&nbsp;&nbsp;sem_wait(&sem);</div>
+                        <div>&nbsp;&nbsp;<span className="text-gray-500">// 临界区开始</span></div>
+                        <div>&nbsp;&nbsp;// 访问共享数据...</div>
+                        <div className="text-green-400">&nbsp;&nbsp;sem_post(&sem);</div>
+                        <div>&nbsp;&nbsp;<span className="text-gray-500">// 临界区结束</span></div>
+                        <div>{'}'}</div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                          <div className="text-green-400 text-xs">sem_wait</div>
+                          <div className="text-gray-400 text-xs">P 操作，申请资源</div>
+                        </div>
+                        <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30">
+                          <div className="text-blue-400 text-xs">sem_post</div>
+                          <div className="text-gray-400 text-xs">V 操作，释放资源</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 7 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-blue-900/20 rounded-lg border border-blue-500/30">
+                      <p className="text-blue-300 text-xs font-medium mb-2">📋 应用场景</p>
+                      <div className="text-xs text-gray-400 space-y-2">
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-green-400 text-xs font-medium">中断服务程序</div>
+                          <p className="text-gray-400 text-xs mt-1">ISR 中只能调用重入函数</p>
+                        </div>
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-green-400 text-xs font-medium">RTOS 多任务</div>
+                          <p className="text-gray-400 text-xs mt-1">任务间并发执行，共享函数需线程安全</p>
+                        </div>
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-green-400 text-xs font-medium">多核并发</div>
+                          <p className="text-gray-400 text-xs mt-1">多核同时执行，需同步机制保护</p>
+                        </div>
+                        <div className="p-2 bg-gray-900/50 rounded">
+                          <div className="text-green-400 text-xs font-medium">回调函数</div>
+                          <p className="text-gray-400 text-xs mt-1">可能被多次调用，需保持重入性</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 8 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-blue-900/20 rounded-lg border border-blue-500/30">
+                      <p className="text-blue-300 text-xs font-medium mb-2">📋 设计原则</p>
+                      <ul className="text-xs text-gray-400 space-y-2">
+                        <li>• <span className="text-green-400">避免共享状态</span>: 不使用全局/静态变量</li>
+                        <li>• <span className="text-blue-400">使用局部变量</span>: 栈上变量天然线程安全</li>
+                        <li>• <span className="text-orange-400">保护临界区</span>: 信号量、互斥锁、关中断</li>
+                        <li>• <span className="text-purple-400">文档标注</span>: 明确标注函数是否重入</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-blue-700/30">
+                <h2 className="text-lg font-semibold text-blue-400 mb-3">关键点说明</h2>
+                <div className="space-y-2 text-sm">
+                  <div className={`p-2 rounded transition-colors ${step >= 2 ? 'bg-blue-900/30 text-blue-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">①</span> 共享状态导致非重入
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 4 ? 'bg-blue-900/30 text-blue-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">②</span> 参数传递消除共享
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 6 ? 'bg-blue-900/30 text-blue-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">③</span> 临界区需要保护
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-blue-700/30">
+                <h2 className="text-lg font-semibold text-blue-400 mb-3">对比总结</h2>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-red-900/20 rounded border border-red-500/30">
+                    <p className="text-red-300 font-medium">非重入函数</p>
+                    <pre className="text-gray-400 font-mono text-xs">使用静态变量，中断中不安全</pre>
+                  </div>
+                  <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                    <p className="text-green-300 font-medium">重入函数</p>
+                    <pre className="text-gray-400 font-mono text-xs">无共享状态，可安全重入</pre>
+                  </div>
+                  <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30">
+                    <p className="text-blue-300 font-medium">线程安全</p>
+                    <pre className="text-gray-400 font-mono text-xs">额外保护机制，支持并发</pre>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-blue-700/30">
+                <h2 className="text-lg font-semibold text-blue-400 mb-3">保护机制</h2>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30">
+                    <p className="text-blue-300 font-medium">关中断</p>
+                    <p className="text-gray-400">单核 ISR 场景，最快</p>
+                  </div>
+                  <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                    <p className="text-green-300 font-medium">互斥锁</p>
+                    <p className="text-gray-400">RTOS 任务间同步</p>
+                  </div>
+                  <div className="p-2 bg-purple-900/20 rounded border border-purple-500/30">
+                    <p className="text-purple-300 font-medium">信号量</p>
+                    <p className="text-gray-400">资源计数和同步</p>
+                  </div>
+                  <div className="p-2 bg-orange-900/20 rounded border border-orange-500/30">
+                    <p className="text-orange-300 font-medium">原子操作</p>
+                    <p className="text-gray-400">硬件支持的原子读写</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-gray-800/80 rounded-xl p-4 border border-blue-700/30">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <button onClick={togglePlay} className={`px-4 py-2 rounded-lg font-medium transition-colors ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'} text-white`}>
+                  {step >= MAX_STEPS ? '🔄 重新播放' : isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                </button>
+                <button onClick={() => handleStepChange(Math.max(1, step - 1))} disabled={step <= 1} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  ◀ 上一步
+                </button>
+                <span className="text-blue-400 font-medium px-3">步骤 {step} / {MAX_STEPS}</span>
+                <button onClick={() => handleStepChange(Math.min(MAX_STEPS, step + 1))} disabled={step >= MAX_STEPS} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  下一步 ▶
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-blue-300">
+                  语速：
+                  <input type="range" min="0.5" max="1.5" step="0.1" value={voiceRate} onChange={(e) => setVoiceRate(parseFloat(e.target.value))} className="ml-2 w-24" />
+                  <span className="ml-2 text-blue-400">{voiceRate.toFixed(1)}x</span>
+                </label>
+                {isVoicePlaying && <span className="text-blue-400 animate-pulse">🔊 语音播放中...</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

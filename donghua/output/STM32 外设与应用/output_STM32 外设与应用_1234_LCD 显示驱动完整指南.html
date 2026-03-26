@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 LCD 显示驱动完整指南 - 题库动画生成器</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { visibility: visible; } 50% { visibility: hidden; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 100% { transform: translateY(20px); } }
+        @keyframes press { 0% { transform: scale(1); } 50% { transform: scale(0.95); } 100% { transform: scale(1); } }
+        @keyframes release { 0% { transform: scale(0.95); } 100% { transform: scale(1); } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        @keyframes jitter { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+        @keyframes debounce { 0% { transform: scale(1); } 50% { transform: scale(0.8); } 100% { transform: scale(1); } }
+        @keyframes longpress { 0% { transform: scale(1); } 100% { transform: scale(1.1); } }
+        @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(255,255,0,0.3); } 50% { background-color: rgba(255,255,0,0.8); } }
+        @keyframes activate { 0% { box-shadow: 0 0 5px currentColor; } 50% { box-shadow: 0 0 20px currentColor; } 100% { box-shadow: 0 0 5px currentColor; } }
+        @keyframes wave { 0% { transform: rotate(0deg); } 25% { transform: rotate(-10deg); } 75% { transform: rotate(10deg); } 100% { transform: rotate(0deg); } }
+        @keyframes staircase { 0% { transform: translateY(0); } 25% { transform: translateY(-5px); } 50% { transform: translateY(-10px); } 75% { transform: translateY(-15px); } 100% { transform: translateY(0); } }
+        @keyframes smooth { 0% { transform: translateY(0); } 100% { transform: translateY(-20px); } }
+        @keyframes triangle { 0% { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); } 50% { clip-path: polygon(50% 100%, 0% 0%, 100% 0%); } 100% { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); } }
+        @keyframes noise { 0% { transform: translate(0,0); } 25% { transform: translate(-2px,2px); } 50% { transform: translate(2px,-2px); } 75% { transform: translate(-2px,-2px); } 100% { transform: translate(0,0); } }
+        @keyframes tick { 0% { transform: rotate(-30deg); } 100% { transform: rotate(0deg); } }
+        @keyframes second { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes update { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        @keyframes alarm { 0%, 100% { background-color: rgba(255,0,0,0.3); } 50% { background-color: rgba(255,0,0,0.8); } }
+        @keyframes backup { 0% { transform: translateX(0); } 50% { transform: translateX(10px); } 100% { transform: translateX(0); } }
+        @keyframes circular { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes transfer { 0% { transform: translateX(0) scale(1); } 50% { transform: translateX(50px) scale(0.8); } 100% { transform: translateX(0) scale(1); } }
+        @keyframes read { 0% { transform: scaleX(1); } 50% { transform: scaleX(1.2); } 100% { transform: scaleX(1); } }
+        @keyframes write { 0% { transform: scaleY(1); } 50% { transform: scaleY(0.8); } 100% { transform: scaleY(1); } }
+        @keyframes move { 0% { transform: translate(0,0); } 25% { transform: translate(10px,0); } 50% { transform: translate(20px,10px); } 75% { transform: translate(10px,20px); } 100% { transform: translate(0,0); } }
+        @keyframes cursor { 0%, 100% { visibility: visible; } 50% { visibility: hidden; } }
+        @keyframes charWrite { 0% { opacity: 0; transform: scale(0.5); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes dataShift { 0% { transform: translateX(100%); } 100% { transform: translateX(0); } }
+        @keyframes commandPulse { 0%, 100% { border-color: #3b82f6; } 50% { border-color: #10b981; } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s infinite; }
+        .animate-press { animation: press 0.2s ease-out; }
+        .animate-release { animation: release 0.2s ease-out; }
+        .animate-bounce { animation: bounce 1s infinite; }
+        .animate-jitter { animation: jitter 0.3s infinite; }
+        .animate-debounce { animation: debounce 0.3s ease-out; }
+        .animate-longpress { animation: longpress 1.5s infinite; }
+        .animate-scan { animation: scan 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-activate { animation: activate 1s infinite; }
+        .animate-wave { animation: wave 1s infinite; }
+        .animate-staircase { animation: staircase 2s infinite; }
+        .animate-smooth { animation: smooth 1.5s infinite; }
+        .animate-triangle { animation: triangle 2s infinite; }
+        .animate-noise { animation: noise 0.3s infinite; }
+        .animate-tick { animation: tick 0.3s ease-out; }
+        .animate-second { animation: second 1s linear infinite; }
+        .animate-update { animation: update 1s infinite; }
+        .animate-alarm { animation: alarm 0.5s infinite; }
+        .animate-backup { animation: backup 0.5s infinite; }
+        .animate-circular { animation: circular 1s linear infinite; }
+        .animate-transfer { animation: transfer 1s infinite; }
+        .animate-read { animation: read 0.5s ease-out; }
+        .animate-write { animation: write 0.5s ease-out; }
+        .animate-move { animation: move 2s infinite; }
+        .animate-cursor { animation: cursor 1s infinite; }
+        .animate-charWrite { animation: charWrite 0.2s ease-out; }
+        .animate-dataShift { animation: dataShift 0.3s ease-out; }
+        .animate-commandPulse { animation: commandPulse 1s infinite; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#06b6d4',
+            secondary: '#0891b2',
+            accent: '#14b8a6',
+            light: '#cffafe',
+            dark: '#164e63',
+            highlight: '#67e8f9'
+        };
+
+        const STEPS = [
+            {
+                title: "LCD 显示基础",
+                narration: "LCD1602 液晶显示器，16 字符×2 行，HD44780 控制器，支持 4 位和 8 位数据模式，内置字符发生器 CGROM。",
+                code: `// LCD1602 引脚定义
+#define LCD_RS  GPIO_PIN_0  // 寄存器选择
+#define LCD_RW  GPIO_PIN_1  // 读写选择
+#define LCD_EN  GPIO_PIN_2  // 使能信号
+#define LCD_D4  GPIO_PIN_4  // 数据位 4-7(4 位模式)
+#define LCD_D5  GPIO_PIN_5
+#define LCD_D6  GPIO_PIN_6
+#define LCD_D7  GPIO_PIN_7
+
+// HD44780 指令集
+#define LCD_CLEAR       0x01  // 清屏
+#define LCD_HOME        0x02  // 归位
+#define LCD_ENTRY_MODE  0x06  // 输入模式
+#define LCD_DISPLAY_ON  0x0C  // 显示开
+#define LCD_CURSOR_ON   0x0E  // 光标开
+#define LCD_SHIFT_RIGHT 0x1C  // 右移
+#define LCD_SHIFT_LEFT  0x18  // 左移
+#define LCD_FUNCTION_4B 0x28  // 4 位模式，2 行，5x7 点阵
+#define LCD_CGRAM_ADDR  0x40  // CGRAM 地址
+#define LCD_DDRAM_ADDR  0x80  // DDRAM 地址`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">LCD1602 结构</div>
+                        {/* LCD 屏幕 */}
+                        <div className="absolute top-12 left-1/2 transform -translate-x-1/2 w-64 h-20 bg-gradient-to-b from-gray-300 to-gray-400 rounded-lg border-4 border-gray-500 shadow-lg">
+                            <div className="absolute top-2 left-2 right-2 h-8 bg-gradient-to-b from-cyan-100 to-cyan-200 rounded flex items-center justify-center">
+                                <span className="text-cyan-900 font-mono text-sm">Hello STM32!</span>
+                            </div>
+                            <div className="absolute bottom-2 left-2 right-2 h-8 bg-gradient-to-b from-cyan-100 to-cyan-200 rounded flex items-center justify-center">
+                                <span className="text-cyan-900 font-mono text-sm animate-cursor">▊</span>
+                            </div>
+                        </div>
+                        {/* 引脚 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 grid grid-cols-8 gap-2">
+                            {[1,2,3,4,5,6,7,8].map(pin => (
+                                <div key={pin} className="flex flex-col items-center">
+                                    <div className={`w-3 h-6 rounded ${pin <= 3 ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`}></div>
+                                    <span className="text-white text-xs mt-1">{['RS','RW','EN','D4','D5','D6','D7','VDD'][pin-1]}</span>
+                                </div>
+                            ))}
+                        </div>
+                        {/* 数据流 */}
+                        <div className="absolute top-1/2 right-4 w-16 h-1 bg-gradient-to-r from-yellow-400 to-transparent animate-dataShift"></div>
+                    </div>
+                ),
+                explanations: [
+                    "LCD1602: 16 字符×2 行点阵 LCD",
+                    "HD44780: Hitachi 字符型 LCD 控制器",
+                    "4 位模式: 仅需 7 个 GPIO(RS,RW,EN,D4-D7)",
+                    "CGROM: 内置 160 个字符 (数字 + 字母)",
+                    "CGRAM: 可自定义 8 个 5x8 字符",
+                    "DDRAM: 显示数据 RAM(80 字节)",
+                    "使能信号 EN: 下降沿锁存数据",
+                    "时序要求：EN 脉冲宽度>450ns"
+                ]
+            },
+            {
+                title: "工作原理",
+                narration: "LCD 通过 RS 选择寄存器，RW 选择读写，EN 使能信号锁存数据。指令寄存器 IR 控制操作，数据寄存器 DR 存储显示内容。",
+                code: `// HD44780 内部结构
+// RS=0,RW=0: 写指令寄存器 (IR)
+// RS=1,RW=0: 写数据寄存器 (DR)
+// RS=0,RW=1: 读忙标志 (BF) + 地址计数器 (AC)
+// RS=1,RW=1: 读数据寄存器 (DR)
+
+// 时序图:
+// EN: ──┐    ┌────
+//       └────┘
+//       ↑
+//   下降沿锁存
+//
+// 4 位数据传输 (高 4 位先):
+// D7-D4: ──[数据高 4 位]──
+// D3-D0: ──[数据低 4 位]──`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">HD44780 内部结构</div>
+                        {/* 内部寄存器 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 grid grid-cols-2 gap-4">
+                            <div className="bg-blue-800 rounded-lg p-3 border-2 border-blue-500">
+                                <div className="text-white text-xs text-center font-bold">IR 指令寄存器</div>
+                                <div className="text-cyan-300 text-xs text-center mt-1">RS=0</div>
+                            </div>
+                            <div className="bg-green-800 rounded-lg p-3 border-2 border-green-500">
+                                <div className="text-white text-xs text-center font-bold">DR 数据寄存器</div>
+                                <div className="text-cyan-300 text-xs text-center mt-1">RS=1</div>
+                            </div>
+                        </div>
+                        {/* 地址计数器 */}
+                        <div className="absolute top-40 left-1/2 transform -translate-x-1/2 bg-purple-800 rounded-lg p-3 border-2 border-purple-500">
+                            <div className="text-white text-xs text-center font-bold">AC 地址计数器</div>
+                            <div className="text-cyan-300 text-xs text-center mt-1 font-mono">Addr: 0x40</div>
+                        </div>
+                        {/* 控制信号 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 grid grid-cols-3 gap-4">
+                            <div className="bg-yellow-600 rounded-lg p-2 border-2 border-yellow-400 animate-pulse">
+                                <div className="text-white text-xs text-center">RS</div>
+                                <div className="text-yellow-200 text-xs text-center font-mono">1</div>
+                            </div>
+                            <div className="bg-yellow-600 rounded-lg p-2 border-2 border-yellow-400">
+                                <div className="text-white text-xs text-center">RW</div>
+                                <div className="text-yellow-200 text-xs text-center font-mono">0</div>
+                            </div>
+                            <div className="bg-yellow-600 rounded-lg p-2 border-2 border-yellow-400 animate-activate">
+                                <div className="text-white text-xs text-center">EN</div>
+                                <div className="text-yellow-200 text-xs text-center font-mono">↹</div>
+                            </div>
+                        </div>
+                        {/* 数据流箭头 */}
+                        <svg className="absolute inset-0 w-full h-full">
+                            <defs>
+                                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 10 3.5, 0 7" fill="#67e8f9" />
+                                </marker>
+                            </defs>
+                            <line x1="50%" y1="140" x2="50%" y2="180" stroke="#67e8f9" strokeWidth="2" markerEnd="url(#arrowhead)" className="animate-flow" />
+                        </svg>
+                    </div>
+                ),
+                explanations: [
+                    "IR (指令寄存器): RS=0 时写入控制命令",
+                    "DR (数据寄存器): RS=1 时写入显示字符",
+                    "AC (地址计数器): 跟踪 DDRAM 当前地址",
+                    "BF (忙标志): RW=1 时检测 LCD 是否就绪",
+                    "RS 信号：0=指令，1=数据",
+                    "RW 信号：0=写入，1=读取",
+                    "EN 使能：高电平接收，下降沿锁存",
+                    "4 位模式：分两次传输 8 位数据"
+                ]
+            },
+            {
+                title: "硬件连接",
+                narration: "STM32 与 LCD1602 的硬件连接。RS 接 PA0，RW 接 PA1，EN 接 PA2，数据位 D4-D7 接 PA4-PA7。电位器调节对比度。",
+                code: `// STM32F103 与 LCD1602 连接
+// LCD 引脚    STM32 引脚    功能
+// 1  VSS      GND         电源地
+// 2  VDD      3.3V        电源正
+// 3  VO       电位器      对比度调节 (0-3.3V)
+// 4  RS       PA0         寄存器选择
+// 5  RW       PA1         读写选择 (可接地常写)
+// 6  EN       PA2         使能信号
+// 7  D0       NC          未用 (4 位模式)
+// 8  D1       NC          未用 (4 位模式)
+// 9  D2       NC          未用 (4 位模式)
+// 10 D3       NC          未用 (4 位模式)
+// 11 D4       PA4         数据位 4
+// 12 D5       PA5         数据位 5
+// 13 D6       PA6         数据位 6
+// 14 D7       PA7         数据位 7
+// 15 A        3.3V        背光正 (串联 220Ω电阻)
+// 16 K       GND         背光负`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">硬件连接图</div>
+                        {/* STM32 */}
+                        <div className="absolute left-4 top-1/2 transform -translate-y-1/2 w-20 h-40 bg-gradient-to-b from-blue-800 to-blue-900 rounded-lg border-2 border-blue-500">
+                            <div className="text-white text-xs text-center py-2 font-bold">STM32</div>
+                            <div className="grid grid-cols-2 gap-1 px-2">
+                                {['PA0','PA1','PA2','PA4','PA5','PA6','PA7'].map(pin => (
+                                    <div key={pin} className="text-cyan-300 text-xs font-mono">{pin}</div>
+                                ))}
+                            </div>
+                        </div>
+                        {/* LCD */}
+                        <div className="absolute right-4 top-1/2 transform -translate-y-1/2 w-48 h-24 bg-gradient-to-b from-gray-300 to-gray-400 rounded-lg border-4 border-gray-500">
+                            <div className="text-cyan-900 text-xs text-center py-1 font-bold">LCD1602</div>
+                            <div className="text-cyan-900 text-sm text-center">Hello World!</div>
+                        </div>
+                        {/* 连线 */}
+                        <svg className="absolute inset-0 w-full h-full">
+                            <line x1="130" y1="140" x2="200" y2="100" stroke="#fbbf24" strokeWidth="2" className="animate-pulse" />
+                            <line x1="130" y1="160" x2="200" y2="110" stroke="#10b981" strokeWidth="2" />
+                            <line x1="130" y1="180" x2="200" y2="120" stroke="#3b82f6" strokeWidth="2" className="animate-pulse" />
+                            <line x1="130" y1="200" x2="200" y2="140" stroke="#8b5cf6" strokeWidth="2" />
+                            <line x1="130" y1="220" x2="200" y2="150" stroke="#ec4899" strokeWidth="2" />
+                            <line x1="130" y1="240" x2="200" y2="160" stroke="#f97316" strokeWidth="2" />
+                            <line x1="130" y1="260" x2="200" y2="170" stroke="#14b8a6" strokeWidth="2" />
+                        </svg>
+                        {/* 标签 */}
+                        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black bg-opacity-50 rounded-lg p-2">
+                            <div className="text-white text-xs">
+                                <div><span className="text-yellow-400">PA0→RS</span></div>
+                                <div><span className="text-green-400">PA1→RW</span></div>
+                                <div><span className="text-blue-400">PA2→EN</span></div>
+                                <div><span className="text-purple-400">PA4-7→D4-7</span></div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "VSS/VDD: 电源地/3.3V 电源",
+                    "VO: 电位器调节 LCD 对比度",
+                    "RS (PA0): 寄存器选择信号",
+                    "RW (PA1): 读写选择 (可接地常写)",
+                    "EN (PA2): 使能信号",
+                    "D4-D7:4 位数据总线",
+                    "A/K: 背光电源 (串联限流电阻)",
+                    "D0-D3:4 位模式下悬空"
+                ]
+            },
+            {
+                title: "GPIO 配置",
+                narration: "配置 GPIO 为推挽输出模式。RS、EN 为推挽输出，数据引脚 D4-D7 同样配置为推挽输出。RW 可接地或配置为输出。",
+                code: `void LCD_GPIO_Init(void) {
+    // 使能 GPIOA 时钟
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    // PA0(RS), PA1(RW), PA2(EN): 推挽输出，50MHz
+    GPIOA->CRL &= ~0x00000FFF;  // 清除 0-2 位
+    GPIOA->CRL |= 0x00000333;   // 输出，50MHz
+
+    // PA4-PA7(D4-D7): 推挽输出，50MHz
+    GPIOA->CRL &= ~0x0FFF0000;  // 清除 4-7 位
+    GPIOA->CRL |= 0x03330000;   // 输出，50MHz
+}
+
+// RW 接地简化方案 (只写不读)
+// 此时无需检测忙标志，固定延时即可
+#define LCD_DELAY_US()  Delay_us(40)  // >37us`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">GPIO 配置 (推挽输出)</div>
+                        {/* GPIO 结构 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="bg-blue-900 rounded-lg p-4 border-2 border-blue-500">
+                                <div className="text-white text-sm font-bold mb-2">GPIOx MODER/PUPDR</div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">MODER[1:0]</div>
+                                        <div className="text-yellow-400 text-sm font-mono">01=输出</div>
+                                    </div>
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">OSPEEDR[1:0]</div>
+                                        <div className="text-green-400 text-sm font-mono">11=50MHz</div>
+                                    </div>
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">OTYPER</div>
+                                        <div className="text-blue-400 text-sm font-mono">0=推挽</div>
+                                    </div>
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">PUPDR[1:0]</div>
+                                        <div className="text-purple-400 text-sm font-mono">00=无上拉</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* 引脚状态 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 grid grid-cols-8 gap-2">
+                            {[
+                                {pin:'PA0',sig:'RS',active:true},
+                                {pin:'PA1',sig:'RW',active:false},
+                                {pin:'PA2',sig:'EN',active:true},
+                                {pin:'PA3',sig:'-',active:false},
+                                {pin:'PA4',sig:'D4',active:true},
+                                {pin:'PA5',sig:'D5',active:true},
+                                {pin:'PA6',sig:'D6',active:true},
+                                {pin:'PA7',sig:'D7',active:true}
+                            ].map(item => (
+                                <div key={item.pin} className={`flex flex-col items-center ${item.active ? 'opacity-100' : 'opacity-50'}`}>
+                                    <div className={`w-8 h-8 rounded flex items-center justify-center ${item.active ? 'bg-green-500 animate-pulse' : 'bg-gray-600'}`}>
+                                        <span className="text-white text-xs">{item.pin}</span>
+                                    </div>
+                                    <span className="text-white text-xs mt-1">{item.sig}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "RCC->APB2ENR: 使能 GPIOA 时钟",
+                    "MODER[1:0]=01: 通用输出模式",
+                    "OSPEEDR[1:0]=11: 50MHz 高速",
+                    "OTYPER=0: 推挽输出 (非开漏)",
+                    "PUPDR=00: 无上拉/下拉",
+                    "CRL 寄存器：控制引脚 0-7 模式",
+                    "0x333: 输出 50MHz 配置值",
+                    "RW 接地：简化为只写模式"
+                ]
+            },
+            {
+                title: "驱动实现",
+                narration: "LCD 驱动程序核心：写指令、写数据、忙检测、初始化序列。4 位模式下数据分高 4 位和低 4 位传输。",
+                code: `// 写 4 位数据
+void LCD_Write4Bits(uint8_t data) {
+    GPIOA->BSRR = (data & 0x0F) << 4;      // 设置 D4-D7
+    GPIOA->BSRR = (~data & 0x0F) << 20;    // 清零
+    GPIOA->BSRR = (1 << 2);                 // EN=1
+    LCD_DELAY_US();
+    GPIOA->BSRR = (1 << 2) << 16;          // EN=0
+    LCD_DELAY_US();
+}
+
+// 写指令
+void LCD_WriteCmd(uint8_t cmd) {
+    GPIOA->BRR = (1 << 0);  // RS=0
+    LCD_Write4Bits(cmd >> 4);    // 高 4 位
+    LCD_Write4Bits(cmd & 0x0F);  // 低 4 位
+}
+
+// 写数据
+void LCD_WriteData(uint8_t data) {
+    GPIOA->BSRR = (1 << 0);  // RS=1
+    LCD_Write4Bits(data >> 4);
+    LCD_Write4Bits(data & 0x0F);
+}
+
+// 初始化序列
+void LCD_Init(void) {
+    Delay_ms(50);  // 上电等待
+    LCD_Write4Bits(0x03); Delay_ms(5);
+    LCD_Write4Bits(0x03); Delay_ms(5);
+    LCD_Write4Bits(0x03); Delay_ms(1);
+    LCD_WriteCmd(0x28);  // 4 位模式，2 行
+    LCD_WriteCmd(0x08);  // 显示关
+    LCD_WriteCmd(0x01);  // 清屏
+    LCD_WriteCmd(0x06);  // 输入模式
+    LCD_WriteCmd(0x0C);  // 显示开
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">4 位数据传输流程</div>
+                        {/* 数据传输动画 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="flex items-center space-x-4">
+                                <div className="bg-yellow-600 rounded-lg p-3 border-2 border-yellow-400">
+                                    <div className="text-white text-xs text-center">数据字节</div>
+                                    <div className="text-yellow-200 text-lg font-mono text-center">0x48</div>
+                                </div>
+                                <div className="text-white text-2xl">→</div>
+                                <div className="bg-green-600 rounded-lg p-3 border-2 border-green-400 animate-pulse">
+                                    <div className="text-white text-xs text-center">高 4 位</div>
+                                    <div className="text-green-200 text-lg font-mono text-center">0x4</div>
+                                </div>
+                                <div className="text-white text-2xl">→</div>
+                                <div className="bg-blue-600 rounded-lg p-3 border-2 border-blue-400 animate-pulse" style={{animationDelay:'0.3s'}}>
+                                    <div className="text-white text-xs text-center">低 4 位</div>
+                                    <div className="text-blue-200 text-lg font-mono text-center">0x8</div>
+                                </div>
+                                <div className="text-white text-2xl">→</div>
+                                <div className="bg-gray-300 rounded-lg p-3 border-4 border-gray-500">
+                                    <div className="text-cyan-900 text-xs text-center">LCD</div>
+                                    <div className="text-cyan-900 text-sm font-mono text-center">H</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* EN 脉冲 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <div className="text-white text-xs text-center mb-2">EN 信号时序</div>
+                            <svg width="200" height="40">
+                                <polyline points="0,20 40,20 40,10 60,10 60,20 100,20 100,10 120,10 120,20 200,20"
+                                    fill="none" stroke="#fbbf24" strokeWidth="2" className="animate-flow" />
+                            </svg>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "LCD_Write4Bits: 传输 4 位数据 +EN 脉冲",
+                    "BSRR 原子操作：避免读 - 改 - 写",
+                    "写指令：RS=0，分两次传输",
+                    "写数据：RS=1，分两次传输",
+                    "初始化：3 次 0x03 同步 8/4 位模式",
+                    "0x28:4 位模式，2 行，5x8 点阵",
+                    "0x01: 清屏 (耗时 1.52ms)",
+                    "0x0C: 显示开，光标关"
+                ]
+            },
+            {
+                title: "字符显示",
+                narration: "在指定位置显示字符。设置 DDRAM 地址后写入字符数据。支持字符串显示和自定义字符 CGRAM 编程。",
+                code: `// 设置显示位置 (行 0-1, 列 0-15)
+void LCD_ShowChar(uint8_t row, uint8_t col, char ch) {
+    uint8_t addr = row * 0x40 + col;  // DDRAM 地址
+    LCD_WriteCmd(LCD_DDRAM_ADDR | addr);
+    LCD_WriteData(ch);
+}
+
+// 显示字符串
+void LCD_ShowString(uint8_t row, uint8_t col, char *str) {
+    LCD_ShowChar(row, col, str[0]);
+    for (int i = 1; str[i] != '\\0'; i++) {
+        if (col + i >= 16) break;  // 防止超界
+        LCD_WriteData(str[i]);
+    }
+}
+
+// 自定义字符 (CGRAM)
+void LCD_CreateCustomChar(uint8_t index, uint8_t *pattern) {
+    LCD_WriteCmd(LCD_CGRAM_ADDR | (index * 8));
+    for (int i = 0; i < 8; i++) {
+        LCD_WriteData(pattern[i] & 0x1F);  // 5 位数据
+    }
+}
+
+// 使用示例：心形图案
+uint8_t heart[8] = {0x00,0x0A,0x1F,0x1F,0x0E,0x04,0x00,0x00};
+LCD_CreateCustomChar(0, heart);
+LCD_ShowChar(0, 0, 0);  // 显示自定义字符 0`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">字符显示过程</div>
+                        {/* DDRAM 映射 */}
+                        <div className="absolute top-16 left-4">
+                            <div className="text-cyan-300 text-xs mb-2">DDRAM 地址映射</div>
+                            <div className="grid grid-cols-16 gap-1">
+                                {Array.from({length: 16}).map((_, i) => (
+                                    <div key={i} className={`w-6 h-6 rounded flex items-center justify-center text-xs ${i===0 ? 'bg-yellow-500 animate-pulse' : 'bg-gray-700'}`}>
+                                        <span className="text-white">{i}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="text-cyan-300 text-xs mt-1">Row0: 0x00-0x0F</div>
+                            <div className="grid grid-cols-16 gap-1 mt-2">
+                                {Array.from({length: 16}).map((_, i) => (
+                                    <div key={i} className={`w-6 h-6 rounded flex items-center justify-center text-xs ${i===0 ? 'bg-blue-500' : 'bg-gray-700'}`}>
+                                        <span className="text-white">{0x40+i}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="text-cyan-300 text-xs mt-1">Row1: 0x40-0x4F</div>
+                        </div>
+                        {/* LCD 显示 */}
+                        <div className="absolute top-16 right-4 w-48 h-20 bg-gradient-to-b from-gray-300 to-gray-400 rounded-lg border-4 border-gray-500">
+                            <div className="absolute top-2 left-2 right-2 h-8 bg-gradient-to-b from-cyan-100 to-cyan-200 rounded flex items-center justify-center">
+                                <span className="text-cyan-900 font-mono text-sm animate-charWrite">H</span>
+                                <span className="text-cyan-900 font-mono text-sm animate-charWrite" style={{animationDelay:'0.1s'}}>e</span>
+                                <span className="text-cyan-900 font-mono text-sm animate-charWrite" style={{animationDelay:'0.2s'}}>l</span>
+                                <span className="text-cyan-900 font-mono text-sm animate-charWrite" style={{animationDelay:'0.3s'}}>l</span>
+                                <span className="text-cyan-900 font-mono text-sm animate-charWrite" style={{animationDelay:'0.4s'}}>o</span>
+                            </div>
+                            <div className="absolute bottom-2 left-2 right-2 h-8 bg-gradient-to-b from-cyan-100 to-cyan-200 rounded flex items-center justify-center">
+                                <span className="text-cyan-900 font-mono text-sm">STM32!</span>
+                            </div>
+                        </div>
+                        {/* 自定义字符 */}
+                        <div className="absolute bottom-4 right-4">
+                            <div className="text-cyan-300 text-xs mb-2">CGRAM 自定义字符</div>
+                            <div className="grid grid-cols-8 gap-1">
+                                {Array.from({length: 8}).map((_, i) => (
+                                    <div key={i} className="w-6 h-6 rounded flex items-center justify-center bg-pink-600">
+                                        <div className="grid grid-cols-5 gap-0">
+                                            {Array.from({length: 5}).map((_, j) => (
+                                                <div key={j} className={`w-1 h-1 ${i===2||i===3 ? 'bg-red-400' : 'bg-pink-800'}`}></div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "DDRAM 地址：行 0=0x00-0x0F，行 1=0x40-0x4F",
+                    "LCD_ShowChar: 设置地址后写数据",
+                    "字符串显示：循环写入字符",
+                    "CGRAM: 8 个自定义字符，每个 8 字节",
+                    "5x8 点阵：每字节 5 位 (bit0-4)",
+                    "自定义字符索引 0-7",
+                    "显示自定义字符：写入索引值",
+                    "心形/笑脸等图标应用"
+                ]
+            },
+            {
+                title: "滚动显示",
+                narration: "实现屏幕滚动效果。使用移位指令 0x18(左移) 和 0x1C(右移)，实现整屏文字滚动动画。",
+                code: `// 屏幕左移 (文字向左滚动)
+void LCD_ShiftLeft(void) {
+    LCD_WriteCmd(LCD_SHIFT_LEFT);  // 0x18
+    Delay_ms(300);  // 滚动速度
+}
+
+// 屏幕右移 (文字向右滚动)
+void LCD_ShiftRight(void) {
+    LCD_WriteCmd(LCD_SHIFT_RIGHT);  // 0x1C
+    Delay_ms(300);
+}
+
+// 滚动显示长字符串
+void LCD_ScrollText(char *text, uint8_t row) {
+    int len = strlen(text);
+    if (len <= 16) {
+        LCD_ShowString(row, 0, text);
+        return;
+    }
+
+    // 从右侧滚入
+    for (int i = 0; i < len - 15; i++) {
+        LCD_ShowString(row, 0, text + i);
+        LCD_ShiftLeft();
+    }
+}
+
+// 跑马灯效果
+void LCD_Marquee(char *text) {
+    LCD_ShowString(0, 0, ">>> ");
+    LCD_ShowString(0, 4, text);
+    while(1) {
+        LCD_ShiftLeft();
+        Delay_ms(500);
+    }
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">滚动显示效果</div>
+                        {/* 滚动动画 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 w-48 h-20 bg-gradient-to-b from-gray-300 to-gray-400 rounded-lg border-4 border-gray-500 overflow-hidden">
+                            <div className="absolute top-2 left-2 right-2 h-8 bg-gradient-to-b from-cyan-100 to-cyan-200 rounded flex items-center">
+                                <div className="animate-dataShift whitespace-nowrap">
+                                    <span className="text-cyan-900 font-mono text-sm inline-block">Welcome to STM32! &nbsp; </span>
+                                </div>
+                            </div>
+                            <div className="absolute bottom-2 left-2 right-2 h-8 bg-gradient-to-b from-cyan-100 to-cyan-200 rounded flex items-center justify-center">
+                                <span className="text-cyan-900 font-mono text-sm">Scroll Demo</span>
+                            </div>
+                        </div>
+                        {/* 移位箭头 */}
+                        <div className="absolute top-48 left-1/2 transform -translate-x-1/2 flex items-center space-x-8">
+                            <div className="flex items-center space-x-2">
+                                <div className="text-white text-xs">0x18</div>
+                                <div className="text-cyan-400 text-2xl">←</div>
+                                <div className="text-white text-xs">左移</div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <div className="text-white text-xs">右移</div>
+                                <div className="text-cyan-400 text-2xl">→</div>
+                                <div className="text-white text-xs">0x1C</div>
+                            </div>
+                        </div>
+                        {/* 时序图 */}
+                        <div className="absolute bottom-4 left-4">
+                            <div className="text-white text-xs mb-2">滚动时序</div>
+                            <svg width="150" height="40">
+                                <rect x="0" y="10" width="30" height="20" fill="#3b82f6" className="animate-pulse" />
+                                <rect x="40" y="10" width="30" height="20" fill="#10b981" className="animate-pulse" style={{animationDelay:'0.3s'}} />
+                                <rect x="80" y="10" width="30" height="20" fill="#f59e0b" className="animate-pulse" style={{animationDelay:'0.6s'}} />
+                                <rect x="120" y="10" width="30" height="20" fill="#ec4899" className="animate-pulse" style={{animationDelay:'0.9s'}} />
+                            </svg>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "0x18: 屏幕左移指令",
+                    "0x1C: 屏幕右移指令",
+                    "滚动速度：300ms/步",
+                    "长字符串：从右侧滚入",
+                    "跑马灯：循环移位显示",
+                    "移位不改变 DDRAM 内容",
+                    "仅改变显示窗口位置",
+                    "适用于超过 16 字符文本"
+                ]
+            },
+            {
+                title: "应用实例",
+                narration: "LCD 显示综合应用：电压表显示、温度监控、系统状态。结合 ADC 采集和数据处理，实现实时信息展示。",
+                code: `// 电压表显示 (0-3.3V, 2 位小数)
+void LCD_ShowVoltage(float voltage) {
+    char buf[16];
+    sprintf(buf, "V: %.2fV", voltage);
+    LCD_ShowString(0, 0, buf);
+}
+
+// 温度显示 (DS18B20)
+void LCD_ShowTemperature(int temp) {
+    LCD_ShowString(1, 0, "Temp: ");
+    LCD_ShowChar(1, 6, temp / 10 + '0');
+    LCD_ShowChar(1, 7, temp % 10 + '0');
+    LCD_ShowString(1, 8, "'C");
+}
+
+// 系统状态显示
+void LCD_ShowStatus(void) {
+    LCD_ShowString(0, 0, "Sys:OK  ");
+    LCD_ShowString(0, 8, "Bat:95% ");
+    LCD_ShowString(1, 0, "CPU:72MHz");
+    LCD_ShowString(1, 10, "T:25'C  ");
+}
+
+// 密码输入显示 (带掩码)
+void LCD_ShowPassword(char *pwd) {
+    LCD_ShowString(0, 0, "Password:");
+    for (int i = 0; pwd[i]; i++) {
+        LCD_ShowChar(1, i, '*');
+    }
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">应用实例</div>
+                        {/* 电压表 */}
+                        <div className="absolute top-16 left-4 w-40 h-16 bg-gradient-to-b from-gray-300 to-gray-400 rounded-lg border-4 border-gray-500">
+                            <div className="absolute inset-2 bg-gradient-to-b from-cyan-100 to-cyan-200 rounded flex items-center justify-center">
+                                <span className="text-cyan-900 font-mono text-lg">V: 3.28V</span>
+                            </div>
+                        </div>
+                        {/* 温度计 */}
+                        <div className="absolute top-16 right-4 w-32 h-16 bg-gradient-to-b from-gray-300 to-gray-400 rounded-lg border-4 border-gray-500">
+                            <div className="absolute inset-2 bg-gradient-to-b from-red-100 to-red-200 rounded flex items-center justify-center">
+                                <span className="text-red-900 font-mono text-lg">25.6°C</span>
+                            </div>
+                        </div>
+                        {/* 系统状态 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 w-64 h-20 bg-gradient-to-b from-gray-300 to-gray-400 rounded-lg border-4 border-gray-500">
+                            <div className="absolute top-2 left-2 right-2 h-8 bg-gradient-to-b from-cyan-100 to-cyan-200 rounded flex items-center justify-center">
+                                <span className="text-cyan-900 font-mono text-xs">Sys:OK  Bat:95%</span>
+                            </div>
+                            <div className="absolute bottom-2 left-2 right-2 h-8 bg-gradient-to-b from-green-100 to-green-200 rounded flex items-center justify-center">
+                                <span className="text-green-900 font-mono text-xs">CPU:72MHz  T:25°C</span>
+                            </div>
+                        </div>
+                        {/* 数据流 */}
+                        <svg className="absolute inset-0 w-full h-full">
+                            <circle cx="50%" cy="50%" r="60" fill="none" stroke="#67e8f9" strokeWidth="2" strokeDasharray="10,5" className="animate-circular" />
+                        </svg>
+                    </div>
+                ),
+                explanations: [
+                    "电压表：ADC 采集 + 浮点格式化",
+                    "温度显示：整数 + 小数分离显示",
+                    "系统状态：多参数同时显示",
+                    "密码掩码：*号替代明文字符",
+                    "实时刷新：定时器周期性更新",
+                    "进度条：用自定义字符实现",
+                    "图标指示：CGRAM 自定义符号",
+                    "菜单系统：多行选择界面"
+                ]
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(true);
+            const [isInitialized, setIsInitialized] = React.useState(false);
+            const [availableVoices, setAvailableVoices] = React.useState([]);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                const voices = speechSynthesis.getVoices();
+                setAvailableVoices(voices);
+                const preferredVoice = voices.find(v => v.lang === 'zh-CN' && v.name.includes('Xiaoxiao')) ||
+                                       voices.find(v => v.lang === 'zh-CN') ||
+                                       voices[0];
+                if (preferredVoice && isPlaying && !isInitialized) {
+                    setIsInitialized(true);
+                    speakStep(0, preferredVoice);
+                }
+            }, []);
+
+            const getPreferredVoice = () => {
+                return availableVoices.find(v => v.lang === 'zh-CN' && v.name.includes('Xiaoxiao')) ||
+                       availableVoices.find(v => v.lang === 'zh-CN') ||
+                       availableVoices[0];
+            };
+
+            const speakStep = (stepIndex, voice) => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                    voiceEndTimerRef.current = null;
+                }
+
+                speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(STEPS[stepIndex].narration);
+                utterance.lang = 'zh-CN';
+                utterance.voice = voice || getPreferredVoice();
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            const next = (prev + 1) % STEPS.length;
+                            if (isPlaying) {
+                                setTimeout(() => speakStep(next, voice), 100);
+                            }
+                            return next;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            const next = (prev + 1) % STEPS.length;
+                            if (isPlaying) {
+                                setTimeout(() => speakStep(next, voice), 100);
+                            }
+                            return next;
+                        });
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            const handleStepClick = (index) => {
+                setCurrentStep(index);
+                const voice = getPreferredVoice();
+                speakStep(index, voice);
+            };
+
+            const togglePlayPause = () => {
+                if (isPlaying) {
+                    speechSynthesis.cancel();
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                        voiceEndTimerRef.current = null;
+                    }
+                    setIsPlaying(false);
+                } else {
+                    setIsPlaying(true);
+                    const voice = getPreferredVoice();
+                    speakStep(currentStep, voice);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-900 via-cyan-900 to-gray-900 p-8">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="text-center mb-8">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 LCD 显示驱动完整指南</h1>
+                            <p className="text-cyan-300">LCD1602 / HD44780 / 4 位模式 / 字符显示</p>
+                        </div>
+
+                        {/* Controls */}
+                        <div className="flex justify-center items-center space-x-4 mb-6">
+                            <button
+                                onClick={() => handleStepClick((currentStep - 1 + STEPS.length) % STEPS.length)}
+                                className="px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
+                            >
+                                ← 上一步
+                            </button>
+                            <button
+                                onClick={togglePlayPause}
+                                className={`px-8 py-3 rounded-lg transition-colors ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'} text-white`}
+                            >
+                                {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                            </button>
+                            <button
+                                onClick={() => handleStepClick((currentStep + 1) % STEPS.length)}
+                                className="px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
+                            >
+                                下一步 →
+                            </button>
+                        </div>
+
+                        {/* Progress */}
+                        <div className="flex justify-center space-x-2 mb-8">
+                            {STEPS.map((_, index) => (
+                                <div
+                                    key={index}
+                                    className={`w-3 h-3 rounded-full transition-colors ${index === currentStep ? 'bg-cyan-400' : 'bg-gray-600'}`}
+                                />
+                            ))}
+                        </div>
+
+                        {/* Main Content */}
+                        <div className="grid grid-cols-3 gap-6">
+                            {/* Code */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-cyan-400 mb-4">💻 代码</h3>
+                                <pre className="text-green-400 text-sm overflow-auto h-80 font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+
+                            {/* Visualization */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-cyan-400 mb-4">🎨 可视化</h3>
+                                <div className="h-80">
+                                    {STEPS[currentStep].visualization()}
+                                </div>
+                            </div>
+
+                            {/* Explanations */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-cyan-400 mb-4">📖 解释</h3>
+                                <ul className="space-y-3">
+                                    {STEPS[currentStep].explanations.map((exp, index) => (
+                                        <li key={index} className="text-white text-sm flex items-start">
+                                            <span className="text-cyan-400 mr-2">•</span>
+                                            <span>{exp}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+
+                        {/* Step Info */}
+                        <div className="mt-8 text-center">
+                            <h2 className="text-2xl font-bold text-cyan-400">
+                                {currentStep + 1}. {STEPS[currentStep].title}
+                            </h2>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

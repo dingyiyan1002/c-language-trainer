@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1214 - FreeRTOS 事件组与任务通知完整指南 - 嵌入式 C 语言可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(236, 72, 153, 0.2); } 50% { background-color: rgba(236, 72, 153, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes danger { 0%, 100% { background-color: rgba(239, 68, 68, 0.3); } 50% { background-color: rgba(239, 68, 68, 0.6); } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes setBit { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+        @keyframes clearBit { 0% { opacity: 1; } 100% { opacity: 0.3; } }
+        @keyframes waitForAll { 0%, 100% { border-color: rgba(236, 72, 153, 0.3); } 50% { border-color: rgba(236, 72, 153, 0.9); } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .flow { animation: flow 2s infinite; }
+        .highlight { animation: highlight 2s infinite; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .countdown { animation: countdown 0.3s ease-out; }
+        .danger { animation: danger 1s infinite; }
+        .reset { animation: reset 1s linear; }
+        .setBit { animation: setBit 0.5s ease-out; }
+        .clearBit { animation: clearBit 0.5s ease-out; }
+        .waitForAll { animation: waitForAll 2s infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#ec4899',
+            secondary: '#db2777',
+            accent: '#f472b6',
+            highlight: '#fbcfe8',
+            danger: '#ef4444',
+            success: '#10b981'
+        };
+
+        const STEPS = [
+            {
+                title: "事件组基础概念",
+                code: `// FreeRTOS 事件组概述
+// 事件组用于多事件同步 (一对多、多对一)
+
+// 事件组特性:
+// - 24 位事件标志 (bit0-bit23)
+// - 可等待多个事件 (AND/OR逻辑)
+// - 可广播通知多个任务
+// - 轻量级，高效
+
+// 事件组 vs 信号量:
+// 信号量：单个事件，计数功能
+// 事件组：多个事件 (24 位)，逻辑组合
+
+// 应用场景:
+// 1. 等待多个外设就绪 (WiFi+GPS+ 传感器)
+// 2. 多任务同步启动
+// 3. 状态机事件收集
+// 4. 一对多通知 (广播)
+
+// 事件组句柄
+EventGroupHandle_t xEventGroup;`,
+                description: "事件组提供 24 位独立事件标志，用于多事件同步。与信号量不同，事件组可以同时表示多个事件状态，支持 AND/OR 逻辑组合。典型应用：等待多个外设全部就绪 (AND)、等待任意一个事件发生 (OR)、一对多广播通知。事件组比多个信号量更高效。",
+                highlight: "事件组 24 位可同时表示多个事件，支持 AND/OR 逻辑组合"
+            },
+            {
+                title: "事件组创建与设置",
+                code: `// 创建事件组
+EventGroupHandle_t xEventGroup = xEventGroupCreate();
+
+// 静态创建 (不动态分配内存)
+StaticEventGroup_t xEventGroupBuffer;
+EventGroupHandle_t xEventGroup = xEventGroupCreateStatic(&xEventGroupBuffer);
+
+// 设置事件位 (从任务)
+xEventGroupSetBits(xEventGroup, EVENT_WIFI_READY);
+xEventGroupSetBits(xEventGroup, EVENT_GPS_READY | EVENT_SENSOR_READY);
+
+// 设置事件位 (从中断)
+xEventGroupSetBitsFromISR(xEventGroup, EVENT_UART_RX, &xHigherPriorityTaskWoken);
+
+// 清除事件位
+xEventGroupClearBits(xEventGroup, EVENT_WIFI_READY);
+
+// 获取当前事件值
+EventBits_t uxEventGroupGetEventBits(EventGroupHandle_t xEventGroup);
+
+// 事件位定义
+#define EVENT_WIFI_READY    (1 << 0)
+#define EVENT_GPS_READY     (1 << 1)
+#define EVENT_SENSOR_READY  (1 << 2)
+#define EVENT_ALARM         (1 << 3)
+#define EVENT_LOW_BATTERY   (1 << 4)`,
+                description: "xEventGroupCreate 创建事件组。xEventGroupSetBits 设置事件位 (从任务)，xEventGroupSetBitsFromISR 从中断设置。xEventGroupClearBits 清除事件位。事件位用位掩码定义，每个事件占用一个 bit。最多支持 24 个独立事件 (bit0-bit23)。",
+                highlight: "从中断设置事件必须用 FromISR 版本，支持上下文切换"
+            },
+            {
+                title: "等待事件 (多事件同步)",
+                code: `// 等待单个事件
+EventBits_t uxEventGroupWaitBits(
+    xEventGroup,        // 事件组句柄
+    EVENT_WIFI_READY,   // 要等待的事件位
+    pdTRUE,             // 清除位 (成功后清除)
+    pdFALSE,            // 等待逻辑 (FALSE=OR, TRUE=AND)
+    portMAX_DELAY       // 超时时间
+);
+
+// 等待多个事件 (OR 逻辑 - 任一发生)
+xEventGroupWaitBits(xEventGroup,
+    EVENT_WIFI_READY | EVENT_GPS_READY,
+    pdTRUE, pdFALSE, portMAX_DELAY);
+// WiFi 或 GPS 就绪即返回
+
+// 等待多个事件 (AND 逻辑 - 全部发生)
+xEventGroupWaitBits(xEventGroup,
+    EVENT_WIFI_READY | EVENT_GPS_READY | EVENT_SENSOR_READY,
+    pdTRUE, pdTRUE, portMAX_DELAY);
+// 必须全部就绪才返回
+
+// 带超时等待
+EventBits_t bits = xEventGroupWaitBits(xEventGroup,
+    EVENT_ALARM, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000));
+
+if(bits & EVENT_ALARM) {
+    // 事件发生
+} else {
+    // 超时
+}`,
+                description: "xEventGroupWaitBits 用于等待事件。参数包括：事件组句柄、要等待的事件位、是否清除位、等待逻辑 (AND/OR)、超时时间。OR 逻辑 (pdFALSE) 表示任一事件发生即返回，AND 逻辑 (pdTRUE) 表示所有事件都发生才返回。返回值为当前事件值，可判断哪些事件发生。",
+                highlight: "AND 逻辑用于等待多个条件全部满足，OR 逻辑用于等待任一条件"
+            },
+            {
+                title: "任务通知 (最轻量 IPC)",
+                code: `// 任务通知 - FreeRTOS v8.2+ 最轻量 IPC
+
+// 特点:
+// - 无需创建对象 (无内存开销)
+// - 速度最快 (无锁操作)
+// - 每个任务 32 位通知值
+
+// 发送通知 (从任务)
+xTaskNotify(taskHandle, ulValue, eAction);
+xTaskNotifyGive(taskHandle);  // 简化版，值 +1
+
+// 发送通知 (从中断)
+xTaskNotifyFromISR(taskHandle, ulValue, eAction, &xHigherPriorityTaskWoken);
+vTaskNotifyGiveFromISR(taskHandle, &xHigherPriorityTaskWoken);
+
+// 等待通知 (阻塞)
+ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // 清除通知
+ulTaskNotifyTake(pdFALSE, portMAX_DELAY); // 不清除
+
+// 等待通知 (非阻塞)
+if(ulTaskNotifyTake(pdTRUE, 0) > 0) {
+    // 有通知
+}
+
+// 动作类型:
+// eSetBits    - 位或操作
+// eIncrement  - 值 +1
+// eSetValueWithOverwrite  - 覆盖写入
+// eSetValueWithoutOverwrite - 仅当未设置时写入`,
+                description: "任务通知是最轻量级的 IPC 机制，无需创建对象，每个任务内置 32 位通知值。xTaskNotifyGive 发送通知 (值 +1)，ulTaskNotifyTake 等待并清除通知。支持多种动作：置位、递增、赋值。从中断发送通知可唤醒高优先级任务。性能比信号量快 45%，内存占用为 0。",
+                highlight: "任务通知最快最省内存，应优先于信号量使用"
+            },
+            {
+                title: "事件组应用：多任务同步启动",
+                code: `// 多任务同步启动应用
+
+EventGroupHandle_t xStartEventGroup;
+
+// 事件定义
+#define TASK_INIT_COMPLETE  (1 << 0)
+#define SENSOR_CALIBRATED   (1 << 1)
+#define NETWORK_CONNECTED   (1 << 2)
+#define ALL_READY         (TASK_INIT_COMPLETE | SENSOR_CALIBRATED | NETWORK_CONNECTED)
+
+// 初始化任务
+void vTaskInit(void *pvParameters) {
+    Hardware_Init();
+    xEventGroupSetBits(xStartEventGroup, TASK_INIT_COMPLETE);
+    vTaskDelete(NULL);  // 完成后删除自己
+}
+
+// 传感器校准任务
+void vTaskSensorCalib(void *pvParameters) {
+    Sensor_Calibrate();
+    xEventGroupSetBits(xStartEventGroup, SENSOR_CALIBRATED);
+    vTaskDelete(NULL);
+}
+
+// 网络连接任务
+void vTaskNetwork(void *pvParameters) {
+    Network_Connect();
+    xEventGroupSetBits(xStartEventGroup, NETWORK_CONNECTED);
+    vTaskDelete(NULL);
+}
+
+// 主工作任务 (等待所有就绪)
+void vTaskMain(void *pvParameters) {
+    // 等待所有初始化完成
+    xEventGroupWaitBits(xStartEventGroup, ALL_READY,
+                        pdTRUE, pdTRUE, portMAX_DELAY);
+
+    // 所有任务就绪，开始正常工作
+    while(1) {
+        Main_Work_Loop();
+    }
+}`,
+                description: "多任务同步启动是事件组的典型应用。多个初始化任务并行执行，完成后设置各自的事件位。主工作任务使用 AND 逻辑等待所有事件位都置位后才开始正常工作。这种模式比串行初始化更快，充分利用多任务并发性。初始化任务完成后可删除自己节省资源。",
+                highlight: "AND 逻辑等待所有条件满足，实现多任务同步启动"
+            },
+            {
+                title: "任务通知应用：中断通知任务",
+                code: `// 任务通知应用：中断通知任务
+
+TaskHandle_t xTaskHandle;
+
+// 初始化
+void vTaskCreateNotify(void) {
+    xTaskCreate(vTaskWaitNotify, "NotifyTask", 128, NULL, 2, &xTaskHandle);
+}
+
+// 等待通知的任务 (最高效模式)
+void vTaskWaitNotify(void *pvParameters) {
+    uint32_t notifyCount = 0;
+
+    for(;;) {
+        // 阻塞等待通知 (值 +1 模式)
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        notifyCount++;
+
+        // 处理事件
+        Process_Interrupt_Event();
+    }
+}
+
+// 中断服务程序
+void EXTI0_IRQHandler(void) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    // 清除中断标志
+    EXTI->PR = EXTI_PR_PR0;
+
+    // 发送通知 (值 +1)
+    vTaskNotifyGiveFromISR(xTaskHandle, &xHigherPriorityTaskWoken);
+
+    // 如果需要，立即切换到高优先级任务
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+// 优势：
+// - 无需创建信号量对象
+// - 速度最快
+// - 代码最简洁`,
+                description: "中断通知任务是任务通知最典型的应用。中断使用 vTaskNotifyGiveFromISR 发送通知，任务使用 ulTaskNotifyTake 阻塞等待。通知值每次 +1，任务可以统计中断次数。相比信号量，任务通知无需创建对象、速度更快、代码更简洁。这是中断 - 任务通信的首选方案。",
+                highlight: "中断 + 任务通知是最佳组合，无需信号量对象，最快最省"
+            },
+            {
+                title: "事件组广播通知",
+                code: `// 事件组广播通知 (一对多)
+
+EventGroupHandle_t xBroadcastGroup;
+
+// 定义广播事件
+#define BROADCAST_DATA_READY  (1 << 0)
+#define BROADCAST_STOP        (1 << 1)
+
+// 多个任务等待同一个事件 (广播模式)
+void vTaskWorker1(void *pvParameters) {
+    for(;;) {
+        // 等待广播
+        xEventGroupWaitBits(xBroadcastGroup, BROADCAST_DATA_READY,
+                            pdTRUE, pdFALSE, portMAX_DELAY);
+        // 收到广播，处理数据
+        Process_Data1();
+    }
+}
+
+void vTaskWorker2(void *pvParameters) {
+    for(;;) {
+        xEventGroupWaitBits(xBroadcastGroup, BROADCAST_DATA_READY,
+                            pdTRUE, pdFALSE, portMAX_DELAY);
+        Process_Data2();
+    }
+}
+
+// 广播任务
+void vTaskBroadcaster(void *pvParameters) {
+    for(;;) {
+        // 准备数据
+        Prepare_Data();
+
+        // 广播通知所有等待任务
+        xEventGroupSetBits(xBroadcastGroup, BROADCAST_DATA_READY);
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+// 注意:
+// - 所有等待任务都会收到通知
+// - 事件位会被所有任务清除 (如果 pdTRUE)
+// - 适合一对多通知场景`,
+                description: "事件组支持一对多广播通知。多个任务等待同一个事件位，当该事件位置位时，所有等待任务都会被唤醒。适合数据发布 - 订阅模式、系统状态广播等场景。注意：如果多个任务都设置清除位 (pdTRUE)，事件位会被清除多次。",
+                highlight: "事件组广播实现一对多通知，所有等待任务同时被唤醒"
+            },
+            {
+                title: "IPC 机制选择指南",
+                code: `// IPC 机制选择指南
+
+// 1. 传递数据 (带负载)
+// → 队列 (xQueueCreate)
+QueueHandle_t xQueue = xQueueCreate(10, sizeof(Data_t));
+
+// 2. 互斥访问共享资源
+// → 互斥量 (xSemaphoreCreateMutex)
+SemaphoreHandle_t xMutex = xSemaphoreCreateMutex();
+
+// 3. 中断通知任务 (无数据)
+// → 任务通知 (最快)
+ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+vTaskNotifyGiveFromISR(taskHandle, &xHigherPriorityTaskWoken);
+
+// 4. 任务间同步 (简单)
+// → 任务通知 或 二进制信号量
+xTaskNotifyGive(taskHandle);
+xSemaphoreCreateBinary();
+
+// 5. 多事件同步 (等待多个条件)
+// → 事件组 (xEventGroupCreate)
+xEventGroupWaitBits(xEventGroup, ALL_EVENTS, pdTRUE, pdTRUE, portMAX_DELAY);
+
+// 6. 资源计数 (多个相同资源)
+// → 计数信号量 (xSemaphoreCreateCounting)
+SemaphoreHandle_t xSem = xSemaphoreCreateCounting(10, 10);
+
+// 性能对比 (从快到慢):
+// 任务通知 > 事件组 > 信号量 > 队列`,
+                description: "IPC 机制选择：传数据用队列，互斥访问用互斥量，中断通知用任务通知，简单同步用任务通知或信号量，多事件同步用事件组，资源计数用计数信号量。性能排序：任务通知最快 (无对象开销)，事件组次之，信号量再次，队列最慢 (数据拷贝)。",
+                highlight: "任务通知最快最省内存，但功能有限；根据场景选择最合适的 IPC"
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [showCode, setShowCode] = useState(true);
+            const [eventBits, setEventBits] = useState(0);
+            const [notifyCount, setNotifyCount] = useState(0);
+            const voiceEndTimerRef = useRef(null);
+
+            // 模拟事件位设置
+            useEffect(() => {
+                if (!isPlaying) return;
+                const interval = setInterval(() => {
+                    if (currentStep >= 1 && currentStep <= 4) {
+                        setEventBits(prev => {
+                            const newBits = prev | (1 << (prev % 5));
+                            return newBits > 31 ? 0 : newBits;
+                        });
+                    }
+                }, 1000);
+                return () => clearInterval(interval);
+            }, [isPlaying, currentStep]);
+
+            // 模拟通知计数
+            useEffect(() => {
+                if (!isPlaying) return;
+                const interval = setInterval(() => {
+                    if (currentStep >= 3 && currentStep <= 5) {
+                        setNotifyCount(prev => (prev + 1) % 10);
+                    }
+                }, 800);
+                return () => clearInterval(interval);
+            }, [isPlaying, currentStep]);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v =>
+                        v.lang === 'zh-CN' ||
+                        v.lang === 'zh-CN-XiaoxiaoNeural' ||
+                        v.lang.includes('Chinese')
+                    );
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.description + "。" + step.highlight);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep]);
+
+            // 事件组可视化
+            const EventGroupVisual = () => {
+                const bits = [0, 1, 2, 3, 4, 5, 6, 7];
+                const labels = ['WiFi', 'GPS', 'Sensor', 'Alarm', 'LowBat', 'USB', 'RTC', 'ERR'];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-pink-400 mb-3">事件组 (24 位)</h3>
+                        <div className="grid grid-cols-8 gap-1 mb-3">
+                            {bits.map((i) => (
+                                <div key={i} className={`aspect-square rounded flex flex-col items-center justify-center transition-all ${
+                                    (eventBits & (1 << i)) ? 'bg-pink-500 setBit' : 'bg-gray-600'
+                                }`}>
+                                    <span className="text-xs font-bold">{(eventBits & (1 << i)) ? '1' : '0'}</span>
+                                    <span className="text-xs opacity-50">B{i}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="text-xs text-gray-400 mb-2">事件值：0x{eventBits.toString(16).toUpperCase()}</div>
+                        <div className="flex flex-wrap gap-1">
+                            {bits.map((i) => (
+                                <span key={i} className={`text-xs px-1 rounded ${
+                                    (eventBits & (1 << i)) ? 'bg-pink-500 text-white' : 'bg-gray-700 text-gray-400'
+                                }`}>{labels[i]}</span>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 任务通知可视化
+            const NotifyVisual = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-blue-400 mb-3">任务通知</h3>
+                        <div className="flex items-center gap-4 mb-3">
+                            <div className="bg-blue-500 px-3 py-2 rounded text-xs font-bold">中断</div>
+                            <div className="text-blue-400 animate-pulse">→</div>
+                            <div className="bg-gray-900 border border-blue-500 px-4 py-2 rounded">
+                                <div className="text-xs text-gray-400">通知值</div>
+                                <div className="text-2xl font-mono text-blue-400">{notifyCount}</div>
+                            </div>
+                            <div className="text-blue-400 animate-pulse">→</div>
+                            <div className="bg-green-500 px-3 py-2 rounded text-xs font-bold">任务</div>
+                        </div>
+                        <div className="text-xs text-gray-400">
+                            通知次数：{notifyCount} (每次 +1)
+                        </div>
+                    </div>
+                );
+            };
+
+            // 多任务同步启动可视化
+            const SyncStartVisual = () => {
+                const tasks = [
+                    { name: '初始化', event: 'TASK_INIT', done: (eventBits & 1) },
+                    { name: '传感器', event: 'SENSOR_CAL', done: (eventBits & 2) },
+                    { name: '网络', event: 'NETWORK', done: (eventBits & 4) }
+                ];
+
+                const allReady = (eventBits & 7) === 7;
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-3">多任务同步启动</h3>
+                        <div className="space-y-2">
+                            {tasks.map((t, i) => (
+                                <div key={i} className={`p-2 rounded flex justify-between items-center ${
+                                    t.done ? 'bg-green-500' : 'bg-gray-700'
+                                }`}>
+                                    <span className="text-xs">{t.name}</span>
+                                    <span className="text-xs">{t.done ? '✓ 完成' : '○ 进行中'}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <div className={`mt-3 p-2 rounded text-center text-xs ${
+                            allReady ? 'bg-green-500 text-white' : 'bg-gray-700 text-gray-400'
+                        }`}>
+                            {allReady ? '🚀 全部就绪，开始工作!' : '⏳ 等待所有任务完成...'}
+                        </div>
+                    </div>
+                );
+            };
+
+            // IPC 选择指南
+            const IPCGuide = () => {
+                const ipcs = [
+                    { name: '任务通知', speed: '最快', use: '同步', color: 'bg-green-500' },
+                    { name: '事件组', speed: '快', use: '多事件', color: 'bg-pink-500' },
+                    { name: '信号量', speed: '中', use: '资源/同步', color: 'bg-blue-500' },
+                    { name: '队列', speed: '慢', use: '传数据', color: 'bg-amber-500' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-3">IPC 机制对比</h3>
+                        <div className="space-y-2">
+                            {ipcs.map((ipc, i) => (
+                                <div key={i} className={`p-2 rounded ${ipc.color}`}>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="font-bold">{ipc.name}</span>
+                                        <span>速度：{ipc.speed}</span>
+                                    </div>
+                                    <div className="text-xs opacity-75">用途：{ipc.use}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    {/* 头部 */}
+                    <div className="max-w-7xl mx-auto mb-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-pink-400">
+                                1214 - FreeRTOS 事件组与任务通知完整指南
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">
+                                    {isPlaying ? '暂停' : '播放'}
+                                </button>
+                                <button onClick={() => setShowCode(!showCode)} className="px-3 py-1 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                    {showCode ? '隐藏代码' : '显示代码'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div className="flex gap-1 mb-4">
+                            {STEPS.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentStep(i)}
+                                    className={`flex-1 h-2 rounded transition-all ${
+                                        i === currentStep ? 'bg-pink-500 scale-110' :
+                                        i < currentStep ? 'bg-pink-700' : 'bg-gray-600'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 主内容区 - 三列布局 */}
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* 左列：代码 */}
+                        {showCode && (
+                            <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                                <h2 className="text-sm font-bold text-pink-400 mb-2">
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap bg-gray-900 p-3 rounded">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        )}
+
+                        {/* 中列：可视化动画 */}
+                        <div className={`${showCode ? 'col-span-1' : 'col-span-2'} space-y-4`}>
+                            <EventGroupVisual />
+                            <div className="grid grid-cols-2 gap-4">
+                                {currentStep >= 3 ? <NotifyVisual /> : <SyncStartVisual />}
+                                {currentStep >= 7 ? <IPCGuide /> : <div className="bg-gray-800 rounded-lg p-4"><h3 className="text-sm font-bold text-gray-400 mb-2">等待下一步...</h3></div>}
+                            </div>
+                        </div>
+
+                        {/* 右列：说明 */}
+                        <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                            <h3 className="text-sm font-bold text-blue-400 mb-2">说明</h3>
+                            <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                                {STEPS[currentStep].description}
+                            </p>
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2">
+                                <p className="text-xs text-yellow-300">
+                                    <span className="font-bold">💡 重点:</span> {STEPS[currentStep].highlight}
+                                </p>
+                            </div>
+
+                            {/* 导航按钮 */}
+                            <div className="flex gap-2 mt-4">
+                                <button
+                                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                                    disabled={currentStep === 0}
+                                    className="flex-1 py-2 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 text-xs"
+                                >
+                                    ← 上一步
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+                                    disabled={currentStep === STEPS.length - 1}
+                                    className="flex-1 py-2 bg-pink-600 rounded hover:bg-pink-500 disabled:opacity-50 text-xs"
+                                >
+                                    下一步 →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部摘要 */}
+                    <div className="max-w-7xl mx-auto mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-pink-400 mb-2">事件组与任务通知核心要点</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-pink-400 font-bold">24 位事件</span>
+                                <p className="text-gray-400 mt-1">多事件同步</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-green-400 font-bold">任务通知</span>
+                                <p className="text-gray-400 mt-1">最快最省内存</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-blue-400 font-bold">AND/OR 逻辑</span>
+                                <p className="text-gray-400 mt-1">灵活等待条件</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-purple-400 font-bold">广播通知</span>
+                                <p className="text-gray-400 mt-1">一对多唤醒</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

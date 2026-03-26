@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1157 - 内存池 | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes allocate { 0%, 100% { background-color: rgba(34, 197, 94, 0.3); } 50% { background-color: rgba(34, 197, 94, 0.8); } }
+    @keyframes free { 0%, 100% { background-color: rgba(59, 130, 246, 0.3); } 50% { background-color: rgba(59, 130, 246, 0.8); } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .animate-allocate { animation: allocate 1s ease-in-out infinite; }
+    .animate-free { animation: free 1s ease-in-out infinite; }
+    .highlight { box-shadow: 0 0 20px rgba(34, 197, 94, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(34, 197, 94, 0.2); border-left: 3px solid #22c55e; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#22c55e', primaryLight: '#4ade80',
+      secondary: '#16a34a', secondaryLight: '#22c55e',
+      accent: '#15803d', accentLight: '#4ade80',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== 内存池 (Memory Pool) =====
+// 固定大小块的高效内存管理
+
+// 1. 内存池结构
+#define POOL_BLOCK_SIZE   64      // 每块 64 字节
+#define POOL_BLOCK_COUNT  32      // 共 32 块
+
+typedef struct Block {
+  struct Block *next;             // 指向下一空闲块
+} Block_t;
+
+typedef struct {
+  uint8_t  pool[POOL_BLOCK_SIZE * POOL_BLOCK_COUNT]; // 内存池
+  Block_t  *free_list;            // 空闲链表头
+  uint32_t allocated_count;       // 已分配计数
+} MemoryPool_t;
+
+// 2. 初始化内存池
+void pool_init(MemoryPool_t *pool) {
+  pool->free_list = NULL;
+  pool->allocated_count = 0;
+
+  // 将所有块链接成空闲链表
+  for (int i = 0; i < POOL_BLOCK_COUNT; i++) {
+    Block_t *block = (Block_t*)(pool->pool + i * POOL_BLOCK_SIZE);
+    block->next = pool->free_list;
+    pool->free_list = block;
+  }
+}
+
+// 3. 从池中分配 (O(1) 时间)
+void* pool_alloc(MemoryPool_t *pool) {
+  if (pool->free_list == NULL) {
+    return NULL;  // 池已耗尽
+  }
+
+  // 从空闲链表头取出
+  Block_t *block = pool->free_list;
+  pool->free_list = block->next;
+  pool->allocated_count++;
+
+  return block;  // 返回块地址
+}
+
+// 4. 释放回池中 (O(1) 时间)
+void pool_free(MemoryPool_t *pool, void *ptr) {
+  if (ptr == NULL) return;
+
+  // 重新链接到空闲链表头
+  Block_t *block = (Block_t*)ptr;
+  block->next = pool->free_list;
+  pool->free_list = block;
+  pool->allocated_count--;
+}
+
+// 5. 获取池统计
+void pool_stats(MemoryPool_t *pool, uint32_t *total, uint32_t *free, uint32_t *used) {
+  *total = POOL_BLOCK_COUNT;
+  *used = pool->allocated_count;
+  *free = POOL_BLOCK_COUNT - pool->allocated_count;
+}
+
+// 6. 多池管理 (不同大小)
+typedef struct {
+  MemoryPool_t small_pool;    // 小对象池 (32B)
+  MemoryPool_t medium_pool;   // 中对象池 (128B)
+  MemoryPool_t large_pool;    // 大对象池 (512B)
+} MultiPool_t;
+
+void* multi_alloc(MultiPool_t *mp, size_t size) {
+  if (size <= 32) return pool_alloc(&mp->small_pool);
+  if (size <= 128) return pool_alloc(&mp->medium_pool);
+  if (size <= 512) return pool_alloc(&mp->large_pool);
+  return malloc(size);  // 超大对象用 malloc
+}`;
+
+    const STEPS = [
+      {
+        title: "内存池概述",
+        codeHighlight: [3, 4, 5],
+        explanation: "内存池是固定大小块的预分配内存，解决通用 malloc 的碎片和不确定性问题。分配/释放都是 O(1) 时间复杂度，适合实时系统。",
+        visualization: "overview"
+      },
+      {
+        title: "内存池结构",
+        codeHighlight: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+        explanation: "内存池包含：固定大小的内存数组、空闲链表头指针、已分配计数。每个块大小相同，通过 next 指针链接成链表。",
+        visualization: "structure"
+      },
+      {
+        title: "初始化内存池",
+        codeHighlight: [20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+        explanation: "初始化时将所有块链接成空闲链表。第一个块指向第二个，第二个指向第三个...最后一个是 NULL。空闲链表头指向第一个块。",
+        visualization: "init"
+      },
+      {
+        title: "内存池分配",
+        codeHighlight: [32, 33, 34, 35, 36, 37, 38, 39, 40, 41],
+        explanation: "分配操作：1) 检查空闲链表是否为空 2) 从头节点取出一个块 3) 更新空闲链表头 4) 增加分配计数。O(1) 时间，无碎片。",
+        visualization: "alloc"
+      },
+      {
+        title: "内存池释放",
+        codeHighlight: [44, 45, 46, 47, 48, 49, 50, 51, 52],
+        explanation: "释放操作：1) 将块重新链接到空闲链表头 2) 更新空闲链表头 3) 减少分配计数。O(1) 时间，简单高效。",
+        visualization: "free"
+      },
+      {
+        title: "池统计信息",
+        codeHighlight: [55, 56, 57, 58, 59, 60],
+        explanation: "统计信息用于调试和监控：总块数、已分配数、空闲数。可以快速判断池是否耗尽，是否需要扩容。",
+        visualization: "stats"
+      },
+      {
+        title: "多池管理",
+        codeHighlight: [63, 64, 65, 66, 67, 68, 69, 70, 71],
+        explanation: "多池系统：不同大小的对象使用不同的池。小对象 (32B)、中对象 (128B)、大对象 (512B)。超大对象才用 malloc。",
+        visualization: "multipool"
+      },
+      {
+        title: "内存池 vs malloc",
+        codeHighlight: [1, 2],
+        explanation: "内存池优势：1) 无碎片 2) O(1) 分配/释放 3) 确定性时间 4) 易于调试。缺点：1) 预分配内存 2) 固定大小限制。",
+        visualization: "compare"
+      }
+    ];
+
+    function Overview({ step }) {
+      return (
+        <div className="space-y-4">
+          <div className="text-center mb-6">
+            <div className="text-6xl mb-4 animate-pulse">🏊</div>
+            <div className="text-green-400 font-bold text-xl">内存池 (Memory Pool)</div>
+            <div className="text-gray-400 text-sm mt-2">Fixed-Size Block Allocation</div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-green-900/30 p-4 rounded-lg border border-green-500">
+              <div className="text-2xl mb-2">⚡</div>
+              <div className="text-green-300 font-bold text-sm">O(1) 分配</div>
+              <div className="text-gray-400 text-xs mt-1">恒定时间复杂度</div>
+            </div>
+            <div className="bg-blue-900/30 p-4 rounded-lg border border-blue-500">
+              <div className="text-2xl mb-2">🔒</div>
+              <div className="text-blue-300 font-bold text-sm">无碎片</div>
+              <div className="text-gray-400 text-xs mt-1">固定大小块</div>
+            </div>
+            <div className="bg-purple-900/30 p-4 rounded-lg border border-purple-500">
+              <div className="text-2xl mb-2">📊</div>
+              <div className="text-purple-300 font-bold text-sm">预分配</div>
+              <div className="text-gray-400 text-xs mt-1">编译时确定大小</div>
+            </div>
+            <div className="bg-yellow-900/30 p-4 rounded-lg border border-yellow-500">
+              <div className="text-2xl mb-2">🎯</div>
+              <div className="text-yellow-300 font-bold text-sm">确定性</div>
+              <div className="text-gray-400 text-xs mt-1">实时系统友好</div>
+            </div>
+          </div>
+          <div className="mt-6 p-4 bg-gradient-to-r from-green-900/50 to-blue-900/50 rounded-lg border-2 border-green-500">
+            <div className="text-center text-green-300 font-bold">
+              🎯 内存池 = 嵌入式系统最佳实践
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function PoolStructure({ step }) {
+      const fields = [
+        { name: "pool[]", value: "2048B", desc: "32 块 × 64 字节", active: step >= 1 },
+        { name: "free_list", value: "0x20001000", desc: "空闲链表头", active: step >= 1 },
+        { name: "allocated_count", value: "0", desc: "已分配计数", active: step >= 1 },
+      ];
+
+      return (
+        <div className="space-y-2">
+          <div className="text-center text-green-400 font-bold mb-3">
+            内存池结构
+          </div>
+          {fields.map((f, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 p-3 rounded transition-all duration-300 ${
+                f.active ? 'bg-green-900/50 border-l-4 border-green-500' : 'bg-gray-800'
+              }`}
+            >
+              <span className="font-mono font-bold text-green-300 w-28">{f.name}</span>
+              <span className="font-mono text-xs text-blue-400 flex-1">{f.value}</span>
+              <span className="text-xs text-gray-500">{f.desc}</span>
+            </div>
+          ))}
+          {step >= 1 && (
+            <div className="mt-4">
+              <div className="text-gray-400 text-xs mb-2 text-center">内存池布局</div>
+              <div className="grid grid-cols-8 gap-1">
+                {Array.from({ length: 32 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`h-8 rounded flex items-center justify-center text-xs font-mono ${
+                      step >= 1 ? 'bg-green-600 text-white' : 'bg-gray-700'
+                    }`}
+                  >
+                    {i}
+                  </div>
+                ))}
+              </div>
+              <div className="text-center text-gray-400 text-xs mt-2">
+                32 块，每块 64 字节，总计 2048 字节
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function PoolInit({ step }) {
+      const blocks = Array.from({ length: 8 });
+
+      return (
+        <div className="space-y-4">
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-center text-gray-400 text-sm mb-3">初始化前</div>
+            <div className="grid grid-cols-8 gap-1">
+              {blocks.map((_, i) => (
+                <div key={i} className="h-12 bg-gray-700 rounded flex items-center justify-center text-gray-500 text-xs">
+                  {i}
+                </div>
+              ))}
+            </div>
+            <div className="text-center text-gray-400 text-xs mt-2">未初始化的内存池</div>
+          </div>
+          <div className="text-center text-green-400 text-2xl">↓ pool_init()</div>
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-center text-gray-400 text-sm mb-3">初始化后</div>
+            <div className="space-y-1">
+              {blocks.map((_, i) => (
+                <div
+                  key={i}
+                  className={`flex items-center gap-2 p-2 rounded transition-all duration-300 ${
+                    step >= 2 ? 'bg-green-900/30 border border-green-500' : 'bg-gray-700'
+                  }`}
+                  style={{ animationDelay: `${i * 50}ms` }}
+                >
+                  <span className="text-green-300 font-mono text-sm w-8">块{i}</span>
+                  <span className="text-gray-400 text-xs">→</span>
+                  <span className="text-blue-400 font-mono text-xs">
+                    {i < blocks.length - 1 ? `块${i + 1}` : 'NULL'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="text-center text-gray-400 text-xs mt-2">
+              空闲链表：块 0 → 块 1 → ... → 块 31 → NULL
+            </div>
+          </div>
+          {step >= 2 && (
+            <div className="p-3 bg-green-900/30 rounded border border-green-500 text-center">
+              <div className="text-green-400 text-xs">
+                ✅ 所有 32 块都已链接到空闲链表
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function PoolAlloc({ step }) {
+      const blocks = Array.from({ length: 8 });
+
+      return (
+        <div className="space-y-4">
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-center text-gray-400 text-sm mb-3">分配前</div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-green-400 text-sm">free_list →</span>
+              <span className="text-green-300 font-mono">块 0</span>
+            </div>
+            <div className="grid grid-cols-8 gap-1">
+              {blocks.map((_, i) => (
+                <div
+                  key={i}
+                  className={`h-16 rounded flex flex-col items-center justify-center ${
+                    i === 0 ? 'bg-green-600 animate-pulse' : 'bg-green-900/30 border border-green-500'
+                  }`}
+                >
+                  <span className="text-white text-xs font-bold">块{i}</span>
+                  {i === 0 && <span className="text-green-200 text-xs">空闲</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="text-center text-green-400 text-2xl">↓ pool_alloc()</div>
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-center text-gray-400 text-sm mb-3">分配后</div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-blue-400 text-sm">free_list →</span>
+              <span className="text-blue-300 font-mono">块 1</span>
+            </div>
+            <div className="grid grid-cols-8 gap-1">
+              {blocks.map((_, i) => (
+                <div
+                  key={i}
+                  className={`h-16 rounded flex flex-col items-center justify-center ${
+                    i === 0 ? 'bg-blue-600' :
+                    i === 1 ? 'bg-green-600 animate-pulse' :
+                    'bg-green-900/30 border border-green-500'
+                  }`}
+                >
+                  <span className="text-white text-xs font-bold">块{i}</span>
+                  {i === 0 && <span className="text-blue-200 text-xs">已分配</span>}
+                  {i === 1 && <span className="text-green-200 text-xs">下一个空闲</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+          {step >= 3 && (
+            <div className="grid grid-cols-3 gap-4">
+              <div className="bg-blue-900/30 p-3 rounded border border-blue-500 text-center">
+                <div className="text-blue-400 text-xs">操作</div>
+                <div className="text-blue-300 font-bold">取出头节点</div>
+              </div>
+              <div className="bg-green-900/30 p-3 rounded border border-green-500 text-center">
+                <div className="text-green-400 text-xs">时间</div>
+                <div className="text-green-300 font-bold">O(1)</div>
+              </div>
+              <div className="bg-purple-900/30 p-3 rounded border border-purple-500 text-center">
+                <div className="text-purple-400 text-xs">结果</div>
+                <div className="text-purple-300 font-bold">块 0</div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function PoolFree({ step }) {
+      return (
+        <div className="space-y-4">
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-center text-gray-400 text-sm mb-3">释放前</div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-green-400 text-sm">free_list →</span>
+              <span className="text-green-300 font-mono">块 1</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {[
+                { id: 0, state: 'alloc' },
+                { id: 1, state: 'free' },
+                { id: 2, state: 'alloc' },
+                { id: 3, state: 'free' },
+              ].map((b) => (
+                <div
+                  key={b.id}
+                  className={`h-16 rounded flex flex-col items-center justify-center ${
+                    b.state === 'free' ? 'bg-green-900/30 border border-green-500' : 'bg-blue-600'
+                  }`}
+                >
+                  <span className="text-white text-xs font-bold">块{b.id}</span>
+                  <span className={`text-xs ${b.state === 'free' ? 'text-green-300' : 'text-blue-200'}`}>
+                    {b.state === 'free' ? '空闲' : '已分配'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="text-center text-green-400 text-2xl">↓ pool_free(块 0)</div>
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-center text-gray-400 text-sm mb-3">释放后</div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-green-400 text-sm">free_list →</span>
+              <span className="text-green-300 font-mono">块 0</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {[
+                { id: 0, state: 'free' },
+                { id: 1, state: 'free' },
+                { id: 2, state: 'alloc' },
+                { id: 3, state: 'free' },
+              ].map((b) => (
+                <div
+                  key={b.id}
+                  className={`h-16 rounded flex flex-col items-center justify-center ${
+                    b.state === 'free' ? 'bg-green-600 animate-pulse' : 'bg-blue-600'
+                  }`}
+                >
+                  <span className="text-white text-xs font-bold">块{b.id}</span>
+                  <span className={`text-xs ${b.state === 'free' ? 'text-green-200' : 'text-blue-200'}`}>
+                    {b.state === 'free' ? '空闲' : '已分配'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {step >= 4 && (
+            <div className="p-3 bg-green-900/30 rounded border border-green-500 text-center">
+              <div className="text-green-400 text-xs">
+                ✅ 块 0 重新链接到空闲链表头
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function PoolStats({ step }) {
+      const total = 32;
+      const used = 18;
+      const free = total - used;
+
+      return (
+        <div className="space-y-4">
+          <div className="bg-gray-800 p-4 rounded-lg">
+            <div className="text-center text-gray-400 text-sm mb-3">池统计</div>
+            <div className="flex items-center gap-4 mb-4">
+              <div className="flex-1">
+                <div className="text-center text-green-400 font-bold text-2xl">{used}</div>
+                <div className="text-center text-gray-400 text-xs">已分配</div>
+              </div>
+              <div className="text-gray-600 text-2xl">/</div>
+              <div className="flex-1">
+                <div className="text-center text-blue-400 font-bold text-2xl">{total}</div>
+                <div className="text-center text-gray-400 text-xs">总数</div>
+              </div>
+              <div className="text-gray-600 text-2xl">=</div>
+              <div className="flex-1">
+                <div className="text-center text-purple-400 font-bold text-2xl">{Math.round(used/total*100)}%</div>
+                <div className="text-center text-gray-400 text-xs">使用率</div>
+              </div>
+            </div>
+            <div className="w-full bg-gray-700 rounded-full h-6 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-green-500 to-blue-500 transition-all duration-500"
+                style={{ width: `${used/total*100}%` }}
+              ></div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-green-900/30 p-3 rounded border border-green-500 text-center">
+              <div className="text-green-400 text-xs">空闲块</div>
+              <div className="text-green-300 font-bold text-xl">{free}</div>
+            </div>
+            <div className="bg-blue-900/30 p-3 rounded border border-blue-500 text-center">
+              <div className="text-blue-400 text-xs">已分配</div>
+              <div className="text-blue-300 font-bold text-xl">{used}</div>
+            </div>
+            <div className="bg-purple-900/30 p-3 rounded border border-purple-500 text-center">
+              <div className="text-purple-400 text-xs">总容量</div>
+              <div className="text-purple-300 font-bold text-xl">{total}</div>
+            </div>
+          </div>
+          {step >= 5 && (
+            <div className="p-3 bg-yellow-900/30 rounded border border-yellow-500 text-center">
+              <div className="text-yellow-400 text-xs">
+                ⚠️ 使用率 {Math.round(used/total*100)}% - 考虑扩容或优化
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function MultiPool({ step }) {
+      const pools = [
+        { name: "小对象池", size: "32B", blocks: 64, used: 45, color: "green" },
+        { name: "中对象池", size: "128B", blocks: 32, used: 18, color: "blue" },
+        { name: "大对象池", size: "512B", blocks: 16, used: 8, color: "purple" },
+      ];
+
+      return (
+        <div className="space-y-3">
+          {pools.map((p, i) => (
+            <div key={i} className="bg-gray-800 p-4 rounded-lg">
+              <div className="flex justify-between items-center mb-2">
+                <div className="font-bold text-white">{p.name}</div>
+                <div className={`text-${p.color}-400 font-mono text-sm`}>{p.size} × {p.blocks}</div>
+              </div>
+              <div className="w-full bg-gray-700 rounded-full h-4 overflow-hidden mb-2">
+                <div
+                  className={`h-full bg-${p.color}-500 transition-all duration-500`}
+                  style={{ width: `${p.used/p.blocks*100}%` }}
+                ></div>
+              </div>
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>已分配：{p.used}</span>
+                <span>空闲：{p.blocks - p.used}</span>
+              </div>
+            </div>
+          ))}
+          {step >= 6 && (
+            <div className="p-4 bg-gradient-to-r from-green-900/50 to-blue-900/50 rounded-lg border-2 border-green-500">
+              <div className="text-center text-green-300 font-bold">
+                🎯 多池系统 = 灵活 + 高效
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function CompareMallocPool({ step }) {
+      const comparisons = [
+        { feature: "时间复杂度", malloc: "O(n)", pool: "O(1)", winner: "pool" },
+        { feature: "内存碎片", malloc: "可能严重", pool: "无", winner: "pool" },
+        { feature: "确定性", malloc: "不确定", pool: "确定", winner: "pool" },
+        { feature: "灵活性", malloc: "任意大小", pool: "固定大小", winner: "malloc" },
+        { feature: "内存效率", malloc: "高 (按需)", pool: "低 (预分配)", winner: "malloc" },
+      ];
+
+      return (
+        <div className="space-y-2">
+          {comparisons.map((c, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-4 p-3 rounded transition-all duration-300 ${
+                step >= 7 ? 'bg-green-900/50' : 'bg-gray-800'
+              }`}
+            >
+              <span className="text-gray-400 text-sm w-24">{c.feature}</span>
+              <span className={`text-red-400 font-mono w-24 ${c.winner === 'malloc' ? 'text-green-400 font-bold' : ''}`}>
+                {c.malloc}
+              </span>
+              <span className="text-gray-500">←→</span>
+              <span className={`text-green-400 font-mono w-24 ${c.winner === 'pool' ? 'text-green-400 font-bold' : ''}`}>
+                {c.pool}
+              </span>
+            </div>
+          ))}
+          {step >= 7 && (
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              <div className="bg-blue-900/30 p-4 rounded-lg border border-blue-500">
+                <div className="text-blue-400 font-bold mb-2">malloc 适用场景</div>
+                <div className="text-gray-400 text-xs">
+                  • 大小不确定的对象<br/>
+                  • 内存受限系统<br/>
+                  • 非实时应用
+                </div>
+              </div>
+              <div className="bg-green-900/30 p-4 rounded-lg border border-green-500">
+                <div className="text-green-400 font-bold mb-2">内存池适用场景</div>
+                <div className="text-gray-400 text-xs">
+                  • 固定大小对象<br/>
+                  • 实时系统<br/>
+                  • 高频分配/释放
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function Visualization({ step, visualization }) {
+      switch(visualization) {
+        case 'overview': return <Overview step={step} />;
+        case 'structure': return <PoolStructure step={step} />;
+        case 'init': return <PoolInit step={step} />;
+        case 'alloc': return <PoolAlloc step={step} />;
+        case 'free': return <PoolFree step={step} />;
+        case 'stats': return <PoolStats step={step} />;
+        case 'multipool': return <MultiPool step={step} />;
+        case 'compare': return <CompareMallocPool step={step} />;
+        default: return null;
+      }
+    }
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPaused, setIsPaused] = useState(false);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [showCode, setShowCode] = useState(true);
+      const voiceEndTimerRef = useRef(null);
+      const stepRef = useRef(0);
+
+      const speak = useCallback((text) => {
+        if (!('speechSynthesis' in window)) return;
+
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        const voices = window.speechSynthesis.getVoices();
+        const zhVoice = voices.find(v =>
+          v.lang === 'zh-CN' ||
+          v.lang === 'zh-CN-XiaoxiaoNeural' ||
+          v.name.includes('Xiaoxiao') ||
+          v.name.includes('Chinese')
+        );
+        if (zhVoice) utterance.voice = zhVoice;
+
+        utterance.onend = () => {
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (!isPaused && isPlaying && stepRef.current < STEPS.length - 1) {
+              setCurrentStep(prev => {
+                stepRef.current = prev + 1;
+                return prev + 1;
+              });
+            }
+          }, 800);
+        };
+
+        utterance.onerror = (event) => {
+          console.warn('Speech synthesis error:', event.error);
+          if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (!isPaused && isPlaying && stepRef.current < STEPS.length - 1) {
+              setCurrentStep(prev => {
+                stepRef.current = prev + 1;
+                return prev + 1;
+              });
+            }
+          }, 800);
+        };
+
+        window.speechSynthesis.speak(utterance);
+      }, [isPaused, isPlaying]);
+
+      useEffect(() => {
+        stepRef.current = currentStep;
+      }, [currentStep]);
+
+      useEffect(() => {
+        const loadVoices = () => {
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.getVoices();
+          }
+        };
+
+        loadVoices();
+        if ('speechSynthesis' in window && window.speechSynthesis.onvoiceschanged !== undefined) {
+          window.speechSynthesis.onvoiceschanged = loadVoices;
+        }
+      }, []);
+
+      useEffect(() => {
+        const step = STEPS[currentStep];
+        if (step && isPlaying) {
+          speak(step.title + "。" + step.explanation);
+        }
+        return () => {
+          if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        };
+      }, [currentStep, isPlaying, speak]);
+
+      const handleStepClick = (index) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setCurrentStep(index);
+        stepRef.current = index;
+      };
+
+      const togglePlay = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsPlaying(!isPlaying);
+        if (!isPlaying && currentStep < STEPS.length - 1) {
+          setTimeout(() => setCurrentStep(prev => prev + 1), 100);
+        }
+      };
+
+      const togglePause = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsPaused(!isPaused);
+      };
+
+      const reset = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setCurrentStep(0);
+        stepRef.current = 0;
+        setIsPaused(false);
+        setIsPlaying(true);
+      };
+
+      const nextStep = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => {
+            stepRef.current = prev + 1;
+            return prev + 1;
+          });
+        }
+      };
+
+      const prevStep = () => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        if (currentStep > 0) {
+          setCurrentStep(prev => {
+            stepRef.current = prev - 1;
+            return prev - 1;
+          });
+        }
+      };
+
+      const currentStepData = STEPS[currentStep];
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="mb-4 text-center">
+            <h1 className="text-3xl font-bold mb-2" style={{ color: COLOR_MAP.primary }}>
+              1157 - 内存池
+            </h1>
+            <p className="text-gray-400">Embedded C Animation · 共 {STEPS.length} 步</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {showCode && (
+              <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4 overflow-auto" style={{ maxHeight: '70vh' }}>
+                <pre className="text-xs font-mono leading-relaxed">
+                  {CODE.split('\n').map((line, i) => (
+                    <div
+                      key={i}
+                      className={`code-line px-2 py-1 rounded ${
+                        currentStepData?.codeHighlight?.includes(i + 1) ? 'active' : ''
+                      }`}
+                    >
+                      <span className="text-gray-500 select-none w-8 inline-block">{i + 1}</span>
+                      <span className={currentStepData?.codeHighlight?.includes(i + 1) ? 'text-white' : 'text-gray-300'}>
+                        {line}
+                      </span>
+                    </div>
+                  ))}
+                </pre>
+              </div>
+            )}
+
+            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4" style={{ maxHeight: '70vh', overflow: 'auto' }}>
+              <h3 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.primary }}>
+                {currentStepData?.title}
+              </h3>
+              <Visualization step={currentStep} visualization={currentStepData?.visualization} />
+            </div>
+
+            <div className="lg:col-span-1 space-y-4">
+              <div className="bg-gray-800 rounded-lg p-4">
+                <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.primaryLight }}>
+                  说明
+                </h3>
+                <p className="text-gray-300 leading-relaxed">
+                  {currentStepData?.explanation}
+                </p>
+              </div>
+
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="flex flex-wrap gap-2">
+                  {STEPS.map((step, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleStepClick(index)}
+                      className={`px-3 py-2 rounded text-xs font-bold transition-all duration-300 ${
+                        index === currentStep
+                          ? 'bg-green-600 text-white scale-105'
+                          : index < currentStep
+                          ? 'bg-green-900/50 text-green-300'
+                          : 'bg-gray-700 text-gray-400'
+                      }`}
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex justify-center gap-4">
+            <button onClick={reset} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors">
+              🔄 重置
+            </button>
+            <button onClick={prevStep} disabled={currentStep === 0} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50">
+              ⏮️ 上一步
+            </button>
+            <button onClick={togglePlay} className={`px-6 py-3 rounded-lg font-bold transition-colors ${isPlaying ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+              {isPlaying ? '⏸️ 暂停' : '▶️ 播放'}
+            </button>
+            <button onClick={togglePause} disabled={!isPlaying} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50">
+              {isPaused ? '▶️ 继续' : '⏯️ 挂起'}
+            </button>
+            <button onClick={nextStep} disabled={currentStep === STEPS.length - 1} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors disabled:opacity-50">
+              下一步 ⏭️
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

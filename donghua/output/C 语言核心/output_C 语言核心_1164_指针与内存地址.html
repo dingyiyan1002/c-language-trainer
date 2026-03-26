@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1164 - 指针与内存地址 - 嵌入式 C 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+    @keyframes highlight { 0%, 100% { box-shadow: 0 0 5px rgba(249, 115, 22, 0.5); } 50% { box-shadow: 0 0 20px rgba(249, 115, 22, 0.8); } }
+    .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+    .animate-blink { animation: blink 0.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out forwards; }
+    .animate-scaleIn { animation: scaleIn 0.5s ease-out forwards; }
+    .animate-flow { animation: flow 1.5s linear infinite; }
+    .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#f97316',
+      secondary: '#fb923c',
+      accent: '#fdba74',
+      bg: '#7c2d12',
+      text: '#ffedd5',
+      border: '#ea580c'
+    };
+
+    const STEPS = [
+      { title: '指针概述', voice: '指针是 C 语言中最强大的特性之一。指针本质上是一个变量，它存储的是另一个变量的内存地址。通过指针可以直接访问和操作内存，这在嵌入式编程中尤为重要。' },
+      { title: '内存模型', voice: '程序内存分为多个区域：代码区存储程序指令，全局区存储全局变量和静态变量，栈区存储局部变量和函数调用信息，堆区用于动态内存分配。' },
+      { title: '地址与取值', voice: '取地址运算符&获取变量的内存地址，解引用运算符*获取指针指向的值。指针声明时*表示这是一个指针变量，使用时*表示取指针指向的值。' },
+      { title: '指针运算', voice: '指针可以进行算术运算。指针加 1 不是地址值加 1，而是加上所指类型的大小。int 指针加 1 地址增加 4 字节，char 指针加 1 地址增加 1 字节。' },
+      { title: '指针与数组', voice: '数组名本质上是指向数组首元素的常量指针。可以通过指针访问数组元素，数组下标操作 arr[i] 等价于*(arr+i)。指针可以遍历数组提高效率。' },
+      { title: '指针与函数', voice: '指针作为函数参数可以实现传址调用，函数内部可以修改实参的值。函数也可以返回指针，但要注意不能返回局部变量的地址。' },
+      { title: '二级指针', voice: '二级指针是指向指针的指针，使用**声明。二级指针常用于动态二维数组、修改指针变量的值、指针数组等场景。' },
+      { title: 'void 指针', voice: 'void 指针是通用指针类型，可以指向任何数据类型。void 指针不能直接解引用，必须先强制类型转换。常用于函数参数实现泛型功能。' }
+    ];
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [voiceStatus, setVoiceStatus] = useState('就绪');
+      const voiceEndTimerRef = useRef(null);
+
+      useEffect(() => {
+        if (!isPlaying) return;
+        const step = STEPS[currentStep];
+        setVoiceStatus('播放中...');
+
+        const utterance = new SpeechSynthesisUtterance(step.voice);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+
+        const voices = speechSynthesis.getVoices();
+        const xiaoxiao = voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('zh-CN'));
+        if (xiaoxiao) utterance.voice = xiaoxiao;
+
+        utterance.onend = () => {
+          setVoiceStatus('已完成');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            } else {
+              setIsPlaying(false);
+            }
+          }, 800);
+        };
+
+        utterance.onerror = () => {
+          setVoiceStatus('播放失败');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            }
+          }, 800);
+        };
+
+        speechSynthesis.speak(utterance);
+        return () => clearTimeout(voiceEndTimerRef.current);
+      }, [currentStep, isPlaying]);
+
+      const handlePlay = () => {
+        setCurrentStep(0);
+        setIsPlaying(true);
+        speechSynthesis.cancel();
+      };
+
+      const handlePause = () => {
+        setIsPlaying(false);
+        speechSynthesis.cancel();
+      };
+
+      const handleNext = () => {
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => prev + 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const handlePrev = () => {
+        if (currentStep > 0) {
+          setCurrentStep(prev => prev - 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const renderStepContent = () => {
+        switch(currentStep) {
+          case 0: return <Step0Overview />;
+          case 1: return <Step1MemoryModel />;
+          case 2: return <Step2AddrDeref />;
+          case 3: return <Step3PointerMath />;
+          case 4: return <Step4PointerArray />;
+          case 5: return <Step5PointerFunc />;
+          case 6: return <Step6DoublePointer />;
+          case 7: return <Step7VoidPointer />;
+          default: return <Step0Overview />;
+        }
+      };
+
+      return (
+        <div className="min-h-screen p-4" style={{ background: `linear-gradient(135deg, ${COLOR_MAP.bg} 0%, #0f172a 100%)` }}>
+          <div className="mb-4 flex items-center justify-between" style={{ backgroundColor: 'rgba(30, 41, 59, 0.8)', borderRadius: '12px', padding: '16px' }}>
+            <div>
+              <h1 className="text-2xl font-bold" style={{ color: COLOR_MAP.text }}>1164 - 指针与内存地址</h1>
+              <p className="text-sm" style={{ color: COLOR_MAP.accent }}>Embedded C - Pointer and Memory Address</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-sm" style={{ color: COLOR_MAP.accent }}>
+                {voiceStatus} | 步骤 {currentStep + 1}/{STEPS.length}
+              </div>
+              <button onClick={handlePrev} disabled={currentStep === 0} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>上一个</button>
+              {!isPlaying ? (
+                <button onClick={handlePlay} className="px-4 py-2 rounded" style={{ backgroundColor: '#10b981', color: 'white' }}>播放</button>
+              ) : (
+                <button onClick={handlePause} className="px-4 py-2 rounded" style={{ backgroundColor: '#f59e0b', color: 'white' }}>暂停</button>
+              )}
+              <button onClick={handleNext} disabled={currentStep === STEPS.length - 1} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>下一个</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 h-[calc(100vh-150px)]">
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>代码示例</div>
+              <pre className="p-4 text-sm overflow-auto h-full text-gray-100 font-mono">
+                <code>{renderStepContent()}</code>
+              </pre>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>可视化动画</div>
+              <div className="p-4 h-full overflow-auto">
+                {renderVisualization()}
+              </div>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>解释说明</div>
+              <div className="p-4 space-y-3 h-full overflow-auto">
+                <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20` }}>
+                  <div className="font-bold mb-2" style={{ color: COLOR_MAP.text }}>{STEPS[currentStep].title}</div>
+                  <p style={{ color: COLOR_MAP.accent }}>{STEPS[currentStep].voice}</p>
+                </div>
+                {renderExplanation()}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function renderVisualization() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewViz />;
+        case 1: return <Step1MemoryModelViz />;
+        case 2: return <Step2AddrDerefViz />;
+        case 3: return <Step3PointerMathViz />;
+        case 4: return <Step4PointerArrayViz />;
+        case 5: return <Step5PointerFuncViz />;
+        case 6: return <Step6DoublePointerViz />;
+        case 7: return <Step7VoidPointerViz />;
+        default: return <Step0OverviewViz />;
+      }
+    }
+
+    function renderExplanation() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewExp />;
+        case 1: return <Step1MemoryModelExp />;
+        case 2: return <Step2AddrDerefExp />;
+        case 3: return <Step3PointerMathExp />;
+        case 4: return <Step4PointerArrayExp />;
+        case 5: return <Step5PointerFuncExp />;
+        case 6: return <Step6DoublePointerExp />;
+        case 7: return <Step7VoidPointerExp />;
+        default: return null;
+      }
+    }
+
+    function Step0Overview() {
+      return `/**
+ * 指针与内存地址 - 概述
+ * Pointer and Memory Address
+ *
+ * 指针本质:
+ * - 存储内存地址的变量
+ * - 直接访问内存的钥匙
+ * - 嵌入式编程的核心
+ */
+
+// 指针声明
+int *ptr;          // 指向 int 的指针
+char *str;         // 指向 char 的指针
+float *fptr;       // 指向 float 的指针
+void *vptr;        // 通用指针 (void*)
+
+// 指针相关运算符
+// &  : 取地址 (Address of)
+// *  : 解引用 (Dereference)
+
+// 示例
+int var = 100;
+int *ptr = &var;   // ptr 存储 var 的地址
+int val = *ptr;    // val = 100, 取 ptr 指向的值
+
+// 指针重要性
+// 1. 直接操作硬件寄存器
+// 2. 高效传递大数据
+// 3. 动态内存管理
+// 4. 实现数据结构 (链表/树等)`;
+    }
+
+    function Step0OverviewViz() {
+      return (
+        <div className="space-y-4">
+          <div className="text-center mb-4">
+            <div className="text-lg font-bold" style={{ color: COLOR_MAP.text }}>指针概念</div>
+          </div>
+          <div className="p-4 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="flex justify-between items-center">
+              <div className="p-3 rounded text-center" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                <div className="font-bold text-sm">指针变量 ptr</div>
+                <div className="text-xs mt-2 font-mono">0x2000</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.accent }}>存储地址</div>
+              </div>
+              <div className="flex items-center">
+                <div className="w-24 h-0.5" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="w-3 h-3 rotate-45 -mx-2" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="text-xs mx-2" style={{ color: COLOR_MAP.text }}>指向</div>
+              </div>
+              <div className="p-3 rounded text-center" style={{ backgroundColor: COLOR_MAP.secondary, color: 'white' }}>
+                <div className="font-bold text-sm">变量 var</div>
+                <div className="text-xs mt-2 font-mono">100</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.accent }}>地址：0x2000</div>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+                <div>ptr = &var;</div>
+                <div style={{ color: COLOR_MAP.text }}>ptr 得到 var 的地址</div>
+              </div>
+              <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+                <div>*ptr = 100;</div>
+                <div style={{ color: COLOR_MAP.text }}>解引用取到值</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step0OverviewExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>指针本质：</strong> 指针是一个变量，但它存储的不是普通值，而是另一个变量的内存地址。通过指针可以间接访问和修改该地址的数据。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>嵌入式应用：</strong> 在嵌入式 C 中，指针用于访问硬件寄存器 (如#define REG (*(volatile uint32_t*)0x40020000))、操作缓冲区、实现数据结构等。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>指针声明：</strong> int *ptr 声明一个指向 int 的指针。*表示这是指针变量，int 表示它指向的数据类型。</p>
+        </div>
+      );
+    }
+
+    function Step1MemoryModel() {
+      return `/**
+ * 内存模型
+ */
+
+// 程序内存布局
+// ┌─────────────────────────┐ 高地址
+// │    内核空间 (Kernel)     │
+// ├─────────────────────────┤
+// │    代码区 (.text)        │  存储程序指令
+// │    (只读，固定大小)       │
+// ├─────────────────────────┤
+// │    数据区 (.data)        │  已初始化全局/静态变量
+// │    .bss 段               │  未初始化全局/静态变量
+// ├─────────────────────────┤
+// │         堆 (Heap)        │  动态分配，向上增长
+// │         ↑                │
+// │         │ 空闲区域        │
+// │         ↓                │
+// │         栈 (Stack)       │  自动增长，向下增长
+// ├─────────────────────────┤
+// │    用户空间              │
+// └─────────────────────────┘ 低地址
+
+// 各区域特点
+// 代码区：只读，存储指令
+// 数据区：全局变量，静态变量
+// 堆：malloc/free 动态分配
+// 栈：局部变量，函数调用`;
+    }
+
+    function Step1MemoryModelViz() {
+      return (
+        <div className="space-y-2">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>内存布局</div>
+          <div className="space-y-1">
+            <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>代码区 (.text)</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>程序指令 · 只读</div>
+            </div>
+            <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>数据区 (.data/.bss)</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>全局变量 · 静态变量</div>
+            </div>
+            <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.accent}30`, border: `1px solid ${COLOR_MAP.accent}` }}>
+              <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>堆 (Heap)</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.text }}>malloc/free · 向上增长</div>
+            </div>
+            <div className="text-center text-xs" style={{ color: COLOR_MAP.accent }}>↑ ↓ 空闲区域</div>
+            <div className="p-2 rounded text-center animate-pulse" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}` }}>
+              <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>栈 (Stack)</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>局部变量 · 向下增长</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step1MemoryModelExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>代码区：</strong> 存储程序的可执行指令，只读。函数代码位于此区域。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>数据区：</strong> .data 段存储已初始化的全局变量和静态变量，.bss 段存储未初始化的全局变量和静态变量 (自动初始化为 0)。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>堆和栈：</strong> 堆用于动态内存分配 (malloc/free)，向上增长。栈用于局部变量和函数调用，向下增长。两者相向增长，可能相遇导致栈溢出。</p>
+        </div>
+      );
+    }
+
+    function Step2AddrDeref() {
+      return `/**
+ * 地址运算符 & 和 解引用运算符 *
+ */
+
+// 变量与地址
+int var = 42;
+// 内存示意:
+// 地址      值
+// 0x1000:  42
+
+// & 取地址运算符
+int *ptr = &var;
+// ptr 的值是 0x1000 (var 的地址)
+
+// * 解引用运算符
+int val = *ptr;
+// val = 42 (取 ptr 指向地址的值)
+
+// 完整示例
+int a = 10;
+int *p = &a;      // p 指向 a
+*p = 20;          // 修改 a 的值为 20
+printf("%d", a);  // 输出 20
+
+// & 和*互为逆运算
+int x = 100;
+int *px = &x;     // &x 得到 x 的地址
+int y = *&x;      // y = 100 (&和*抵消)
+int z = *px;      // z = 100`;
+    }
+
+    function Step2AddrDerefViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>& 和 * 运算符</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-20 font-bold" style={{ color: COLOR_MAP.text }}>int var = 42;</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+                  <span style={{ color: COLOR_MAP.text }}>地址：0x1000</span>
+                  <span className="mx-2" style={{ color: COLOR_MAP.accent }}>|</span>
+                  <span style={{ color: COLOR_MAP.text }}>值：42</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-20 font-bold" style={{ color: COLOR_MAP.text }}>&var</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                  <span style={{ color: COLOR_MAP.text }}>得到地址：0x1000</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-20 font-bold" style={{ color: COLOR_MAP.text }}>int *ptr = &var;</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.accent}30`, border: `1px solid ${COLOR_MAP.accent}` }}>
+                  <span style={{ color: COLOR_MAP.text }}>ptr 存储 0x1000</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-20 font-bold" style={{ color: COLOR_MAP.text }}>*ptr</div>
+                <div className="flex-1 p-1 rounded animate-pulse" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                  <span>解引用得到：42</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs text-center">
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}`, color: COLOR_MAP.text }}>
+              & : 取地址
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}`, color: COLOR_MAP.text }}>
+              * : 取指针指向的值
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step2AddrDerefExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>& 取地址：</strong> & 是一元运算符，返回操作数的内存地址。&var 返回变量 var 的地址。这个地址值可以赋给指针变量。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>* 解引用：</strong> * 也是一元运算符，用于访问指针指向的内存位置。*ptr 返回 ptr 所存储地址处的值。*有时也叫"间接寻址运算符"。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>&和*关系：</strong> & 和 * 互为逆运算。*&x 等价于 x，先取地址再解引用回到原值。但*&不能随便互换，*&x 合法，*&100 非法。</p>
+        </div>
+      );
+    }
+
+    function Step3PointerMath() {
+      return `/**
+ * 指针运算
+ */
+
+// 指针加减整数
+int arr[5] = {10, 20, 30, 40, 50};
+int *p = arr;      // p 指向 arr[0], 地址假设为 0x1000
+
+p = p + 1;         // p 指向 arr[1], 地址是 0x1004 (不是 0x1001!)
+// 因为 int 占 4 字节，p+1 = 地址 + 4
+
+p = p + 2;         // p 指向 arr[3], 地址是 0x100C
+
+// 不同类型指针步长
+char *cptr;        // cptr + 1 = 地址 + 1 (char 1 字节)
+short *sptr;       // sptr + 1 = 地址 + 2 (short 2 字节)
+int *iptr;         // iptr + 1 = 地址 + 4 (int 4 字节)
+long *lptr;        // lptr + 1 = 地址 + 8 (long 8 字节)
+
+// 指针减法 (两个指针相减)
+int *p1 = &arr[4];
+int *p2 = &arr[1];
+int diff = p1 - p2;  // diff = 3 (相差 3 个 int 元素)
+// 不是字节差 12，而是元素个数差 3
+
+// 指针不能相加，但可比较
+if (p1 > p2) { }   // 合法：比较地址大小`;
+    }
+
+    function Step3PointerMathViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>指针运算</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-1 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>char* +1</div>
+                <div className="flex-1 flex gap-0.5">
+                  <div className="flex-1 h-4 rounded" style={{ backgroundColor: COLOR_MAP.primary }}></div>
+                  <div className="flex-1 h-4 rounded" style={{ backgroundColor: COLOR_MAP.bg }}></div>
+                </div>
+                <div className="w-12 text-right" style={{ color: COLOR_MAP.accent }}>+1 字节</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>short* +1</div>
+                <div className="flex-1 flex gap-0.5">
+                  <div className="flex-1 h-4 rounded" style={{ backgroundColor: COLOR_MAP.secondary }}></div>
+                  <div className="flex-1 h-4 rounded" style={{ backgroundColor: COLOR_MAP.secondary }}></div>
+                  <div className="flex-1 h-4 rounded" style={{ backgroundColor: COLOR_MAP.bg }}></div>
+                </div>
+                <div className="w-12 text-right" style={{ color: COLOR_MAP.accent }}>+2 字节</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>int* +1</div>
+                <div className="flex-1 flex gap-0.5">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="flex-1 h-4 rounded" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                  ))}
+                </div>
+                <div className="w-12 text-right" style={{ color: COLOR_MAP.accent }}>+4 字节</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>long* +1</div>
+                <div className="flex-1 flex gap-0.5">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="flex-1 h-4 rounded" style={{ backgroundColor: COLOR_MAP.bg, border: `1px solid ${COLOR_MAP.border}` }}></div>
+                  ))}
+                </div>
+                <div className="w-12 text-right" style={{ color: COLOR_MAP.accent }}>+8 字节</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs animate-blink" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            指针 +1 = 地址 + 所指类型的大小
+          </div>
+        </div>
+      );
+    }
+
+    function Step3PointerMathExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>指针加法：</strong> 指针加 1 不是地址简单加 1，而是加上所指类型的大小。int*加 1，地址增加 4 (32 位系统)。这样设计是为了方便数组访问。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>指针减法：</strong> 两个同类型指针相减，结果是它们之间相差的元素个数，不是字节差。例如 int 数组中，&arr[5] - &arr[2] = 3，不是 12。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>指针比较：</strong> 指针可以比较大小 (==, !=, &lt;, &gt; 等)，用于判断指针位置关系。指向高地址的指针值更大。</p>
+        </div>
+      );
+    }
+
+    function Step4PointerArray() {
+      return `/**
+ * 指针与数组
+ */
+
+// 数组名即是指针
+int arr[5] = {1, 2, 3, 4, 5};
+// arr 等价于 &arr[0], 指向首元素的指针
+
+// 下标与指针等价
+arr[0]  等价于  *(arr + 0)
+arr[1]  等价于  *(arr + 1)
+arr[i]  等价于  *(arr + i)
+
+// 指针遍历数组
+void print_array(int *arr, int size) {
+    for (int i = 0; i < size; i++) {
+        printf("%d ", arr[i]);      // 下标方式
+        printf("%d ", *(arr + i));  // 指针方式
+        printf("%d ", *arr++);      // 指针自增 (会改变 arr)
+    }
+}
+
+// 指针遍历 (不改变原指针)
+int *p = arr;
+for (int i = 0; i < 5; i++) {
+    printf("%d ", *(p + i));  // p 不变
+    printf("%d ", *p++);      // p 自增
+}
+
+// 数组作为函数参数 (退化为指针)
+void func(int arr[]) { }  // 等价于 void func(int *arr)
+// sizeof(arr) = 4 (指针大小), 不是数组大小!`;
+    }
+
+    function Step4PointerArrayViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>指针与数组</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-1 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>arr[0]</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>1</div>
+                <div className="w-20 text-right" style={{ color: COLOR_MAP.accent }}>*(arr+0)</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>arr[1]</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: COLOR_MAP.secondary, color: 'white' }}>2</div>
+                <div className="w-20 text-right" style={{ color: COLOR_MAP.accent }}>*(arr+1)</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>arr[2]</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: COLOR_MAP.accent, color: '#0f172a' }}>3</div>
+                <div className="w-20 text-right" style={{ color: COLOR_MAP.accent }}>*(arr+2)</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>arr[3]</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: COLOR_MAP.bg, border: `1px solid ${COLOR_MAP.border}` }}>4</div>
+                <div className="w-20 text-right" style={{ color: COLOR_MAP.accent }}>*(arr+3)</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>arr[4]</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: COLOR_MAP.bg, border: `1px solid ${COLOR_MAP.border}` }}>5</div>
+                <div className="w-20 text-right" style={{ color: COLOR_MAP.accent }}>*(arr+4)</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            arr[i] 完全等价于 *(arr + i)
+          </div>
+        </div>
+      );
+    }
+
+    function Step4PointerArrayExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>数组名即指针：</strong> 数组名 arr 在表达式中自动转换为指向首元素的指针 &arr[0]。但 arr 是常量指针，不能修改 (arr++ 非法)。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>下标与指针：</strong> arr[i] 完全等价于 *(arr+i)。编译器将下标操作转换为指针运算。指针方式更灵活但可能降低可读性。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>数组传参退化：</strong> 数组作为函数参数时退化为指针，丢失长度信息。函数内部 sizeof(arr) 得到的是指针大小 (4 或 8 字节)，不是数组大小。需要额外传递长度参数。</p>
+        </div>
+      );
+    }
+
+    function Step5PointerFunc() {
+      return `/**
+ * 指针与函数
+ */
+
+// 指针作为参数 (传址调用)
+void swap(int *a, int *b) {
+    int temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+int x = 10, y = 20;
+swap(&x, &y);  // 传递地址，函数内可修改实参
+// 现在 x=20, y=10
+
+// 返回值是指针
+int* find_max(int *arr, int size) {
+    int *max = &arr[0];
+    for (int i = 1; i < size; i++) {
+        if (arr[i] > *max) {
+            max = &arr[i];
+        }
+    }
+    return max;  // 返回最大值地址
+}
+
+// ⚠️ 错误：返回局部变量地址
+int* bad_func() {
+    int local = 100;
+    return &local;  // 错误！函数返回后 local 被销毁
+}
+
+// 函数指针
+int add(int a, int b) { return a + b; }
+int (*func_ptr)(int, int) = &add;  // 函数指针
+int result = func_ptr(3, 4);  // result = 7`;
+    }
+
+    function Step5PointerFuncViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>指针与函数</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="text-xs font-bold mb-2" style={{ color: COLOR_MAP.text }}>传值 vs 传址</div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}` }}>
+                <div style={{ color: COLOR_MAP.text }}>传值调用</div>
+                <div className="mt-1" style={{ color: COLOR_MAP.accent }}>void func(int x)</div>
+                <div style={{ color: COLOR_MAP.accent }}>函数内无法修改实参</div>
+              </div>
+              <div className="p-2 rounded animate-pulse" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                <div>传址调用</div>
+                <div className="mt-1">void func(int *x)</div>
+                <div>函数内可修改实参</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded" style={{ backgroundColor: '#ef444420`, border: `1px solid #ef4444' }}>
+            <div className="text-xs font-bold mb-1" style={{ color: '#ef4444' }}>⚠️ 危险：返回局部变量地址</div>
+            <div className="text-xs" style={{ color: COLOR_MAP.accent }}>局部变量在栈上，函数返回后失效</div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            函数指针：指向函数的指针，用于回调函数、函数表等
+          </div>
+        </div>
+      );
+    }
+
+    function Step5PointerFuncExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>传址调用：</strong> 传递指针给函数，函数可以修改实参的值。这是 C 语言实现"引用传递"的方式，用于需要返回多个值或修改大对象的场景。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>返回指针：</strong> 函数可以返回指针，但要确保返回的地址有效。可以返回全局变量、静态变量、动态分配内存的地址，绝不能返回局部变量地址。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>函数指针：</strong> 函数也有地址，可以用函数指针存储。函数指针用于回调函数、状态机、函数表等高级应用。</p>
+        </div>
+      );
+    }
+
+    function Step6DoublePointer() {
+      return `/**
+ * 二级指针 (指针的指针)
+ */
+
+// 声明二级指针
+int var = 100;
+int *ptr = &var;
+int **pptr = &ptr;   // pptr 指向 ptr
+
+// 内存示意
+// pptr (0x3000) → ptr (0x2000) → var (0x1000)
+// 值：0x2000      值：0x1000     值：100
+
+// 解引用
+*pptr = &var;      // 等价于 ptr = &var;
+**pptr = 200;      // 等价于 var = 200;
+
+// 应用场景 1: 动态二维数组
+int **matrix = (int**)malloc(rows * sizeof(int*));
+for (int i = 0; i < rows; i++) {
+    matrix[i] = (int*)malloc(cols * sizeof(int));
+}
+
+// 应用场景 2: 修改指针变量
+void allocate(int **p) {
+    *p = (int*)malloc(100 * sizeof(int));
+}
+int *ptr = NULL;
+allocate(&ptr);  // ptr 被分配内存
+
+// 应用场景 3: 字符串数组
+char *strs[] = {"Hello", "World"};
+char **pp = strs;`;
+    }
+
+    function Step6DoublePointerViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>二级指针</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="flex justify-between items-center">
+              <div className="p-3 rounded text-center" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                <div className="font-bold text-xs">pptr</div>
+                <div className="text-xs mt-2 font-mono">0x3000</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.accent }}>存储：0x2000</div>
+              </div>
+              <div className="flex items-center">
+                <div className="w-16 h-0.5" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="w-2 h-2 rotate-45 -mx-1" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="text-xs mx-1" style={{ color: COLOR_MAP.text }}>指向</div>
+              </div>
+              <div className="p-3 rounded text-center" style={{ backgroundColor: COLOR_MAP.secondary, color: 'white' }}>
+                <div className="font-bold text-xs">ptr</div>
+                <div className="text-xs mt-2 font-mono">0x2000</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.accent }}>存储：0x1000</div>
+              </div>
+              <div className="flex items-center">
+                <div className="w-16 h-0.5" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="w-2 h-2 rotate-45 -mx-1" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="text-xs mx-1" style={{ color: COLOR_MAP.text }}>指向</div>
+              </div>
+              <div className="p-3 rounded text-center animate-pulse" style={{ backgroundColor: COLOR_MAP.accent, color: '#0f172a' }}>
+                <div className="font-bold text-xs">var</div>
+                <div className="text-xs mt-2 font-mono">0x1000</div>
+                <div className="text-xs">值：100</div>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}`, color: COLOR_MAP.text }}>
+              *pptr = ptr
+            </div>
+            <div className="p-2 rounded text-center animate-blink" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+              **pptr = var
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step6DoublePointerExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>二级指针：</strong> 指向指针的指针，使用**声明。*pptr 得到 ptr，**pptr 得到 var。可以理解为"指针的指针"。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>动态二维数组：</strong> 二级指针常用于动态二维数组。先分配行指针数组，再为每行分配列空间。matrix[i][j] 可正常访问。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>修改指针变量：</strong> 函数要修改指针变量本身 (而非指向的值) 时，需要传递指针的地址，即二级指针。常见于内存分配函数。</p>
+        </div>
+      );
+    }
+
+    function Step7VoidPointer() {
+      return `/**
+ * void 指针 (通用指针)
+ */
+
+// void 指针声明
+void *vptr;
+
+// void 指针特点
+// 1. 可以指向任何类型的数据
+// 2. 不能直接解引用 (需强制类型转换)
+// 3. 不能进行指针运算 (需先转换)
+
+// 示例
+int i = 42;
+float f = 3.14;
+char c = 'A';
+
+void *vp;
+vp = &i;      // 可以指向 int
+vp = &f;      // 可以指向 float
+vp = &c;      // 可以指向 char
+
+// 使用前必须转换
+int *ip = (int*)vp;
+int val = *ip;  // val = 42
+
+// 直接解引用是错误的
+// int x = *vp;  // 编译错误!
+
+// 应用：泛型函数
+void print_value(void *data, char type) {
+    switch (type) {
+        case 'i': printf("%d", *(int*)data); break;
+        case 'f': printf("%f", *(float*)data); break;
+        case 'c': printf("%c", *(char*)data); break;
+    }
+}
+
+// malloc 返回 void*
+int *arr = (int*)malloc(100 * sizeof(int));`;
+    }
+
+    function Step7VoidPointerViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>void 指针</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="text-xs font-bold mb-2" style={{ color: COLOR_MAP.text }}>通用指针特性</div>
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-24 font-bold" style={{ color: COLOR_MAP.text }}>void *vptr;</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>通用指针</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-24" style={{ color: COLOR_MAP.accent }}>→ &int_var</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>可指向 int</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-24" style={{ color: COLOR_MAP.accent }}>→ &float_var</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>可指向 float</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-24" style={{ color: COLOR_MAP.accent }}>→ &char_var</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.accent}30` }}>可指向 char</div>
+              </div>
+              <div className="p-2 rounded" style={{ backgroundColor: '#ef444420`, border: `1px solid #ef4444' }}>
+                <div style={{ color: '#ef4444', fontWeight: 'bold' }}>⚠️ 不能直接 *vptr</div>
+                <div style={{ color: COLOR_MAP.accent }}>必须先强制类型转换</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            malloc 返回 void*，需转换后使用
+          </div>
+        </div>
+      );
+    }
+
+    function Step7VoidPointerExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>通用指针：</strong> void* 是"无类型"指针，可以存储任何类型变量的地址。这使 void* 成为泛型编程的基础。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>使用限制：</strong> void* 不能直接解引用 (*vptr 非法)，不能直接指针运算 (vptr++ 非法)。必须先强制转换为具体类型指针。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>应用场景：</strong> malloc/free 返回/接收 void*；泛型函数参数 (如 qsort、bsearch)；数据存储不知道具体类型时。</p>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

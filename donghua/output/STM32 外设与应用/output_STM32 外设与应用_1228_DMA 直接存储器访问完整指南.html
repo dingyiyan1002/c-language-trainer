@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 DMA 直接存储器访问完整指南</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); opacity: 1; } 100% { transform: translateX(200px); opacity: 0; } }
+        @keyframes transfer { 0% { transform: translateY(0); } 100% { transform: translateY(100px); } }
+        @keyframes read { 0%, 100% { background-color: rgb(59, 130, 246); } 50% { background-color: rgb(96, 165, 250); } }
+        @keyframes write { 0%, 100% { background-color: rgb(16, 185, 129); } 50% { background-color: rgb(52, 211, 153); } }
+        @keyframes move { 0% { transform: translateX(0); } 100% { transform: translateX(150px); } }
+        @keyframes circular { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .pulse { animation: pulse 1s infinite; }
+        .blink { animation: blink 0.5s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .flow { animation: flow 1.5s infinite; }
+        .transfer { animation: transfer 0.8s infinite; }
+        .read { animation: read 0.3s infinite; }
+        .write { animation: write 0.3s infinite; }
+        .move { animation: move 1s infinite; }
+        .circular { animation: circular 2s linear infinite; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ========== 可配置参数 ==========
+        const STEPS = [
+            { title: "DMA 基础架构", code: `// DMA: Direct Memory Access
+// 直接在存储器与外设间传输数据
+// 无需 CPU 干预，提高效率
+
+// STM32 DMA 特性:
+// - 2 个 DMA 控制器 (DMA1/DMA2)
+// - 每个 8 个流 (Stream 0-7)
+// - 每个流 8 个通道 (Channel)
+// - 支持存储器/外设间传输` },
+            { title: "DMA 流与通道", code: `// DMA 流 (Stream) 与通道 (Channel) 映射
+// 每个外设固定连接到特定 DMA 流通道
+
+// DMA1 通道映射:
+// Stream 0: CH0=SPI1_RX, CH1=I2C1_RX
+// Stream 1: CH0=SPI1_TX, CH3=USART1_RX
+// Stream 2: CH0=SPI2_RX, CH4=USART2_RX
+// Stream 3: CH0=SPI2_TX, CH4=USART2_TX
+// Stream 4: CH0=I2C1_TX, CH3=USART1_TX
+// Stream 5: CH3=USART1_RX, CH4=I2C1_RX
+// Stream 6: CH3=USART1_TX, CH4=I2C1_TX
+// Stream 7: CH0=SPI2_RX
+
+// DMA2 通道映射 (类似)` },
+            { title: "DMA 配置寄存器", code: `// DMA 配置步骤
+void DMA_Config(void) {
+    // 1. 使能时钟
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
+
+    // 2. 选择通道 (CHSEL)
+    DMA1_Stream0->CR &= ~DMA_SxCR_CHSEL;
+    DMA1_Stream0->CR |= 0;  // Channel 0
+
+    // 3. 配置方向
+    DMA1_Stream0->CR |= DMA_SxCR_DIR_0;  // 外设到存储器
+
+    // 4. 配置数据宽度
+    DMA1_Stream0->CR |= DMA_SxCR_PSIZE_0;  // 8 位
+    DMA1_Stream0->CR |= DMA_SxCR_MSIZE_0;  // 8 位
+
+    // 5. 使能中断
+    DMA1_Stream0->CR |= DMA_SxCR_TCIE;  // 传输完成
+}` },
+            { title: "存储器到存储器", code: `// 存储器到存储器传输
+// 用于快速内存拷贝
+
+void DMA_MemToMem_Copy(uint32_t* src, uint32_t* dst, uint16_t len) {
+    DMA1_Stream0->CR = DMA_SxCR_DIR_1;  // M2M
+    DMA1_Stream0->PAR = (uint32_t)src;  // 源地址
+    DMA1_Stream0->M0AR = (uint32_t)dst; // 目标地址
+    DMA1_Stream0->NDTR = len;           // 数据量
+
+    DMA1_Stream0->CR |= DMA_SxCR_EN;    // 使能
+
+    while (DMA1_Stream0->NDTR);         // 等待完成
+}` },
+            { title: "外设到存储器 (接收)", code: `// 外设到存储器 - USART 接收示例
+void DMA_USART_Receive(uint8_t* buf, uint16_t len) {
+    DMA1_Stream2->CR = 0;
+    DMA1_Stream2->CR |= DMA_SxCR_DIR_0;     // 外设到内存
+    DMA1_Stream2->CR |= DMA_SxCR_PSIZE_0;   // 8 位
+    DMA1_Stream2->CR |= DMA_SxCR_MSIZE_0;   // 8 位
+    DMA1_Stream2->CR |= DMA_SxCR_MINC;      // 内存地址递增
+    DMA1_Stream2->CR |= DMA_SxCR_CIRC;      // 循环模式
+
+    DMA1_Stream2->PAR = (uint32_t)&USART1->DR;
+    DMA1_Stream2->M0AR = (uint32_t)buf;
+    DMA1_Stream2->NDTR = len;
+
+    DMA1_Stream2->CR |= DMA_SxCR_EN;
+    USART1->CR3 |= USART_CR3_DMAR;  // 使能 USART DMA
+}` },
+            { title: "存储器到外设 (发送)", code: `// 存储器到外设 - USART 发送示例
+void DMA_USART_Transmit(uint8_t* buf, uint16_t len) {
+    DMA1_Stream4->CR = 0;
+    DMA1_Stream4->CR |= DMA_SxCR_DIR_1;     // 内存到外设
+    DMA1_Stream4->CR |= DMA_SxCR_PSIZE_0;   // 8 位
+    DMA1_Stream4->CR |= DMA_SxCR_MSIZE_0;   // 8 位
+    DMA1_Stream4->CR |= DMA_SxCR_MINC;      // 内存地址递增
+
+    DMA1_Stream4->PAR = (uint32_t)&USART1->DR;
+    DMA1_Stream4->M0AR = (uint32_t)buf;
+    DMA1_Stream4->NDTR = len;
+
+    DMA1_Stream4->CR |= DMA_SxCR_EN;
+    USART1->CR3 |= USART_CR3_DMAT;  // 使能 USART DMA
+}` },
+            { title: "循环模式与中断", code: `// 循环模式 (Circular Mode)
+// 用于连续数据流 (如 ADC 采样)
+
+volatile uint8_t dma_complete = 0;
+
+// 传输完成回调
+void DMA1_Stream2_IRQHandler(void) {
+    if (DMA1->HISR & DMA_HISR_TCIF2) {
+        DMA1->HIFCR = DMA_HIFCR_CTCIF2;  // 清除标志
+        dma_complete = 1;  // 标志完成
+    }
+}
+
+// 半传输中断 (用于双缓冲)
+void DMA_HalfComplete(void) {
+    if (DMA1->HISR & DMA_HISR_HTIF2) {
+        DMA1->HIFCR = DMA_HIFCR_CHTIF2;
+        // 处理前半部分数据
+    }
+}` },
+            { title: "应用实例", code: `// ADC 多通道 + DMA 扫描
+uint32_t adc_values[4];  // 4 通道数据
+
+void ADC_DMA_Init(void) {
+    // DMA 配置
+    DMA2_Stream0->PAR = (uint32_t)&ADC1->DR;
+    DMA2_Stream0->M0AR = (uint32_t)adc_values;
+    DMA2_Stream0->NDTR = 4;
+    DMA2_Stream0->CR = DMA_SxCR_DIR_0 | DMA_SxCR_MINC |
+                       DMA_SxCR_CIRC | DMA_SxCR_TCIE;
+
+    // ADC 配置
+    ADC1->SQR1 = (3 << 20);  // 4 个转换
+    ADC1->CR2 |= ADC_CR2_DMA | ADC_CR2_DDS;  // 使能 DMA
+    ADC1->CR2 |= ADC_CR2_SWSTART;
+}
+
+// 主循环读取数据
+void Main_Loop(void) {
+    if (dma_complete) {
+        float ch0 = adc_values[0] * 3.3f / 4095;
+        float ch1 = adc_values[1] * 3.3f / 4095;
+        // ...处理数据
+        dma_complete = 0;
+    }
+}` }
+        ];
+
+        // ========== 6 种颜色配置 ==========
+        const COLOR_MAP = {
+            primary: "#06b6d4",     // cyan-500 - 主色
+            secondary: "#0891b2",   // cyan-600 - 次要色
+            accent: "#22d3ee",      // cyan-400 - 强调色
+            bgStart: "#ecfeff",     // cyan-50 - 背景渐变起始
+            bgEnd: "#cffafe",       // cyan-100 - 背景渐变结束
+            code: "#164e63"         // cyan-900 - 代码高亮
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [isComplete, setIsComplete] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = speechSynthesis.getVoices();
+                    const preferredVoice = voices.find(voice =>
+                        voice.name.includes('Xiaoxiao') ||
+                        voice.name.includes('Chinese') ||
+                        voice.lang === 'zh-CN'
+                    );
+                    if (preferredVoice) utterance.voice = preferredVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (currentStep < STEPS.length - 1 && isPlaying) {
+                                setCurrentStep(prev => prev + 1);
+                            } else if (currentStep >= STEPS.length - 1) {
+                                setIsComplete(true);
+                                setIsPlaying(false);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (currentStep < STEPS.length - 1 && isPlaying) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            // 步骤变化时触发语音
+            useEffect(() => {
+                if (isPlaying || currentStep === 0) {
+                    speak(STEPS[currentStep].title);
+                }
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep, isPlaying]);
+
+            // 初始化语音
+            useEffect(() => {
+                if ('speechSynthesis' in window) {
+                    speechSynthesis.getVoices();
+                }
+            }, []);
+
+            const handleStart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+                setIsComplete(false);
+                speak(STEPS[0].title);
+            };
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const handleReset = () => {
+                setIsPlaying(false);
+                setCurrentStep(0);
+                setIsComplete(false);
+                window.speechSynthesis.cancel();
+            };
+
+            // DMA 传输动画组件
+            const DmaTransferAnimation = () => {
+                const step = currentStep;
+
+                // 步骤 1: DMA 架构
+                if (step === 0) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-lg p-4">
+                            <div className="grid grid-cols-3 gap-4 h-full">
+                                {/* 外设区 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h4 className="text-sm font-bold text-cyan-700 mb-2">外设</h4>
+                                    <div className="space-y-2">
+                                        <div className="bg-cyan-100 p-2 rounded text-xs">USART1</div>
+                                        <div className="bg-cyan-100 p-2 rounded text-xs">SPI1</div>
+                                        <div className="bg-cyan-100 p-2 rounded text-xs">I2C1</div>
+                                        <div className="bg-cyan-100 p-2 rounded text-xs">ADC1</div>
+                                    </div>
+                                </div>
+
+                                {/* DMA 控制器 */}
+                                <div className="bg-cyan-600 rounded-lg p-3 shadow text-white">
+                                    <h4 className="text-sm font-bold mb-2">DMA 控制器</h4>
+                                    <div className="space-y-1">
+                                        <div className="bg-cyan-500 p-2 rounded text-xs pulse">DMA1 Stream 0-7</div>
+                                        <div className="bg-cyan-500 p-2 rounded text-xs pulse">DMA2 Stream 0-7</div>
+                                    </div>
+                                    <div className="mt-2 text-xs text-cyan-100">
+                                        <div>通道选择器</div>
+                                        <div className="flex gap-1 mt-1">
+                                            {[0,1,2,3,4,5,6,7].map(i => (
+                                                <div key={i} className="w-4 h-4 bg-cyan-400 rounded-full"></div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 存储器区 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <h4 className="text-sm font-bold text-cyan-700 mb-2">存储器</h4>
+                                    <div className="space-y-2">
+                                        <div className="bg-green-100 p-2 rounded text-xs border-2 border-green-500">SRAM1</div>
+                                        <div className="bg-green-100 p-2 rounded text-xs">SRAM2</div>
+                                        <div className="bg-green-100 p-2 rounded text-xs">CCM RAM</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 数据流动画 */}
+                            <div className="absolute top-1/2 left-1/4 w-1/2 h-0.5 bg-gray-300">
+                                <div className="absolute w-4 h-4 bg-cyan-500 rounded-full flow" style={{ animationDirection: 'alternate' }}></div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 2: 流与通道映射
+                if (step === 1) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-lg p-4 overflow-auto">
+                            <h4 className="text-sm font-bold text-cyan-700 mb-2">DMA1 通道映射表</h4>
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="bg-cyan-200">
+                                        <th className="p-1">Stream</th>
+                                        <th className="p-1">Channel 0</th>
+                                        <th className="p-1">Channel 1</th>
+                                        <th className="p-1">Channel 2</th>
+                                        <th className="p-1">Channel 3</th>
+                                        <th className="p-1">Channel 4</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {[
+                                        ['0', 'SPI1_RX', 'I2C1_RX', '-', '-', '-'],
+                                        ['1', 'SPI1_TX', '-', '-', 'USART1_RX', '-'],
+                                        ['2', 'SPI2_RX', '-', '-', '-', 'USART2_RX'],
+                                        ['3', 'SPI2_TX', '-', '-', '-', 'USART2_TX'],
+                                        ['4', 'I2C1_TX', '-', '-', '-', 'USART1_TX'],
+                                        ['5', '-', '-', '-', 'USART1_RX', 'I2C1_RX'],
+                                        ['6', '-', '-', '-', 'USART1_TX', 'I2C1_TX'],
+                                        ['7', 'SPI2_RX', '-', '-', '-', '-']
+                                    ].map((row, idx) => (
+                                        <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-cyan-50'}>
+                                            <td className="p-1 font-bold text-cyan-600">{row[0]}</td>
+                                            {row.slice(1).map((cell, i) => (
+                                                <td key={i} className={`p-1 text-center ${cell !== '-' ? 'bg-cyan-100 rounded pulse' : ''}`}>
+                                                    {cell}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+                }
+
+                // 步骤 3: 配置寄存器
+                if (step === 2) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-lg p-4">
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* DMA 配置流程 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white p-3 rounded shadow">
+                                        <div className="text-xs text-gray-500 mb-1">步骤 1</div>
+                                        <div className="text-sm font-bold text-cyan-700">使能时钟</div>
+                                        <div className="text-xs text-cyan-600 mt-1">RCC->AHB1ENR |= DMA1EN</div>
+                                    </div>
+                                    <div className="bg-white p-3 rounded shadow">
+                                        <div className="text-xs text-gray-500 mb-1">步骤 2</div>
+                                        <div className="text-sm font-bold text-cyan-700">选择通道</div>
+                                        <div className="text-xs text-cyan-600 mt-1">CR |= CHSEL (0-7)</div>
+                                    </div>
+                                    <div className="bg-white p-3 rounded shadow">
+                                        <div className="text-xs text-gray-500 mb-1">步骤 3</div>
+                                        <div className="text-sm font-bold text-cyan-700">配置方向</div>
+                                        <div className="text-xs text-cyan-600 mt-1">DIR: 0=P2M, 1=M2P, 2=M2M</div>
+                                    </div>
+                                    <div className="bg-white p-3 rounded shadow">
+                                        <div className="text-xs text-gray-500 mb-1">步骤 4</div>
+                                        <div className="text-sm font-bold text-cyan-700">数据宽度</div>
+                                        <div className="text-xs text-cyan-600 mt-1">PSIZE/MSIZE: 8/16/32 位</div>
+                                    </div>
+                                </div>
+
+                                {/* CR 寄存器位图 */}
+                                <div className="bg-white p-3 rounded shadow">
+                                    <h4 className="text-xs font-bold text-cyan-700 mb-2">DMA_SxCR 寄存器</h4>
+                                    <div className="grid grid-cols-8 gap-1 text-xs">
+                                        {['EN', 'DMEIE', 'TEIE', 'HTIE', 'TCIE', 'PFCTRL', 'DIR', 'CIRC'].map((bit, i) => (
+                                            <div key={i} className={`p-1 text-center rounded ${i === 0 ? 'bg-cyan-500 text-white pulse' : 'bg-gray-100'}`}>
+                                                {bit}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="grid grid-cols-8 gap-1 text-xs mt-1">
+                                        {['MINC', 'PINC', 'CIRC', 'PSIZE', 'PSIZE', 'MSIZE', 'MSIZE', 'CHSEL'].map((bit, i) => (
+                                            <div key={i} className="p-1 text-center bg-gray-100 rounded">{bit}</div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 4: 存储器到存储器
+                if (step === 3) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-cyan-700 mb-4">存储器到存储器传输</h4>
+                            <div className="flex items-center justify-center gap-8">
+                                {/* 源地址 */}
+                                <div className="bg-white rounded-lg p-4 shadow">
+                                    <div className="text-xs text-gray-500 mb-2">源地址 (SRC)</div>
+                                    <div className="grid grid-cols-4 gap-1">
+                                        {[1, 2, 3, 4, 5, 6, 7, 8].map((v, i) => (
+                                            <div key={i} className="w-8 h-8 bg-blue-100 rounded flex items-center justify-center text-xs font-bold text-blue-700 move">
+                                                {v}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-1">0x20000000</div>
+                                </div>
+
+                                {/* DMA 传输 */}
+                                <div className="flex flex-col items-center">
+                                    <div className="w-24 h-12 bg-cyan-500 rounded-lg flex items-center justify-center text-white text-xs font-bold mb-2">
+                                        DMA 传输
+                                    </div>
+                                    <div className="text-xs text-cyan-600">M2M 模式</div>
+                                    <div className="text-xs text-cyan-600">快速拷贝</div>
+                                </div>
+
+                                {/* 目标地址 */}
+                                <div className="bg-white rounded-lg p-4 shadow">
+                                    <div className="text-xs text-gray-500 mb-2">目标地址 (DST)</div>
+                                    <div className="grid grid-cols-4 gap-1">
+                                        {[1, 2, 3, 4, 5, 6, 7, 8].map((v, i) => (
+                                            <div key={i} className={`w-8 h-8 rounded flex items-center justify-center text-xs font-bold transition-all duration-300 ${i < currentStep ? 'bg-green-100 text-green-700' : 'bg-gray-100'}`}>
+                                                {v}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-1">0x20000100</div>
+                                </div>
+                            </div>
+
+                            {/* 性能对比 */}
+                            <div className="mt-4 grid grid-cols-2 gap-4">
+                                <div className="bg-white p-2 rounded shadow text-xs">
+                                    <div className="text-gray-500">CPU 拷贝</div>
+                                    <div className="text-red-500 font-bold">~1000 周期</div>
+                                </div>
+                                <div className="bg-white p-2 rounded shadow text-xs">
+                                    <div className="text-gray-500">DMA 拷贝</div>
+                                    <div className="text-green-500 font-bold">~100 周期</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 5: 外设到存储器
+                if (step === 4) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-cyan-700 mb-4">外设到存储器 - USART 接收</h4>
+                            <div className="flex items-center gap-4">
+                                {/* USART */}
+                                <div className="bg-purple-100 rounded-lg p-3 shadow">
+                                    <div className="text-xs font-bold text-purple-700 mb-2">USART1 DR</div>
+                                    <div className="space-y-1">
+                                        {[1, 2, 3, 4, 5].map((v, i) => (
+                                            <div key={i} className="w-16 h-6 bg-purple-300 rounded flex items-center justify-center text-xs text-purple-800 pulse">
+                                                {v}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* DMA 传输箭头 */}
+                                <div className="flex-1 relative">
+                                    <div className="h-8 bg-gradient-to-r from-purple-400 to-cyan-400 rounded"></div>
+                                    <div className="absolute top-0 left-0 w-4 h-4 bg-cyan-500 rounded-full transfer"></div>
+                                </div>
+
+                                {/* 接收缓冲区 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <div className="text-xs font-bold text-cyan-700 mb-2">接收缓冲区</div>
+                                    <div className="grid grid-cols-8 gap-1">
+                                        {Array(8).fill(0).map((_, i) => (
+                                            <div key={i} className={`w-6 h-6 rounded flex items-center justify-center text-xs ${i < 5 ? 'bg-cyan-100 text-cyan-700' : 'bg-gray-100'}`}>
+                                                {i < 5 ? i + 1 : ''}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-1">循环模式</div>
+                                </div>
+                            </div>
+
+                            {/* 配置要点 */}
+                            <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+                                <div className="bg-white p-2 rounded shadow">
+                                    <div className="font-bold text-cyan-600">DIR = 0</div>
+                                    <div className="text-gray-500">外设→内存</div>
+                                </div>
+                                <div className="bg-white p-2 rounded shadow">
+                                    <div className="font-bold text-cyan-600">MINC = 1</div>
+                                    <div className="text-gray-500">内存地址递增</div>
+                                </div>
+                                <div className="bg-white p-2 rounded shadow">
+                                    <div className="font-bold text-cyan-600">CIRC = 1</div>
+                                    <div className="text-gray-500">循环模式</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 6: 存储器到外设
+                if (step === 5) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-cyan-700 mb-4">存储器到外设 - USART 发送</h4>
+                            <div className="flex items-center gap-4">
+                                {/* 发送缓冲区 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <div className="text-xs font-bold text-cyan-700 mb-2">发送缓冲区</div>
+                                    <div className="grid grid-cols-8 gap-1">
+                                        {['H', 'e', 'l', 'l', 'o', '!', '', ''].map((v, i) => (
+                                            <div key={i} className={`w-6 h-6 rounded flex items-center justify-center text-xs ${v ? 'bg-cyan-100 text-cyan-700' : 'bg-gray-100'}`}>
+                                                {v}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-1">线性模式</div>
+                                </div>
+
+                                {/* DMA 传输箭头 */}
+                                <div className="flex-1 relative">
+                                    <div className="h-8 bg-gradient-to-r from-cyan-400 to-purple-400 rounded"></div>
+                                    <div className="absolute top-0 right-0 w-4 h-4 bg-purple-500 rounded-full transfer" style={{ animationDirection: 'reverse' }}></div>
+                                </div>
+
+                                {/* USART */}
+                                <div className="bg-purple-100 rounded-lg p-3 shadow">
+                                    <div className="text-xs font-bold text-purple-700 mb-2">USART1 DR</div>
+                                    <div className="space-y-1">
+                                        {['H', 'e', 'l', 'l'].map((v, i) => (
+                                            <div key={i} className="w-16 h-6 bg-purple-300 rounded flex items-center justify-center text-xs text-purple-800 blink">
+                                                {v}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="text-xs text-purple-500 mt-1">TX 引脚 →</div>
+                                </div>
+                            </div>
+
+                            {/* 配置要点 */}
+                            <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+                                <div className="bg-white p-2 rounded shadow">
+                                    <div className="font-bold text-cyan-600">DIR = 1</div>
+                                    <div className="text-gray-500">内存→外设</div>
+                                </div>
+                                <div className="bg-white p-2 rounded shadow">
+                                    <div className="font-bold text-cyan-600">MINC = 1</div>
+                                    <div className="text-gray-500">内存地址递增</div>
+                                </div>
+                                <div className="bg-white p-2 rounded shadow">
+                                    <div className="font-bold text-cyan-600">CIRC = 0</div>
+                                    <div className="text-gray-500">线性模式</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 7: 循环模式与中断
+                if (step === 6) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-cyan-700 mb-4">循环模式与中断</h4>
+                            <div className="grid grid-cols-2 gap-4 h-full">
+                                {/* 循环模式示意 */}
+                                <div className="bg-white rounded-lg p-4 shadow">
+                                    <h5 className="text-xs font-bold text-cyan-700 mb-2">循环模式 (Circular)</h5>
+                                    <div className="relative h-32 flex items-center justify-center">
+                                        <div className="w-24 h-24 border-4 border-cyan-200 rounded-full"></div>
+                                        <div className="absolute w-4 h-4 bg-cyan-500 rounded-full circular"></div>
+                                        <div className="absolute text-xs text-cyan-600">
+                                            <div>NDTR 自动重载</div>
+                                            <div>连续采样</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 中断标志 */}
+                                <div className="space-y-2">
+                                    <div className="bg-white rounded-lg p-3 shadow">
+                                        <h5 className="text-xs font-bold text-cyan-700 mb-2">DMA_HISR 状态寄存器</h5>
+                                        <div className="grid grid-cols-2 gap-2 text-xs">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 bg-green-500 rounded-full pulse"></div>
+                                                <span>TCIF: 传输完成</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 bg-yellow-500 rounded-full blink"></div>
+                                                <span>HTIF: 半传输</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 bg-red-500 rounded"></div>
+                                                <span>TEIF: 传输错误</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 bg-blue-500 rounded"></div>
+                                                <span>DMEIF: 直接模式错误</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-cyan-600 rounded-lg p-3 shadow text-white text-xs">
+                                        <div className="font-bold mb-1">双缓冲技术:</div>
+                                        <div>半传输中断 → 处理前半数据</div>
+                                        <div>传输完成中断 → 处理后半数据</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // 步骤 8: 应用实例
+                if (step === 7) {
+                    return (
+                        <div className="relative h-64 bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-lg p-4">
+                            <h4 className="text-sm font-bold text-cyan-700 mb-4">应用实例 - ADC 多通道 + DMA 扫描</h4>
+                            <div className="grid grid-cols-3 gap-4 h-full">
+                                {/* ADC 输入 */}
+                                <div className="bg-orange-100 rounded-lg p-3 shadow">
+                                    <div className="text-xs font-bold text-orange-700 mb-2">ADC 输入通道</div>
+                                    <div className="space-y-1">
+                                        {['CH0: PA0', 'CH1: PA1', 'CH2: PA2', 'CH3: PA3'].map((ch, i) => (
+                                            <div key={i} className="bg-orange-200 p-1 rounded text-xs text-orange-800 pulse">
+                                                {ch}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* ADC + DMA */}
+                                <div className="flex flex-col items-center justify-center">
+                                    <div className="bg-orange-500 text-white rounded-lg p-3 mb-2 text-center">
+                                        <div className="text-sm font-bold">ADC1</div>
+                                        <div className="text-xs">扫描模式 + DMA</div>
+                                    </div>
+                                    <div className="w-0.5 h-8 bg-cyan-400"></div>
+                                    <div className="bg-cyan-500 text-white rounded-lg p-3 text-center">
+                                        <div className="text-sm font-bold">DMA2 Stream0</div>
+                                        <div className="text-xs">循环模式</div>
+                                    </div>
+                                </div>
+
+                                {/* 数据缓冲区 */}
+                                <div className="bg-white rounded-lg p-3 shadow">
+                                    <div className="text-xs font-bold text-cyan-700 mb-2">DMA 缓冲区</div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {Array(4).fill(0).map((_, i) => (
+                                            <div key={i} className="bg-cyan-100 p-2 rounded text-center">
+                                                <div className="text-xs text-gray-500">CH{i}</div>
+                                                <div className="text-sm font-bold text-cyan-700">{(Math.random() * 4095).toFixed(0)}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-2 text-center">自动更新</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                return null;
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        {/* 标题 */}
+                        <h1 className="text-3xl font-bold text-center mb-4 text-cyan-700">
+                            STM32 DMA 直接存储器访问完整指南
+                        </h1>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full font-bold transition-all ${
+                                            index === currentStep
+                                                ? 'bg-cyan-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-cyan-200 text-cyan-700'
+                                                : 'bg-gray-200 text-gray-500'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 主内容区 */}
+                        <div className="grid grid-cols-2 gap-6 mb-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900 rounded-lg p-4 shadow-lg">
+                                <div className="text-cyan-400 font-bold mb-2">
+                                    步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                                </div>
+                                <pre className="text-green-400 text-xs overflow-auto h-64 font-mono">
+                                    <code>{STEPS[currentStep].code}</code>
+                                </pre>
+                            </div>
+
+                            {/* 动画区 */}
+                            <div className="scaleIn">
+                                <DmaTransferAnimation />
+                            </div>
+                        </div>
+
+                        {/* 讲解区 */}
+                        <div className="bg-white rounded-lg p-6 shadow-lg mb-6">
+                            <h3 className="text-xl font-bold text-cyan-700 mb-4">核心知识点</h3>
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="border-l-4 border-cyan-500 pl-4">
+                                    <h4 className="font-bold text-cyan-700 mb-2">流与通道</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• DMA1/DMA2 各 8 个流</li>
+                                        <li>• 每个流 8 个通道可选</li>
+                                        <li>• 外设固定映射到特定通道</li>
+                                    </ul>
+                                </div>
+                                <div className="border-l-4 border-cyan-500 pl-4">
+                                    <h4 className="font-bold text-cyan-700 mb-2">传输方向</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 外设到存储器 (接收)</li>
+                                        <li>• 存储器到外设 (发送)</li>
+                                        <li>• 存储器到存储器 (拷贝)</li>
+                                    </ul>
+                                </div>
+                                <div className="border-l-4 border-cyan-500 pl-4">
+                                    <h4 className="font-bold text-cyan-700 mb-2">工作模式</h4>
+                                    <ul className="text-sm text-gray-600 space-y-1">
+                                        <li>• 线性模式 (一次传输)</li>
+                                        <li>• 循环模式 (连续采样)</li>
+                                        <li>• 双缓冲 (半传输中断)</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 控制按钮 */}
+                        <div className="flex justify-center gap-4">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-bold ${
+                                    currentStep === 0
+                                        ? 'bg-gray-200 text-gray-400'
+                                        : 'bg-cyan-500 text-white hover:bg-cyan-600'
+                                }`}
+                            >
+                                上一步
+                            </button>
+
+                            {!isPlaying && !isComplete && (
+                                <button
+                                    onClick={handleStart}
+                                    className="px-6 py-3 bg-cyan-500 text-white rounded-lg font-bold hover:bg-cyan-600"
+                                >
+                                    开始讲解
+                                </button>
+                            )}
+
+                            {isPlaying && (
+                                <button
+                                    onClick={handleNext}
+                                    className="px-6 py-3 bg-cyan-500 text-white rounded-lg font-bold hover:bg-cyan-600"
+                                >
+                                    下一步
+                                </button>
+                            )}
+
+                            {isComplete && (
+                                <button
+                                    onClick={handleReset}
+                                    className="px-6 py-3 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600"
+                                >
+                                    重新学习
+                                </button>
+                            )}
+
+                            <button
+                                onClick={handleReset}
+                                className="px-6 py-3 bg-gray-500 text-white rounded-lg font-bold hover:bg-gray-600"
+                            >
+                                重置
+                            </button>
+                        </div>
+
+                        {/* 完成提示 */}
+                        {isComplete && (
+                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                                <div className="bg-white rounded-lg p-8 max-w-md text-center scaleIn">
+                                    <div className="text-6xl mb-4">🎉</div>
+                                    <h2 className="text-2xl font-bold text-cyan-700 mb-4">学习完成!</h2>
+                                    <p className="text-gray-600 mb-6">
+                                        已掌握 STM32 DMA 直接存储器访问的核心知识
+                                    </p>
+                                    <button
+                                        onClick={handleReset}
+                                        className="px-6 py-3 bg-cyan-500 text-white rounded-lg font-bold hover:bg-cyan-600"
+                                    >
+                                        重新学习
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

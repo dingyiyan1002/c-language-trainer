@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1176 - 宏定义高级技巧</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(249, 115, 22, 0.2); } 50% { background-color: rgba(249, 115, 22, 0.5); } }
+        @keyframes expandMacro { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .animate-blink { animation: blink 1s steps(2) infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+        .animate-expandMacro { animation: expandMacro 1s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#f97316',
+            secondary: '#ea580c',
+            accent: '#fb923c',
+            highlight: '#fdba74',
+            bg: '#7c2d12',
+            text: '#ffedd5'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const steps = [
+                { title: '宏定义基础回顾', voice: '宏定义基础回顾。宏是预处理器的文本替换机制。define 定义宏，#undef 取消宏。宏分为对象宏和函数宏。对象宏用于常量定义，函数宏用于代码生成。理解宏的文本替换本质是掌握高级技巧的基础。' },
+                { title: '宏参数与展开', voice: '宏参数与展开规则。函数宏可以接受参数，参数在展开时被替换。宏参数不计算直接代入，可能导致多次求值问题。使用括号确保运算优先级正确。理解宏展开顺序对调试很重要。' },
+                { title: '井号运算符', voice: '井号字符串化运算符。井号运算符将宏参数转换为字符串字面量。常用于调试宏、日志宏、错误消息生成。双井号用于 token 拼接，将两个 token 合并为一个。' },
+                { title: '双井号拼接', voice: '双井号 token 拼接运算符。双井号将两个 token 拼接成一个新 token。用于生成唯一标识符、组合变量名、创建派生函数名。拼接发生在预处理阶段，结果是有效的 C 标识符。' },
+                { title: '可变参数宏', voice: '可变参数宏 C99 特性。使用省略号接受可变数量参数。__VA_ARGS__ 代表可变参数部分。可变参数宏用于日志、断言、格式化输出等场景。是 printf 风格宏的基础。' },
+                { title: '预处理运算符', voice: '预处理专用运算符。defined 运算符检查宏是否定义，用于条件编译。__FILE__、__LINE__、__FUNCTION__ 是预定义宏，用于调试和日志。__DATE__、__TIME__ 提供编译时间戳。' },
+                { title: '宏高级应用', voice: '宏的高级应用场景。X 宏用于同步生成多个相关定义。粘贴宏用于生成唯一标识符。断言宏用于运行时检查。日志宏用于调试输出。注册宏用于简化样板代码。' },
+                { title: '宏陷阱与最佳实践', voice: '宏的常见陷阱与最佳实践。陷阱包括多次求值、缺少括号、分号问题、作用域泄漏。最佳实践是优先使用 inline 函数，必须用宏时加足括号，参数多次使用时用临时变量。' }
+            ];
+
+            useEffect(() => {
+                if (!isPlaying) return;
+                const speak = () => {
+                    if (isMuted || !steps[currentStep]) return;
+                    const utterance = new SpeechSynthesisUtterance(steps[currentStep].voice);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak();
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    window.speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, isMuted]);
+
+            const MacroParams = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>宏参数与展开</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-red-400 font-bold mb-2">❌ 错误用法</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`#define SQUARE(x) x * x
+#define ADD(a, b) a + b
+
+int r1 = SQUARE(5);      // 25 ✓
+int r2 = SQUARE(2 + 3);  // 11 ✗ 展开为 2+3*2+3=11!
+int r3 = ADD(1, 2) * 3;  // 7 ✗ 展开为 1+2*3=7!
+
+// 参数多次求值
+#define INC(x) (++x)
+int i = 0;
+int r4 = INC(i) + INC(i); // 未定义行为!
+                          // i 被修改多次`}
+                                </pre>
+                                <div className="mt-2 text-xs text-red-400">
+                                    ⚠️ 缺少括号导致优先级错误，参数多次求值
+                                </div>
+                            </div>
+                            <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">✓ 正确用法</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`#define SQUARE(x) ((x) * (x))
+#define ADD(a, b) ((a) + (b))
+
+int r1 = SQUARE(5);      // 25 ✓
+int r2 = SQUARE(2 + 3);  // 25 ✓ 展开为 ((2+3)*(2+3))
+int r3 = ADD(1, 2) * 3;  // 9 ✓ 展开为 ((1)+(2))*3
+
+// 避免多次求值
+#define INC(x) ({ int _t = (x); ++_t; })
+// 或使用 inline 函数
+inline int square(int x) { return x * x; }`}
+                                </pre>
+                                <div className="mt-2 text-xs text-emerald-400">
+                                    ✓ 完整括号保护，避免多次求值
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const StringizeOperator = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}># 字符串化运算符</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// # 将宏参数转换为字符串
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+
+// 基本用法
+const char* s1 = STRINGIFY(hello);    // "hello"
+const char* s2 = STRINGIFY(123);      // "123"
+const char* s3 = STRINGIFY(2 + 3);    // "2 + 3" (注意是字符串!)
+
+// 与宏组合使用
+#define VERSION 1.2
+const char* ver = TOSTRING(VERSION);  // "1.2"
+
+// 调试宏
+#define DEBUG_PRINT(var) printf(#var " = %d\\n", var)
+int x = 42;
+DEBUG_PRINT(x);  // 输出：x = 42
+
+// 日志宏
+#define LOG(msg) printf("[%s:%d] " #msg "\\n", __FILE__, __LINE__)
+LOG(初始化完成);  // 输出：[main.c:10] 初始化完成`}
+                            </pre>
+                            <div className={`${currentStep >= 2 ? 'animate-scaleIn' : ''} p-3 bg-orange-900/30 rounded border border-orange-600`}>
+                                <div className="text-orange-300 font-bold mb-2">实际应用</div>
+                                <pre className="text-xs font-mono text-gray-300">
+{`// 错误报告宏
+#define ASSERT(expr) \\
+    do { \\
+        if (!(expr)) { \\
+            fprintf(stderr, "断言失败：%s\\n", #expr); \\
+            fprintf(stderr, "文件：%s, 行：%d\\n", __FILE__, __LINE__); \\
+            abort(); \\
+        } \\
+    } while(0)
+
+// 使用
+ASSERT(ptr != NULL);
+// 失败时输出：断言失败：ptr != NULL`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const TokenPasting = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>## Token 拼接运算符</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// ## 连接两个 token
+#define CONCAT(a, b) a##b
+#define MAKE_FUNC(name) func_##name
+
+// 基本用法
+int CONCAT(var, 1) = 10;    // int var1 = 10;
+MAKE_FUNC(init)(void);      // void func_init(void);
+
+// 生成唯一标识符
+#define MAKE_UNIQUE(prefix) prefix##__LINE__
+int MAKE_UNIQUE(temp) = 0;  // int temp__123 = 0;
+
+// 寄存器访问宏 (嵌入式常用)
+#define REG_BASE    0x40020000
+#define REG(name)   (*(volatile uint32_t*)(REG_BASE + name))
+#define GPIO_MODER  REG(MODER__OFFSET)
+#define MODER__OFFSET  0x00
+
+// 使用
+GPIO_MODER = 0x12345678;  // 访问 0x40020000`}
+                            </pre>
+                            <div className={`${currentStep >= 3 ? 'animate-scaleIn' : ''} p-3 bg-blue-900/30 rounded border border-blue-600`}>
+                                <div className="text-blue-300 font-bold mb-2">X 宏模式</div>
+                                <pre className="text-xs font-mono text-gray-300">
+{`// X 宏 - 同步生成多个定义
+#define GPIO_PINS(X) \\
+    X(0) X(1) X(2) X(3) \\
+    X(4) X(5) X(6) X(7)
+
+// 生成枚举
+#define ENUM_DEF(n) GPIO_PIN_##n,
+typedef enum { GPIO_PINS(ENUM_DEF) } GPIO_Pin;
+
+// 生成初始化函数
+#define INIT_DEF(n) void gpio_init_##n(void);
+GPIO_PINS(INIT_DEF)
+
+// 生成数组
+#define PTR_DEF(n) &gpio_init_##n,
+void (*gpio_init_table[])(void) = { GPIO_PINS(PTR_DEF) };`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const VariadicMacros = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>可变参数宏</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// C99 可变参数宏
+#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#define DEBUG(fmt, ...) printf("[DEBUG] " fmt, ##__VA_ARGS__)
+
+// 使用
+LOG("hello\\n");              // printf("hello\\n");
+LOG("值=%d\\n", x);            // printf("值=%d\\n", x);
+DEBUG("x=%d, y=%d\\n", x, y);
+
+// 带级别日志
+#define LOG_LEVEL(level, fmt, ...) \\
+    printf("[%s] " fmt, level, ##__VA_ARGS__)
+
+#define LOG_ERROR(fmt, ...) LOG_LEVEL("ERROR", fmt, ##__VA_ARGS__)
+#define LOG_WARN(fmt, ...)  LOG_LEVEL("WARN", fmt, ##__VA_ARGS__)
+#define LOG_INFO(fmt, ...)  LOG_LEVEL("INFO", fmt, ##__VA_ARGS__)
+
+// 条件编译
+#ifdef DEBUG
+    #define DBG_PRINT(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#else
+    #define DBG_PRINT(fmt, ...) ((void)0)
+#endif`}
+                            </pre>
+                            <div className={`${currentStep >= 4 ? 'animate-scaleIn' : ''} p-3 bg-emerald-900/30 rounded border border-emerald-600`}>
+                                <div className="text-emerald-300 font-bold mb-2">##__VA_ARGS__ 用法</div>
+                                <div className="text-xs text-gray-300">
+                                    <p className="mb-2">##__VA_ARGS__ 在 GNU C 扩展中处理空参数：</p>
+                                    <pre className="text-xs font-mono bg-gray-900 p-2 rounded">
+{`#define MACRO(fmt, ...) func(fmt, ##__VA_ARGS__)
+
+MACRO("hello");     // func("hello") - 空参数被移除
+MACRO("hi %d", 1);  // func("hi %d", 1)`}
+                                    </pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const PredefinedMacros = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>预定义宏</h4>
+                        <div className="space-y-3">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-gray-600">
+                                        <th className="text-left py-2" style={{ color: COLOR_MAP.text }}>宏</th>
+                                        <th className="text-left" style={{ color: COLOR_MAP.text }}>描述</th>
+                                        <th className="text-left" style={{ color: COLOR_MAP.text }}>示例</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr className="border-b border-gray-700">
+                                        <td className="py-2 font-mono text-orange-300">__FILE__</td>
+                                        <td className="text-gray-300">源文件名</td>
+                                        <td className="text-gray-400">"main.c"</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-700">
+                                        <td className="py-2 font-mono text-orange-300">__LINE__</td>
+                                        <td className="text-gray-300">当前行号</td>
+                                        <td className="text-gray-400">42</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-700">
+                                        <td className="py-2 font-mono text-orange-300">__func__</td>
+                                        <td className="text-gray-300">函数名 (C99)</td>
+                                        <td className="text-gray-400">"main"</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-700">
+                                        <td className="py-2 font-mono text-orange-300">__DATE__</td>
+                                        <td className="text-gray-300">编译日期</td>
+                                        <td className="text-gray-400">"Mar 21 2026"</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-700">
+                                        <td className="py-2 font-mono text-orange-300">__TIME__</td>
+                                        <td className="text-gray-300">编译时间</td>
+                                        <td className="text-gray-400">"14:30:00"</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="py-2 font-mono text-orange-300">__cplusplus</td>
+                                        <td className="text-gray-300">C++ 编译时定义</td>
+                                        <td className="text-gray-400">201703L</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            <div className={`${currentStep >= 5 ? 'animate-scaleIn' : ''} p-3 bg-purple-900/30 rounded border border-purple-600`}>
+                                <div className="text-purple-300 font-bold mb-2">实际应用</div>
+                                <pre className="text-xs font-mono text-gray-300">
+{`// 调试输出宏
+#define TRACE() \\
+    printf("[%s:%d] %s()\\n", __FILE__, __LINE__, __func__)
+
+// 版本信息
+const char* getVersionInfo(void) {
+    static char info[128];
+    sprintf(info, "版本 1.0 编译于 %s %s", __DATE__, __TIME__);
+    return info;
+}
+
+// 条件编译
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifdef _WIN32
+    #define PLATFORM "Windows"
+#elif defined(__linux__)
+    #define PLATFORM "Linux"
+#endif`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const AdvancedPatterns = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>宏高级模式</h4>
+                        <div className="space-y-3">
+                            <div className={`${currentStep >= 6 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-orange-400 font-bold mb-2">do-while(0) 包装</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`#define SAFE_FREE(ptr) \\
+    do { \\
+        if ((ptr) != NULL) { \\
+            free(ptr); \\
+            (ptr) = NULL; \\
+        } \\
+    } while(0)
+
+// 为什么用 do-while(0)?
+// 1. 可以用分号结尾，符合语句习惯
+// 2. 在 if/else 中不会出错
+if (cond)
+    SAFE_FREE(p);  // 正确
+else
+    doSomething();`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 6 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-cyan-400 font-bold mb-2">寄存器定义宏</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`#define _REG(addr) (*(volatile uint32_t*)(addr))
+#define _BIT(n)    (1U << (n))
+#define _MASK(h,l) (((1U << ((h)-(l)+1))-1) << (l))
+
+// 使用
+#define GPIOA_BASE  0x40020000
+#define GPIOA_MODER _REG(GPIOA_BASE + 0x00)
+#define GPIOA_ODR   _REG(GPIOA_BASE + 0x14)
+
+// 位操作
+GPIOA_MODER |= _BIT(5);      // 设置位 5
+GPIOA_MODER &= ~_BIT(5);     // 清除位 5
+uint32_t val = (GPIOA_MODER & _MASK(7,4)) >> 4;  // 提取位 4-7`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 6 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-purple-400 font-bold mb-2">编译时检查</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 编译时断言 (C11 _Static_assert)
+#define STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+
+// 传统方法
+#define STATIC_ASSERT(cond) \\
+    do { typedef char static_assert[(cond) ? 1 : -1]; } while(0)
+
+// 使用
+STATIC_ASSERT(sizeof(int) == 4, "int 必须是 4 字节");
+STATIC_ASSERT(sizeof(void*) <= 8, "指针不能超过 8 字节");`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const Pitfalls = () => (
+                <div className="space-y-4">
+                    <div className="bg-gradient-to-r from-orange-900/50 to-amber-900/50 rounded-lg p-6">
+                        <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>宏的陷阱与最佳实践</h3>
+                        <div className="space-y-4">
+                            <div className="bg-red-900/30 p-3 rounded border border-red-600">
+                                <div className="text-red-300 font-bold mb-1">陷阱 1: 多次求值</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`#define MIN(a,b) ((a)<(b)?(a):(b))
+MIN(x++, y++);  // x 或 y 可能自增两次!`}
+                                </pre>
+                                <div className="text-emerald-300 text-xs mt-2">✓ 解决：使用 inline 函数或临时变量</div>
+                            </div>
+                            <div className="bg-red-900/30 p-3 rounded border border-red-600">
+                                <div className="text-red-300 font-bold mb-1">陷阱 2: 优先级问题</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`#define MUL(x) x * x
+MUL(1+2);  // 展开为 1+2*1+2 = 5, 不是 9!`}
+                                </pre>
+                                <div className="text-emerald-300 text-xs mt-2">✓ 解决：所有参数和整体都用括号包裹</div>
+                            </div>
+                            <div className="bg-red-900/30 p-3 rounded border border-red-600">
+                                <div className="text-red-300 font-bold mb-1">陷阱 3: 分号问题</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`#define INIT() init1(); init2()
+if (cond)
+    INIT();  // 展开后 init2() 在 if 外!
+else
+    other();`}
+                                </pre>
+                                <div className="text-emerald-300 text-xs mt-2">✓ 解决：使用 do-while(0) 包装</div>
+                            </div>
+                        </div>
+                        <div className="mt-6 bg-emerald-900/30 p-4 rounded border border-emerald-600">
+                            <div className="text-emerald-300 font-bold mb-2">最佳实践清单</div>
+                            <ul className="text-xs text-gray-300 space-y-1">
+                                <li>✓ 优先使用 inline 函数、enum、const 替代宏</li>
+                                <li>✓ 宏参数和整体都用括号包裹</li>
+                                <li>✓ 参数使用多次时用临时变量</li>
+                                <li>✓ 多语句宏用 do-while(0) 包装</li>
+                                <li>✓ 使用大写命名区分宏和函数</li>
+                                <li>✓ 复杂逻辑优先考虑代码生成工具</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch(currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-6">
+                                <div className="bg-gradient-to-r from-orange-900/50 to-amber-900/50 rounded-lg p-6">
+                                    <h3 className="text-2xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>宏定义基础回顾</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-orange-400 mr-2">▸</span>
+                                            <span>预处理器文本替换机制</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-orange-400 mr-2">▸</span>
+                                            <span>对象宏用于常量定义</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-orange-400 mr-2">▸</span>
+                                            <span>函数宏用于代码生成</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-orange-400 mr-2">▸</span>
+                                            <span>展开发生在编译前</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300">
+{`// 对象宏
+#define PI 3.14159
+#define MAX_SIZE 1024
+
+// 函数宏
+#define MIN(a,b) ((a)<(b)?(a):(b))
+#define SQUARE(x) ((x)*(x))
+
+// 取消宏
+#undef PI
+#define PI 3.14159265`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return <MacroParams />;
+                    case 2:
+                        return <StringizeOperator />;
+                    case 3:
+                        return <TokenPasting />;
+                    case 4:
+                        return <VariadicMacros />;
+                    case 5:
+                        return <PredefinedMacros />;
+                    case 6:
+                        return <AdvancedPatterns />;
+                    case 7:
+                        return <Pitfalls />;
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-6 flex items-center justify-between">
+                            <div>
+                                <h1 className="text-3xl font-bold" style={{ color: COLOR_MAP.primary }}>
+                                    1176 - 宏定义高级技巧
+                                </h1>
+                                <p className="text-gray-400 mt-1">C 语言核心 · 步骤 {currentStep + 1} / {steps.length}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setIsMuted(!isMuted)}
+                                    className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-orange-600'} hover:opacity-80`}>
+                                    {isMuted ? '🔇 静音' : '🔊 语音'}
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className={`px-4 py-2 rounded ${isPlaying ? 'bg-orange-600' : 'bg-gray-600'} hover:opacity-80`}>
+                                    {isPlaying ? '⏸ 暂停' : '▶ 继续'}
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-3 gap-6">
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>代码示例</h3>
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`// 基础宏
+#define PI 3.14159
+#define MIN(a,b) ((a)<(b)?(a):(b))
+
+// 字符串化
+#define STR(x) #x
+#define TOSTR(x) STR(x)
+
+// Token 拼接
+#define CAT(a,b) a##b
+
+// 可变参数
+#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)
+
+// 预定义宏
+__FILE__, __LINE__, __func__`}
+                                    </pre>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>关键点</h3>
+                                    <ul className="space-y-2 text-sm text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-orange-400 mr-2">•</span>
+                                            <span>宏是文本替换，不是函数</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-orange-400 mr-2">•</span>
+                                            <span>参数必须用括号保护</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-orange-400 mr-2">•</span>
+                                            <span># 字符串化，## 拼接</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-orange-400 mr-2">•</span>
+                                            <span>优先使用 inline 函数替代宏</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div className="col-span-1">
+                                <div className="bg-gray-800 rounded-lg p-6 h-full">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>
+                                        {steps[currentStep].title}
+                                    </h3>
+                                    {renderContent()}
+                                </div>
+                            </div>
+
+                            <div className="col-span-1 space-y-4">
+                                <MacroParams />
+                                <StringizeOperator />
+                            </div>
+                        </div>
+
+                        <footer className="mt-8 flex justify-center gap-2">
+                            {steps.map((_, idx) => (
+                                <button key={idx} onClick={() => setCurrentStep(idx)}
+                                    className={`w-3 h-3 rounded-full transition-all ${idx === currentStep ? 'w-8' : ''}`}
+                                    style={{ backgroundColor: idx <= currentStep ? COLOR_MAP.primary : '#374151' }} />
+                            ))}
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

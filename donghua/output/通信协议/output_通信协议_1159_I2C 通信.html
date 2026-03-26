@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1159 - I2C 通信协议 - 嵌入式 C 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes wave { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+    @keyframes flow { 0% { transform: translateX(0); opacity: 1; } 100% { transform: translateX(100%); opacity: 0; } }
+    .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+    .animate-blink { animation: blink 1s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out forwards; }
+    .animate-scaleIn { animation: scaleIn 0.5s ease-out forwards; }
+    .animate-wave { animation: wave 1s ease-in-out infinite; }
+    .animate-flow { animation: flow 1.5s linear infinite; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // ========== 可修改区域开始 ==========
+    const COLOR_MAP = {
+      primary: '#f59e0b',
+      secondary: '#fbbf24',
+      accent: '#fcd34d',
+      bg: '#78350f',
+      text: '#fef3c7',
+      border: '#d97706'
+    };
+
+    const STEPS = [
+      { title: 'I2C 概述', voice: 'I2C 是 Inter-Integrated Circuit 的缩写，由 Philips 公司开发。它使用两根线实现多主多从通信，广泛应用于传感器、EEPROM、RTC 等外设。' },
+      { title: 'I2C 物理层', voice: 'I2C 使用两根双向开漏线：SDA 数据线双向传输数据，SCL 时钟线由主设备提供时钟信号。两根线都需要外接上拉电阻。' },
+      { title: 'I2C 时序', voice: 'I2C 传输以起始条件开始：SCL 为高时 SDA 从高变低。停止条件：SCL 为高时 SDA 从低变高。数据传输时 SCL 为高期间 SDA 必须稳定。' },
+      { title: '地址帧', voice: '起始条件后发送 7 位或 10 位地址加 1 位读写位。7 位地址支持 127 个设备。读写位 0 表示写，1 表示读。第 9 个时钟周期为应答位。' },
+      { title: '数据帧', voice: '地址匹配后传输数据字节，每字节 8 位。每个字节后跟随一个应答位 ACK 或非应答位 NACK。主机在最后一个字节后发送 NACK 表示结束。' },
+      { title: '写操作流程', voice: '写 EEPROM 流程：发送起始条件、发送设备地址加写位、发送内存地址、发送数据、发送停止条件。' },
+      { title: '读操作流程', voice: '读 EEPROM 流程：发送起始条件写地址、发送内存地址、重复起始条件、发送设备地址加读位、读取数据、发送 NACK、发送停止条件。' },
+      { title: 'HAL 库使用', voice: 'STM32 HAL 库提供 HAL_I2C_Master_Transmit 发送、HAL_I2C_Master_Receive 接收、HAL_I2C_Mem_Write 写内存、HAL_I2C_Mem_Read 读内存函数。' }
+    ];
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [voiceStatus, setVoiceStatus] = useState('就绪');
+      const voiceEndTimerRef = useRef(null);
+
+      useEffect(() => {
+        if (!isPlaying) return;
+        const step = STEPS[currentStep];
+        setVoiceStatus('播放中...');
+
+        const utterance = new SpeechSynthesisUtterance(step.voice);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+
+        const voices = speechSynthesis.getVoices();
+        const xiaoxiao = voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('zh-CN'));
+        if (xiaoxiao) utterance.voice = xiaoxiao;
+
+        utterance.onend = () => {
+          setVoiceStatus('已完成');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            } else {
+              setIsPlaying(false);
+            }
+          }, 800);
+        };
+
+        utterance.onerror = () => {
+          setVoiceStatus('播放失败');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            }
+          }, 800);
+        };
+
+        speechSynthesis.speak(utterance);
+        return () => clearTimeout(voiceEndTimerRef.current);
+      }, [currentStep, isPlaying]);
+
+      const handlePlay = () => {
+        setCurrentStep(0);
+        setIsPlaying(true);
+        speechSynthesis.cancel();
+      };
+
+      const handlePause = () => {
+        setIsPlaying(false);
+        speechSynthesis.cancel();
+      };
+
+      const handleNext = () => {
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => prev + 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const handlePrev = () => {
+        if (currentStep > 0) {
+          setCurrentStep(prev => prev - 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const renderStepContent = () => {
+        switch(currentStep) {
+          case 0: return <Step0Overview />;
+          case 1: return <Step1PhysicalLayer />;
+          case 2: return <Step2Timing />;
+          case 3: return <Step3AddressFrame />;
+          case 4: return <Step4DataFrame />;
+          case 5: return <Step5WriteFlow />;
+          case 6: return <Step6ReadFlow />;
+          case 7: return <Step7HALUsage />;
+          default: return <Step0Overview />;
+        }
+      };
+
+      return (
+        <div className="min-h-screen p-4" style={{ background: `linear-gradient(135deg, ${COLOR_MAP.bg} 0%, #0f172a 100%)` }}>
+          <div className="mb-4 flex items-center justify-between" style={{ backgroundColor: 'rgba(30, 41, 59, 0.8)', borderRadius: '12px', padding: '16px' }}>
+            <div>
+              <h1 className="text-2xl font-bold" style={{ color: COLOR_MAP.text }}>1159 - I2C 通信协议</h1>
+              <p className="text-sm" style={{ color: COLOR_MAP.accent }}>Embedded C - I2C Communication Protocol</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-sm" style={{ color: COLOR_MAP.accent }}>
+                {voiceStatus} | 步骤 {currentStep + 1}/{STEPS.length}
+              </div>
+              <button onClick={handlePrev} disabled={currentStep === 0} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>上一个</button>
+              {!isPlaying ? (
+                <button onClick={handlePlay} className="px-4 py-2 rounded" style={{ backgroundColor: '#10b981', color: 'white' }}>播放</button>
+              ) : (
+                <button onClick={handlePause} className="px-4 py-2 rounded" style={{ backgroundColor: '#f59e0b', color: 'white' }}>暂停</button>
+              )}
+              <button onClick={handleNext} disabled={currentStep === STEPS.length - 1} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>下一个</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 h-[calc(100vh-150px)]">
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>代码示例</div>
+              <pre className="p-4 text-sm overflow-auto h-full text-gray-100 font-mono">
+                <code>{renderStepContent()}</code>
+              </pre>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>可视化动画</div>
+              <div className="p-4 h-full overflow-auto">
+                {renderVisualization()}
+              </div>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>解释说明</div>
+              <div className="p-4 space-y-3 h-full overflow-auto">
+                <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20` }}>
+                  <div className="font-bold mb-2" style={{ color: COLOR_MAP.text }}>{STEPS[currentStep].title}</div>
+                  <p style={{ color: COLOR_MAP.accent }}>{STEPS[currentStep].voice}</p>
+                </div>
+                {renderExplanation()}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function renderVisualization() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewViz />;
+        case 1: return <Step1PhysicalLayerViz />;
+        case 2: return <Step2TimingViz />;
+        case 3: return <Step3AddressFrameViz />;
+        case 4: return <Step4DataFrameViz />;
+        case 5: return <Step5WriteFlowViz />;
+        case 6: return <Step6ReadFlowViz />;
+        case 7: return <Step7HALUsageViz />;
+        default: return <Step0OverviewViz />;
+      }
+    }
+
+    function renderExplanation() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewExp />;
+        case 1: return <Step1PhysicalLayerExp />;
+        case 2: return <Step2TimingExp />;
+        case 3: return <Step3AddressFrameExp />;
+        case 4: return <Step4DataFrameExp />;
+        case 5: return <Step5WriteFlowExp />;
+        case 6: return <Step6ReadFlowExp />;
+        case 7: return <Step7HALUsageExp />;
+        default: return null;
+      }
+    }
+
+    function Step0Overview() {
+      return `/**
+ * I2C 通信协议 - 概述
+ * Inter-Integrated Circuit Protocol
+ *
+ * 特点:
+ * - 同步串行通信
+ * - 半双工
+ * - 多主多从架构
+ * - 设备地址寻址
+ */
+
+// 常见应用设备
+#define EEPROM_24C02    // I2C EEPROM
+#define MPU6050         // 加速度计陀螺仪
+#define BME280          // 温湿度气压传感器
+#define PCF8574         // I/O 扩展芯片
+#define DS1307          // 实时时钟 RTC
+#define OLED_SSD1306    // OLED 显示屏
+
+// 标准模式：100 kbps
+// 快速模式：400 kbps
+// 高速模式：3.4 Mbps
+
+// I2C 优势
+// 1. 引脚少 (仅 2 根线)
+// 2. 支持多设备 (同一总线)
+// 3. 协议简单
+// 4. 成本低`;
+    }
+
+    function Step0OverviewViz() {
+      return (
+        <div className="space-y-4">
+          <div className="text-center mb-4">
+            <div className="text-lg font-bold" style={{ color: COLOR_MAP.text }}>I2C 总线拓扑</div>
+          </div>
+          <div className="p-4 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-3">
+              <div className="flex justify-center gap-4">
+                <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.primary}40`, border: `1px solid ${COLOR_MAP.primary}` }}>
+                  <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>主设备 1</div>
+                  <div className="text-xs" style={{ color: COLOR_MAP.accent }}>MCU</div>
+                </div>
+                <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.primary}40`, border: `1px solid ${COLOR_MAP.primary}` }}>
+                  <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>主设备 2</div>
+                  <div className="text-xs" style={{ color: COLOR_MAP.accent }}>备用 MCU</div>
+                </div>
+              </div>
+              <div className="flex justify-center">
+                <div className="w-32 h-1" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+              </div>
+              <div className="flex justify-center text-xs" style={{ color: COLOR_MAP.text }}>I2C 总线 (SDA + SCL)</div>
+              <div className="flex justify-center">
+                <div className="w-32 h-1" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2">
+                <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                  <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>EEPROM</div>
+                  <div className="text-xs" style={{ color: COLOR_MAP.accent }}>0x50</div>
+                </div>
+                <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                  <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>Sensor</div>
+                  <div className="text-xs" style={{ color: COLOR_MAP.accent }}>0x68</div>
+                </div>
+                <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                  <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>RTC</div>
+                  <div className="text-xs" style={{ color: COLOR_MAP.accent }}>0x6F</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step0OverviewExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>I2C 历史：</strong> 1982 年由 Philips 公司 (现 NXP) 开发，最初用于电视机内部通信。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>应用场景：</strong> 传感器 (温湿度、加速度计)、EEPROM、RTC 实时时钟、OLED 显示屏、I/O 扩展芯片等。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>速度模式：</strong> 标准模式 (100kbps)、快速模式 (400kbps)、高速模式 (3.4Mbps)。</p>
+        </div>
+      );
+    }
+
+    function Step1PhysicalLayer() {
+      return `/**
+ * I2C 物理层结构
+ */
+
+// ┌─────────────────────────────────────────┐
+// │              VCC (3.3V / 5V)            │
+// │                │    │                   │
+// │              ┌─┴─┐ ┌┴─┐                 │
+// │              │R1 │ │R2│  上拉电阻       │
+// │              │4.7kΩ 4.7kΩ               │
+// │              └─┬─┘ └┬─┘                 │
+// │                │    │                   │
+// │   SDA ─────────┼────┼──────────────     │
+// │   (双向)       │    │              │     │
+// │   SCL ─────────┴────┴──────────────     │
+// │   (时钟)                              │     │
+// └─────────────────────────────────────────┘
+//         │              │
+//    ┌────┴────┐   ┌────┴────┐
+//    │ 主设备  │   │ 从设备  │
+//    │  (MCU)  │   │(Sensor) │
+//    └─────────┘   └─────────┘
+
+// 关键特性:
+// 1. 开漏输出 (Open-Drain)
+//    - 只能拉低电平，不能输出高电平
+//    - 高电平由上拉电阻提供
+
+// 2. 线与逻辑 (Wired-AND)
+//    - 任一设备拉低，总线即为低
+//    - 所有设备释放，总线为高
+
+// 3. 上拉电阻选择
+//    - 典型值：4.7kΩ
+//    - 高速时：2.2kΩ 或更小`;
+    }
+
+    function Step1PhysicalLayerViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>I2C 物理连接</div>
+          <div className="relative p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.primary}` }}>
+            {/* VCC and Pull-up resistors */}
+            <div className="text-center text-xs mb-2" style={{ color: COLOR_MAP.text }}>VCC (3.3V)</div>
+            <div className="flex justify-center gap-8 mb-2">
+              <div className="flex flex-col items-center">
+                <div className="w-0.5 h-4" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="w-8 h-0.5" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="w-0.5 h-4" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="text-xs mt-1" style={{ color: COLOR_MAP.text }}>R1 4.7k</div>
+              </div>
+              <div className="flex flex-col items-center">
+                <div className="w-0.5 h-4" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="w-8 h-0.5" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="w-0.5 h-4" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                <div className="text-xs mt-1" style={{ color: COLOR_MAP.text }}>R2 4.7k</div>
+              </div>
+            </div>
+            {/* SDA and SCL lines */}
+            <div className="space-y-2">
+              <div className="flex items-center">
+                <span className="text-xs font-bold mr-2" style={{ color: COLOR_MAP.text }}>SDA</span>
+                <div className="flex-1 h-1" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+              </div>
+              <div className="flex items-center">
+                <span className="text-xs font-bold mr-2" style={{ color: COLOR_MAP.text }}>SCL</span>
+                <div className="flex-1 h-1" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center animate-pulse" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+            <div className="font-bold text-sm" style={{ color: COLOR_MAP.text }}>开漏输出 + 上拉电阻</div>
+            <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>实现多设备共享总线</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step1PhysicalLayerExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>开漏输出：</strong> I2C 引脚内部是 NMOS 管，只能将线路拉低到地，不能输出高电平。高电平由外部上拉电阻提供。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>线与逻辑：</strong> 多个设备可以同时连接在同一总线上，任一设备拉低总线，总线就为低电平。这避免了总线冲突。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>上拉电阻：</strong> 典型值 4.7kΩ。阻值越小上升沿越陡但功耗越大。总线电容大时需减小阻值。</p>
+        </div>
+      );
+    }
+
+    function Step2Timing() {
+      return `/**
+ * I2C 时序定义
+ */
+
+// 起始条件 (START)
+// SCL = 1 期间，SDA 从 1→0
+// ────┐
+// SDA │   ────────
+//     └────
+//     ┌───┐   ┌───┐
+// SCL │   └───┘   └───
+//     ↑
+//     START
+
+// 停止条件 (STOP)
+// SCL = 1 期间，SDA 从 0→1
+//     ┌────
+// SDA │   ────────
+// ────┘
+//     ┌───┐   ┌───┐
+// SCL │   └───┘   └───
+//     ↑
+//     STOP
+
+// 数据有效性规则
+// SCL = 1 期间，SDA 必须稳定
+// 只有 SCL = 0 期间，SDA 才能变化
+
+// 一位数据传输
+//     ┌───┐   ┌───┐   ┌───┐   ┌───┐
+// SCL │   │   │   │   │   │   │   │
+//     └───┘   └───┘   └───┘   └───┘
+// SDA  D7      D6      D5      D4
+//      稳定数据区     变化不允许`;
+    }
+
+    function Step2TimingViz() {
+      return (
+        <div className="space-y-4">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>起始和停止条件</div>
+          {/* START condition */}
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.primary}` }}>
+            <div className="text-xs font-bold mb-2" style={{ color: COLOR_MAP.text }}>起始条件 (START)</div>
+            <div className="relative h-16">
+              <svg className="w-full h-full" viewBox="0 0 200 60">
+                {/* SDA */}
+                <path d="M 0 15 L 60 15 L 60 45 L 120 45" stroke={COLOR_MAP.text} strokeWidth="2" fill="none" />
+                <text x="10" y="12" fill={COLOR_MAP.accent} fontSize="10">SDA</text>
+                {/* SCL */}
+                <path d="M 0 45 L 30 45 L 30 15 L 50 15 L 50 45 L 80 45 L 80 15 L 100 15 L 100 45 L 120 45" stroke={COLOR_MAP.text} strokeWidth="2" fill="none" />
+                <text x="10" y="42" fill={COLOR_MAP.accent} fontSize="10">SCL</text>
+                {/* Arrow */}
+                <polygon points="60,10 65,10 62,5" fill="#f59e0b" />
+                <text x="70" y="10" fill="#f59e0b" fontSize="10">START</text>
+              </svg>
+            </div>
+          </div>
+          {/* STOP condition */}
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `2px solid ${COLOR_MAP.secondary}` }}>
+            <div className="text-xs font-bold mb-2" style={{ color: COLOR_MAP.text }}>停止条件 (STOP)</div>
+            <div className="relative h-16">
+              <svg className="w-full h-full" viewBox="0 0 200 60">
+                {/* SDA */}
+                <path d="M 0 45 L 60 45 L 60 15 L 120 15" stroke={COLOR_MAP.text} strokeWidth="2" fill="none" />
+                <text x="10" y="42" fill={COLOR_MAP.accent} fontSize="10">SDA</text>
+                {/* SCL */}
+                <path d="M 0 45 L 30 45 L 30 15 L 50 15 L 50 45 L 80 45 L 80 15 L 100 15 L 100 45 L 120 45" stroke={COLOR_MAP.text} strokeWidth="2" fill="none" />
+                <text x="10" y="12" fill={COLOR_MAP.accent} fontSize="10">SCL</text>
+                {/* Arrow */}
+                <polygon points="60,20 65,20 62,15" fill="#fbbf24" />
+                <text x="70" y="30" fill="#fbbf24" fontSize="10">STOP</text>
+              </svg>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step2TimingExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>起始条件：</strong> 在 SCL 保持高电平期间，SDA 从高电平跳变到低电平。标志一次传输的开始。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>停止条件：</strong> 在 SCL 保持高电平期间，SDA 从低电平跳变到高电平。标志一次传输的结束。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>数据有效性：</strong> SCL 为高期间 SDA 必须保持稳定，只能在 SCL 为低时改变，确保接收方正确采样。</p>
+        </div>
+      );
+    }
+
+    function Step3AddressFrame() {
+      return `/**
+ * I2C 地址帧格式
+ */
+
+// 7 位地址格式 (最常见)
+// ┌───┬───┬───┬───┬───┬───┬───┬───┐
+// │ A6│ A5│ A4│ A3│ A2│ A1│ A0│ R/W│
+// └───┴───┴───┴───┴───┴───┴───┴───┘
+//   7 位地址           读写位
+
+// 读写位说明
+// R/W = 0 : 写操作 (主机发送数据)
+// R/W = 1 : 读操作 (主机接收数据)
+
+// 常见设备地址 (7 位地址)
+#define EEPROM_ADDR     0x50    // 1010 000
+#define MPU6050_ADDR    0x68    // 1101 000
+#define BME280_ADDR     0x76    // 1110 110
+#define PCF8574_ADDR    0x20    // 0100 000
+#define SSD1306_ADDR    0x3C    // 0111 100
+
+// 发送地址字节 (含读写位)
+// 写 EEPROM: 0xA0 (0x50 << 1) | 0
+// 读 EEPROM: 0xA1 (0x50 << 1) | 1
+
+// 第 9 时钟周期：应答位 (ACK/NACK)
+// ACK  : SDA 被拉低 (0)
+// NACK : SDA 保持高 (1)`;
+    }
+
+    function Step3AddressFrameViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>地址帧结构</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.primary}` }}>
+            <div className="grid grid-cols-8 gap-1 text-xs text-center">
+              {['A6', 'A5', 'A4', 'A3', 'A2', 'A1', 'A0', 'R/W'].map((bit, i) => (
+                <div key={i} className="p-2 rounded" style={{ backgroundColor: i === 7 ? COLOR_MAP.secondary : COLOR_MAP.primary, color: 'white' }}>
+                  <div className="font-bold">{bit}</div>
+                  <div className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.8)' }}>{i === 7 ? '0=写 1=读' : '地址位'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="p-2 rounded text-center animate-pulse" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}` }}>
+            <div className="font-bold text-sm" style={{ color: COLOR_MAP.text }}>示例：EEPROM 地址 0x50</div>
+            <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>写：0xA0 (1010 0000) | 读：0xA1 (1010 0001)</div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="p-2 rounded text-center" style={{ backgroundColor: 'rgba(34, 197, 94, 0.3)', border: `1px solid #22c55e` }}>
+              <div style={{ color: '#22c55e' }}>ACK (应答)</div>
+              <div style={{ color: COLOR_MAP.accent }}>SDA 拉低</div>
+            </div>
+            <div className="p-2 rounded text-center" style={{ backgroundColor: 'rgba(239, 68, 68, 0.3)', border: `1px solid #ef4444` }}>
+              <div style={{ color: '#ef4444' }}>NACK (非应答)</div>
+              <div style={{ color: COLOR_MAP.accent }}>SDA 高电平</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step3AddressFrameExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>7 位地址：</strong> 最常用，支持 127 个设备 (0x00 和 0x7F 保留)。地址左移 1 位后与读写位组合成 8 位。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>读写位：</strong> 地址字节最后一位，0 表示主机要写数据到从机，1 表示主机要从机读取数据。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>应答位：</strong> 每个字节后跟 1 位应答。接收方在第 9 个时钟周期拉低 SDA 表示 ACK，否则为 NACK。</p>
+        </div>
+      );
+    }
+
+    function Step4DataFrame() {
+      return `/**
+ * I2C 数据帧格式
+ */
+
+// 数据帧结构
+// ┌────────┐ ┌────────┐ ┌────────┐    ┌────────┐
+// │ Byte 1 │ │ Byte 2 │ │ Byte 3 │ ... │ Byte N │
+// └───┬────┘ └───┬────┘ └───┬────┘    └───┬────┘
+//     │          │          │              │
+// ┌───┴───┐  ┌───┴───┐  ┌───┴───┐    ┌───┴───┐
+// │ ACK/  │  │ ACK/  │  │ ACK/  │    │NACK/  │
+// │ NACK  │  │ NACK  │  │ NACK  │    │ STOP  │
+// └───────┘  └───────┘  └───────┘    └───────┘
+
+// 每字节 8 位，MSB 先行
+// ┌───┬───┬───┬───┬───┬───┬───┬───┐
+// │ D7│ D6│ D5│ D4│ D3│ D2│ D1│ D0│
+// └───┴───┴───┴───┴───┴───┴───┴───┘
+//   MSB                       LSB
+
+// 应答规则
+// - 接收方在每个字节后回复 ACK/NACK
+// - 主机在最后一个字节后发送 NACK
+// - 从机收到 NACK 后释放总线
+
+// 典型读时序 (主机读从机)
+// START → ADDR+R → [DATA] → NACK → STOP`;
+    }
+
+    function Step4DataFrameViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>数据帧传输</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.primary}` }}>
+            <div className="flex items-center gap-2 overflow-x-auto py-2">
+              <div className="flex-shrink-0 p-2 rounded text-center" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                <div className="text-xs font-bold">START</div>
+              </div>
+              <div className="flex-shrink-0" style={{ color: COLOR_MAP.accent }}>→</div>
+              <div className="flex-shrink-0 p-2 rounded text-center" style={{ backgroundColor: COLOR_MAP.secondary, color: 'white' }}>
+                <div className="text-xs font-bold">ADDR</div>
+                <div className="text-xs">+R/W</div>
+              </div>
+              <div className="flex-shrink-0" style={{ color: COLOR_MAP.accent }}>→</div>
+              <div className="flex-shrink-0 p-2 rounded text-center animate-pulse" style={{ backgroundColor: `${COLOR_MAP.accent}40`, color: 'white' }}>
+                <div className="text-xs font-bold">DATA1</div>
+                <div className="text-xs">ACK</div>
+              </div>
+              <div className="flex-shrink-0" style={{ color: COLOR_MAP.accent }}>→</div>
+              <div className="flex-shrink-0 p-2 rounded text-center animate-pulse" style={{ backgroundColor: `${COLOR_MAP.accent}40`, color: 'white' }}>
+                <div className="text-xs font-bold">DATA2</div>
+                <div className="text-xs">ACK</div>
+              </div>
+              <div className="flex-shrink-0" style={{ color: COLOR_MAP.accent }}>→</div>
+              <div className="flex-shrink-0 p-2 rounded text-center" style={{ backgroundColor: '#ef4444', color: 'white' }}>
+                <div className="text-xs font-bold">NACK</div>
+              </div>
+              <div className="flex-shrink-0" style={{ color: COLOR_MAP.accent }}>→</div>
+              <div className="flex-shrink-0 p-2 rounded text-center" style={{ backgroundColor: '#22c55e', color: 'white' }}>
+                <div className="text-xs font-bold">STOP</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}`, color: COLOR_MAP.accent }}>
+            MSB 先行：先发 D7，最后发 D0
+          </div>
+        </div>
+      );
+    }
+
+    function Step4DataFrameExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>字节传输：</strong> 每字节 8 位，MSB (最高位) 先行。每个字节后跟随 1 位应答。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>应答机制：</strong> 接收方在每个字节后回复 ACK 表示收到。主机在读取最后一个字节后发送 NACK 表示结束。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>时钟延展：</strong> 从机可在处理数据时拉低 SCL 延长低电平时间，主机必须等待从机释放 SCL。</p>
+        </div>
+      );
+    }
+
+    function Step5WriteFlow() {
+      return `/**
+ * I2C 写操作流程 (以 EEPROM 为例)
+ */
+
+// 写时序
+// START → ADDR+W → MEM_ADDR → DATA → STOP
+
+void EEPROM_WriteByte(uint16_t memAddr, uint8_t data) {
+    uint8_t txBuffer[2] = {memAddr, data};
+
+    // 1. 发送起始条件
+    // 2. 发送设备地址 (写)
+    // 3. 发送内存地址
+    // 4. 发送数据
+    // 5. 发送停止条件
+
+    HAL_StatusTypeDef ret = HAL_I2C_Master_Transmit(
+        &hi2c1,              // I2C 句柄
+        EEPROM_ADDR << 1,    // 设备地址 (写=0)
+        txBuffer,            // 发送缓冲区
+        2,                   // 发送 2 字节
+        100                  // 超时时间
+    );
+
+    if (ret != HAL_OK) {
+        // 错误处理
+        Error_Handler();
+    }
+
+    // EEPROM 需要写周期时间 (典型 5ms)
+    HAL_Delay(5);
+}
+
+// 页写 (Page Write) - 更高效
+// START → ADDR+W → MEM_ADDR → DATA1 → DATA2 → ... → STOP
+// 24C02 页大小：8 字节`;
+    }
+
+    function Step5WriteFlowViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>EEPROM 写时序</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>START</div>
+                <div className="flex-1 h-0.5" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>ADDR+W</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, color: COLOR_MAP.text }}>0xA0</div>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>MEM_ADDR</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, color: COLOR_MAP.text }}>0x00~0xFF</div>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>DATA</div>
+                <div className="flex-1 p-1 rounded animate-pulse" style={{ backgroundColor: `${COLOR_MAP.accent}30`, color: COLOR_MAP.text }}>0x55</div>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>STOP</div>
+                <div className="flex-1 h-0.5" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs animate-blink" style={{ backgroundColor: '#fef3c7', color: '#78350f' }}>
+            ⚠️ EEPROM 写入后需等待 5ms 写周期
+          </div>
+        </div>
+      );
+    }
+
+    function Step5WriteFlowExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>写流程：</strong> START → 设备地址 +W → 内存地址 → 数据 → STOP。写入后需等待写周期完成。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>页写：</strong> 连续发送多个数据字节可减少开销。24C02 页大小为 8 字节，超过页边界会回绕。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>HAL 函数：</strong> HAL_I2C_Master_Transmit() 完成整个写流程，返回 HAL_OK 表示成功。</p>
+        </div>
+      );
+    }
+
+    function Step6ReadFlow() {
+      return `/**
+ * I2C 读操作流程 (以 EEPROM 为例)
+ */
+
+// 读时序 (随机地址读)
+// START → ADDR+W → MEM_ADDR →
+// RESTART → ADDR+R → DATA → NACK → STOP
+
+uint8_t EEPROM_ReadByte(uint16_t memAddr) {
+    uint8_t rxData;
+
+    // 步骤 1: 写入内存地址 (写操作)
+    HAL_StatusTypeDef ret = HAL_I2C_Mem_Read(
+        &hi2c1,              // I2C 句柄
+        EEPROM_ADDR << 1,    // 设备地址
+        memAddr,             // 内存地址
+        I2C_MEMADD_SIZE_8BIT,// 地址大小
+        &rxData,             // 接收缓冲区
+        1,                   // 读取 1 字节
+        100                  // 超时
+    );
+
+    if (ret != HAL_OK) {
+        Error_Handler();
+    }
+
+    return rxData;
+}
+
+// 顺序读 (Sequential Read)
+// 读完一个字节后发 ACK 继续读下一个
+// 可连续读取多个字节`;
+    }
+
+    function Step6ReadFlowViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>EEPROM 读时序</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-1 text-xs">
+              <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+                <span style={{ color: COLOR_MAP.text }}>【写阶段】设置内存地址</span>
+              </div>
+              <div className="flex gap-2 justify-center text-xs" style={{ color: COLOR_MAP.accent }}>
+                <span>START</span> → <span>ADDR+W</span> → <span>MEM_ADDR</span>
+              </div>
+              <div className="text-center font-bold" style={{ color: COLOR_MAP.secondary }}>↑ 重复起始条件 (RESTART) ↑</div>
+              <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                <span style={{ color: COLOR_MAP.text }}>【读阶段】读取数据</span>
+              </div>
+              <div className="flex gap-2 justify-center text-xs" style={{ color: COLOR_MAP.accent }}>
+                <span>ADDR+R</span> → <span>DATA</span> → <span>NACK</span> → <span>STOP</span>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            重复起始条件避免总线释放，确保原子操作
+          </div>
+        </div>
+      );
+    }
+
+    function Step6ReadFlowExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>随机读：</strong> 先写内存地址 (写操作)，然后发送重复起始条件，再发地址 +R 读取数据。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>重复起始：</strong> RESTART 在不释放总线的情况下重新开始传输，确保操作的原子性，防止其他主设备干扰。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>顺序读：</strong> 读完一个字节后回复 ACK 可继续读下一地址，发 NACK 结束读取。</p>
+        </div>
+      );
+    }
+
+    function Step7HALUsage() {
+      return `/**
+ * STM32 HAL 库 I2C 使用
+ */
+
+// 初始化 (由 CubeMX 生成)
+I2C_HandleTypeDef hi2c1;
+
+void MX_I2C1_Init(void) {
+    hi2c1.Instance = I2C1;
+    hi2c1.Init.Timing = 0x00200A24;  // 根据时钟计算
+    hi2c1.Init.OwnAddress1 = 0;
+    hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+
+    if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+// 主设备发送 (写)
+HAL_I2C_Master_Transmit(&hi2c1, devAddr, txData, size, timeout);
+
+// 主设备接收 (读)
+HAL_I2C_Master_Receive(&hi2c1, devAddr, rxData, size, timeout);
+
+// 内存写 (带地址指针)
+HAL_I2C_Mem_Write(&hi2c1, devAddr, memAddr, addSize, data, size, timeout);
+
+// 内存读 (带地址指针)
+HAL_I2C_Mem_Read(&hi2c1, devAddr, memAddr, addSize, data, size, timeout);
+
+// 中断方式
+HAL_I2C_Master_Transmit_IT(&hi2c1, devAddr, txData, size);
+// 回调：void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *hi2c)
+
+// DMA 方式
+HAL_I2C_Master_Transmit_DMA(&hi2c1, devAddr, txData, size);`;
+    }
+
+    function Step7HALUsageViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>HAL I2C API</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>阻塞式 API</div>
+              <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>Master_Transmit</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>Master_Receive</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>Mem_Write</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>Mem_Read</div>
+              </div>
+            </div>
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>非阻塞式 API</div>
+              <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>_IT (中断)</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>_DMA (DMA)</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>回调函数</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>事件驱动</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}` }}>
+            <div className="font-bold text-sm" style={{ color: COLOR_MAP.text }}>推荐：简单应用用阻塞式</div>
+            <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>实时性要求高用中断/DMA</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step7HALUsageExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>阻塞式 API：</strong> 函数等待传输完成才返回，使用简单但占用 CPU。适合低频率、非实时场景。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>中断/DMA：</strong> 函数立即返回，传输完成后调用回调函数。不占用 CPU，适合高频率或实时场景。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>内存 API：</strong> HAL_I2C_Mem_Read/Write 专为 EEPROM 等带地址指针的设备设计，自动处理地址写入。</p>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

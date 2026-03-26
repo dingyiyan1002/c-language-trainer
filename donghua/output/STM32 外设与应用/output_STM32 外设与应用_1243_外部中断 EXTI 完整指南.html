@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 外部中断 EXTI 完整指南 - External Interrupt Controller</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes edge { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+        @keyframes trigger { 0%, 100% { background-color: #ef4444; } 50% { background-color: #fca5a5; } }
+        @keyframes interrupt { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        .rising-edge { animation: edge 0.5s ease-out; }
+        .falling-edge { animation: edge 0.5s ease-out reverse; }
+        .trigger-anim { animation: trigger 0.2s ease-out; }
+        .interrupt-anim { animation: interrupt 0.3s ease-out; }
+        .active-step { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#ef4444', primaryLight: '#fca5a5', primaryDark: '#dc2626',
+            secondary: '#f97316', success: '#22c55e', warning: '#f59e0b',
+            rising: '#22c55e', falling: '#ef4444', both: '#8b5cf6', soft: '#3b82f6',
+            gradient: 'from-red-500 via-red-600 to-orange-500'
+        };
+
+        const STEPS = [
+            {
+                title: 'EXTI 基础',
+                voice: 'EXTI 是外部中断控制器，检测 GPIO 引脚或内部事件的边沿信号。STM32F103 有 20 个中断线，EXTI0 到 EXTI19，每根线可配置上升沿、下降沿或双边沿触发。',
+                highlights: ['EXTI', '20 中断线', '边沿检测', '上升沿', '下降沿']
+            },
+            {
+                title: '中断线映射',
+                voice: 'EXTI0 到 EXTI15 直接映射到 GPIO 的 0 到 15 号引脚。同一编号的引脚共享中断线，如 PA0、PB0、PC0 都连接到 EXTI0，但同一时刻只能选择一个。EXTI16 到 19 连接内部事件。',
+                highlights: ['EXTI0-15', 'GPIO 映射', 'PA0-PB0-PC0', '共享', '内部事件']
+            },
+            {
+                title: '触发方式',
+                voice: '上升沿触发：信号从低到高跳变时产生中断。下降沿触发：信号从高到低跳变时产生中断。双边沿触发：任意边沿都触发。软件触发：通过寄存器位手动产生中断。',
+                highlights: ['上升沿', '下降沿', '双边沿', '软件触发', '边沿选择']
+            },
+            {
+                title: 'NVIC 配置',
+                voice: 'EXTI 中断需要 NVIC 嵌套向量中断控制器配合。配置中断优先级分组，设置抢占优先级和子优先级，使能中断通道。高优先级可打断低优先级中断服务程序。',
+                highlights: ['NVIC', '优先级分组', '抢占', '子优先级', '中断使能']
+            },
+            {
+                title: '中断服务',
+                voice: '编写中断服务函数 EXTIx_IRQHandler。进入中断后首先清除中断标志位，然后执行中断处理逻辑。中断程序要短小精悍，复杂处理留给主循环。',
+                highlights: ['ISR', '清除标志', '短小精悍', '快速响应', '标志位']
+            },
+            {
+                title: '消抖处理',
+                voice: '机械按键按下时会产生抖动，需要消抖处理。硬件消抖使用 RC 滤波电容。软件消抖在中断中启动定时器，10 到 20 毫秒后再次检测确认。',
+                highlights: ['机械抖动', '硬件消抖', '软件消抖', '定时器', '10-20ms']
+            },
+            {
+                title: '低功耗',
+                voice: 'EXTI 可唤醒停机模式和待机模式。配置唤醒标志，使能唤醒功能。按键或事件触发时，MCU 从低功耗模式唤醒并执行中断服务程序。',
+                highlights: ['唤醒', '停机模式', '待机模式', '低功耗', '唤醒标志']
+            },
+            {
+                title: '应用实例',
+                voice: '实际应用：按键中断输入、编码器脉冲计数、外部事件触发、故障信号检测、低功耗唤醒。注意中断优先级设置和标志位清除顺序。',
+                highlights: ['按键输入', '编码器', '事件触发', '故障检测', '唤醒']
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [showWaveform, setShowWaveform] = React.useState(false);
+            const [signalState, setSignalState] = React.useState(0);
+            const [interruptCount, setInterruptCount] = React.useState(0);
+            const [triggerMode, setTriggerMode] = React.useState('rising');
+            const [selectedPort, setSelectedPort] = React.useState('A');
+            const [pinNumber, setPinNumber] = React.useState(0);
+            const [isInterruptActive, setIsInterruptActive] = React.useState(false);
+            const [debounceEnabled, setDebounceEnabled] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                const utterance = new SpeechSynthesisUtterance(STEPS[currentStep].voice);
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang.includes('zh-CN') && v.name.includes('Xiaoxiao'))
+                    || voices.find(v => v.lang.includes('zh-CN'))
+                    || voices.find(v => v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                if (isPlaying) speechSynthesis.speak(utterance);
+
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying]);
+
+            const handlePlay = () => setIsPlaying(true);
+            const handlePause = () => {
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+            const handleRestart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+            };
+            const handleStepClick = (index) => {
+                setCurrentStep(index);
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+
+            const toggleSignal = () => {
+                const newState = signalState ? 0 : 1;
+                setSignalState(newState);
+
+                // 检查是否触发中断
+                let shouldTrigger = false;
+                if (triggerMode === 'rising' && newState === 1) shouldTrigger = true;
+                if (triggerMode === 'falling' && newState === 0) shouldTrigger = true;
+                if (triggerMode === 'both') shouldTrigger = true;
+
+                if (shouldTrigger) {
+                    if (debounceEnabled) {
+                        setTimeout(() => {
+                            setIsInterruptActive(true);
+                            setInterruptCount(c => c + 1);
+                            setTimeout(() => setIsInterruptActive(false), 200);
+                        }, 15);
+                    } else {
+                        setIsInterruptActive(true);
+                        setInterruptCount(c => c + 1);
+                        setTimeout(() => setIsInterruptActive(false), 200);
+                    }
+                }
+            };
+
+            const renderWaveform = () => (
+                <div className="bg-gray-800 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-3">
+                        <span className="text-sm text-gray-400">信号波形与中断触发</span>
+                        <span className={`text-xs px-2 py-1 rounded ${isInterruptActive ? 'bg-red-600 animate-pulse' : 'bg-gray-600'}`}>
+                            {isInterruptActive ? '中断!' : '空闲'}
+                        </span>
+                    </div>
+                    <div className="bg-gray-900 rounded h-24 relative overflow-hidden mb-3">
+                        <svg className="w-full h-full" viewBox="0 0 400 100">
+                            <line x1="0" y1="75" x2="400" y2="75" stroke="#374151" strokeWidth="1"/>
+                            <line x1="0" y1="25" x2="400" y2="25" stroke="#374151" strokeWidth="1"/>
+                            {/* 信号波形 */}
+                            <polyline
+                                points="0,75 50,75 50,25 100,25 100,75 150,75 150,25 200,25 200,75 250,75 250,25 300,25 300,75 350,75 350,25 400,25"
+                                fill="none"
+                                stroke={signalState ? '#22c55e' : '#ef4444'}
+                                strokeWidth="3"
+                                className="transition-colors"
+                            />
+                            {/* 触发点标记 */}
+                            {(triggerMode === 'rising' || triggerMode === 'both') && (
+                                <>
+                                    <circle cx="50" cy="50" r="5" fill="#22c55e" className="animate-pulse"/>
+                                    <circle cx="150" cy="50" r="5" fill="#22c55e" className="animate-pulse"/>
+                                    <circle cx="250" cy="50" r="5" fill="#22c55e" className="animate-pulse"/>
+                                    <circle cx="350" cy="50" r="5" fill="#22c55e" className="animate-pulse"/>
+                                </>
+                            )}
+                            {triggerMode === 'falling' && (
+                                <>
+                                    <circle cx="100" cy="50" r="5" fill="#ef4444" className="animate-pulse"/>
+                                    <circle cx="200" cy="50" r="5" fill="#ef4444" className="animate-pulse"/>
+                                    <circle cx="300" cy="50" r="5" fill="#ef4444" className="animate-pulse"/>
+                                </>
+                            )}
+                        </svg>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div className={`p-2 rounded ${triggerMode === 'rising' ? 'bg-green-600' : 'bg-gray-700'}`}>
+                            上升沿触发
+                        </div>
+                        <div className={`p-2 rounded ${triggerMode === 'falling' ? 'bg-red-600' : 'bg-gray-700'}`}>
+                            下降沿触发
+                        </div>
+                        <div className={`p-2 rounded ${triggerMode === 'both' ? 'bg-purple-600' : 'bg-gray-700'}`}>
+                            双边沿触发
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch (currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-red-400">STM32 EXTI 规格</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">中断线数量</div>
+                                            <div className="text-2xl font-bold text-red-400">20</div>
+                                            <div className="text-xs text-gray-400">EXTI0-EXTI19</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">GPIO 映射</div>
+                                            <div className="text-2xl font-bold text-orange-400">16</div>
+                                            <div className="text-xs text-gray-400">EXTI0-EXTI15</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">触发方式</div>
+                                            <div className="text-2xl font-bold text-green-400">3 种</div>
+                                            <div className="text-xs text-gray-400">上升/下降/双边</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">优先级</div>
+                                            <div className="text-2xl font-bold text-purple-400">16 级</div>
+                                            <div className="text-xs text-gray-400">可配置</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-red-900 to-orange-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">EXTI 主要功能:</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 外部 GPIO 中断输入</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 内部事件检测 (PVD/CSS)</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 低功耗唤醒</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 软件中断触发</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 边沿检测配置</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-red-400">EXTI 中断线映射</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="grid grid-cols-7 gap-2 text-xs">
+                                            <div className="text-gray-400">线号</div>
+                                            {['EXTI0','EXTI1','EXTI2','EXTI3','EXTI4','EXTI5-9','EXTI10-15'].map(e => (
+                                                <div key={e} className="text-center font-bold text-red-400">{e}</div>
+                                            ))}
+                                        </div>
+                                        <div className="mt-2 space-y-1">
+                                            <div className="grid grid-cols-7 gap-2 text-xs">
+                                                <div className="text-gray-400">PA</div>
+                                                {['PA0','PA1','PA2','PA3','PA4','PA5-9','PA10-15'].map(p => (
+                                                    <button key={p} onClick={() => { setSelectedPort('A'); setPinNumber(parseInt(p.replace(/[^0-9]/g, '')) || 0); }}
+                                                        className={`text-center py-1 rounded hover:bg-gray-700 ${selectedPort === 'A' && pinNumber === parseInt(p.replace(/[^0-9]/g, '')) ? 'bg-red-600' : 'bg-gray-800'}`}>
+                                                        {p}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <div className="grid grid-cols-7 gap-2 text-xs">
+                                                <div className="text-gray-400">PB</div>
+                                                {['PB0','PB1','PB2','PB3','PB4','PB5-9','PB10-15'].map(p => (
+                                                    <button key={p} onClick={() => { setSelectedPort('B'); setPinNumber(parseInt(p.replace(/[^0-9]/g, '')) || 0); }}
+                                                        className={`text-center py-1 rounded hover:bg-gray-700 ${selectedPort === 'B' && pinNumber === parseInt(p.replace(/[^0-9]/g, '')) ? 'bg-orange-600' : 'bg-gray-800'}`}>
+                                                        {p}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <div className="grid grid-cols-7 gap-2 text-xs">
+                                                <div className="text-gray-400">PC</div>
+                                                {['PC0','PC1','PC2','PC3','PC4','PC5-9','PC10-15'].map(p => (
+                                                    <button key={p} onClick={() => { setSelectedPort('C'); setPinNumber(parseInt(p.replace(/[^0-9]/g, '')) || 0); }}
+                                                        className={`text-center py-1 rounded hover:bg-gray-700 ${selectedPort === 'C' && pinNumber === parseInt(p.replace(/[^0-9]/g, '')) ? 'bg-green-600' : 'bg-gray-800'}`}>
+                                                        {p}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-orange-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-orange-400">⚠️ 共享规则</h4>
+                                    <p className="text-sm text-gray-300">同一编号的 GPIO 引脚共享同一根 EXTI 线，如 PA0、PB0、PC0 都连接到 EXTI0。通过 AFIO_EXTICR 寄存器选择具体使用哪个引脚，但同一时刻只能有一个生效。</p>
+                                </div>
+                            </div>
+                        );
+                    case 2:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-red-400">触发方式配置</h3>
+                                    <div className="space-y-3">
+                                        <button
+                                            onClick={() => setTriggerMode('rising')}
+                                            className={`w-full p-3 rounded-lg text-left transition-all ${
+                                                triggerMode === 'rising' ? 'bg-green-900 ring-2 ring-green-500' : 'bg-gray-900 hover:bg-gray-800'
+                                            }`}
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-green-400">上升沿触发 (RTTR)</span>
+                                                <span className="text-xs text-gray-400">低→高跳变</span>
+                                            </div>
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <svg className="w-16 h-8" viewBox="0 0 50 30">
+                                                    <polyline points="0,25 20,25 20,5 50,5" fill="none" stroke="#22c55e" strokeWidth="2"/>
+                                                </svg>
+                                                <span className="text-xs text-gray-400">检测到上升沿时触发中断</span>
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => setTriggerMode('falling')}
+                                            className={`w-full p-3 rounded-lg text-left transition-all ${
+                                                triggerMode === 'falling' ? 'bg-red-900 ring-2 ring-red-500' : 'bg-gray-900 hover:bg-gray-800'
+                                            }`}
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-red-400">下降沿触发 (FTTR)</span>
+                                                <span className="text-xs text-gray-400">高→低跳变</span>
+                                            </div>
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <svg className="w-16 h-8" viewBox="0 0 50 30">
+                                                    <polyline points="0,5 20,5 20,25 50,25" fill="none" stroke="#ef4444" strokeWidth="2"/>
+                                                </svg>
+                                                <span className="text-xs text-gray-400">检测到下降沿时触发中断</span>
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => setTriggerMode('both')}
+                                            className={`w-full p-3 rounded-lg text-left transition-all ${
+                                                triggerMode === 'both' ? 'bg-purple-900 ring-2 ring-purple-500' : 'bg-gray-900 hover:bg-gray-800'
+                                            }`}
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-purple-400">双边沿触发 (RTTR+FTTR)</span>
+                                                <span className="text-xs text-gray-400">任意边沿</span>
+                                            </div>
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <svg className="w-16 h-8" viewBox="0 0 50 30">
+                                                    <polyline points="0,25 12,25 12,5 25,5 25,25 38,25 38,5 50,5" fill="none" stroke="#a855f7" strokeWidth="2"/>
+                                                </svg>
+                                                <span className="text-xs text-gray-400">上升沿和下降沿都触发中断</span>
+                                            </div>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="bg-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-blue-400">💡 应用建议</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 按键检测：下降沿 (按下) 或上升沿 (释放)</li>
+                                        <li>• 编码器：双边沿捕获正交脉冲</li>
+                                        <li>• 故障信号：根据有效电平选择</li>
+                                        <li>• 低功耗唤醒：任意边沿</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 3:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-red-400">NVIC 中断控制器</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="flex items-center justify-center gap-4">
+                                            <div className="bg-red-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">EXTI</div>
+                                                <div className="font-bold text-red-400">中断请求</div>
+                                            </div>
+                                            <div className="text-red-400">→</div>
+                                            <div className="bg-purple-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">NVIC</div>
+                                                <div className="font-bold text-purple-400">优先级仲裁</div>
+                                            </div>
+                                            <div className="text-purple-400">→</div>
+                                            <div className="bg-blue-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">CPU</div>
+                                                <div className="font-bold text-blue-400">执行 ISR</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-purple-400 mb-1">优先级分组 (SCB→AIRCR)</div>
+                                            <div className="text-xs text-gray-400">5 组：Group 0-4，决定抢占/子优先级位数</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-green-400 mb-1">抢占优先级</div>
+                                            <div className="text-xs text-gray-400">高抢占优先级可打断低优先级的中断服务</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-orange-400 mb-1">子优先级</div>
+                                            <div className="text-xs text-gray-400">同抢占优先级时，高子优先级先响应</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-purple-900 to-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">⚙️ Group 配置示例</h4>
+                                    <div className="text-xs font-mono bg-gray-900 rounded p-3">
+                                        Group 2: 2 位抢占 +2 位子优先级<br/>
+                                        抢占优先级：0-3 (4 级)<br/>
+                                        子优先级：0-3 (4 级)<br/>
+                                        总计：16 个优先级组合
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 4:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-red-400">中断服务函数</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// EXTI 中断服务函数模板
+void EXTI0_IRQHandler(void) {
+    // 1. 首先清除中断标志位
+    EXTI->PR = EXTI_PR_PR0;
+
+    // 2. 执行中断处理逻辑
+    // 保持简短，复杂处理交给主循环
+    if (debounce_ok) {
+        key_pressed = 1;
+    }
+}
+
+void EXTI1_IRQHandler(void) {
+    EXTI->PR = EXTI_PR_PR1;  // 清除标志
+    // 处理逻辑
+}
+
+void EXTI2_IRQHandler(void) {
+    EXTI->PR = EXTI_PR_PR2;  // 清除标志
+    // 处理逻辑
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-orange-900 rounded-lg p-4 border-2 border-orange-500">
+                                    <h4 className="font-bold mb-2 text-orange-400">⚠️ 重要：先清除标志</h4>
+                                    <p className="text-sm text-gray-300">必须在进入中断后首先清除标志位，否则中断会重复触发导致程序卡死。清除标志使用写 1 方式。</p>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-blue-400">中断向量表</h3>
+                                    <div className="bg-gray-900 rounded p-3 overflow-x-auto">
+                                        <table className="w-full text-xs">
+                                            <thead>
+                                                <tr className="border-b border-gray-700">
+                                                    <th className="text-left py-1">中断线</th>
+                                                    <th className="text-left">向量函数</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr className="border-b border-gray-800">
+                                                    <td className="py-1">EXTI0</td>
+                                                    <td className="font-mono text-purple-400">EXTI0_IRQHandler</td>
+                                                </tr>
+                                                <tr className="border-b border-gray-800">
+                                                    <td>EXTI1</td>
+                                                    <td className="font-mono text-purple-400">EXTI1_IRQHandler</td>
+                                                </tr>
+                                                <tr className="border-b border-gray-800">
+                                                    <td>EXTI2</td>
+                                                    <td className="font-mono text-purple-400">EXTI2_IRQHandler</td>
+                                                </tr>
+                                                <tr>
+                                                    <td>EXTI3-15</td>
+                                                    <td className="font-mono text-purple-400">EXTI3_IRQHandler ... EXTI15_10_IRQHandler</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 5:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-red-400">按键消抖处理</h3>
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <h4 className="font-bold text-blue-400 mb-2">硬件消抖</h4>
+                                            <div className="text-xs text-gray-400 mb-2">RC 滤波电路</div>
+                                            <svg className="w-full h-20" viewBox="0 0 100 60">
+                                                <line x1="10" y1="30" x2="30" y2="30" stroke="#3b82f6" strokeWidth="2"/>
+                                                <rect x="30" y="25" width="10" height="10" fill="none" stroke="#3b82f6" strokeWidth="2"/>
+                                                <line x1="40" y1="30" x2="60" y2="30" stroke="#3b82f6" strokeWidth="2"/>
+                                                <line x1="60" y1="20" x2="60" y2="40" stroke="#22c55e" strokeWidth="2"/>
+                                                <line x1="55" y1="40" x2="65" y2="40" stroke="#22c55e" strokeWidth="2"/>
+                                                <line x1="60" y1="40" x2="60" y2="50" stroke="#22c55e" strokeWidth="2"/>
+                                                <line x1="60" y1="50" x2="90" y2="50" stroke="#3b82f6" strokeWidth="2"/>
+                                                <text x="50" y="15" fill="#9ca3af" fontSize="8">R</text>
+                                                <text x="70" y="35" fill="#9ca3af" fontSize="8">C</text>
+                                            </svg>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <h4 className="font-bold text-green-400 mb-2">软件消抖</h4>
+                                            <div className="text-xs text-gray-400 mb-2">定时器延时检测</div>
+                                            <div className="space-y-1 text-xs">
+                                                <div className="bg-gray-800 rounded p-1">1. 中断检测到边沿</div>
+                                                <div className="bg-gray-800 rounded p-1">2. 启动 15ms 定时器</div>
+                                                <div className="bg-gray-800 rounded p-1">3. 定时到后再次检测</div>
+                                                <div className="bg-gray-800 rounded p-1">4. 确认按键状态</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2 bg-gray-900 rounded p-3">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={debounceEnabled}
+                                            onChange={(e) => setDebounceEnabled(e.target.checked)}
+                                            className="w-4 h-4"
+                                        />
+                                        <span className="text-sm">启用软件消抖 (15ms 延时)</span>
+                                    </label>
+                                </div>
+                                <div className="bg-green-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-green-400">✓ 消抖时间选择</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 轻触按键：10-15ms</li>
+                                        <li>• 机械开关：15-20ms</li>
+                                        <li>• 继电器：20-30ms</li>
+                                        <li>• 光电隔离：5-10ms</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 6:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-red-400">低功耗唤醒</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="flex items-center justify-center gap-4">
+                                            <div className="bg-gray-700 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">STOP</div>
+                                                <div className="font-bold text-gray-400">停机模式</div>
+                                            </div>
+                                            <div className="text-gray-400">→</div>
+                                            <div className="bg-red-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">EXTI</div>
+                                                <div className="font-bold text-red-400">唤醒事件</div>
+                                            </div>
+                                            <div className="text-red-400">→</div>
+                                            <div className="bg-green-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">RUN</div>
+                                                <div className="font-bold text-green-400">正常运行</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-purple-400 mb-1">停机模式 (Stop)</div>
+                                            <div className="text-xs text-gray-400">关闭 HSE/HSI，保留 SRAM 和寄存器，唤醒后从断点继续</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-orange-400 mb-1">待机模式 (Standby)</div>
+                                            <div className="text-xs text-gray-400">关闭大部分电路，唤醒后从复位开始执行</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-red-900 to-purple-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">🔌 唤醒源</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• EXTI0-EXTI19 任意中断线</li>
+                                        <li>• PVD 电源电压检测</li>
+                                        <li>• RTC 闹钟事件</li>
+                                        <li>• USB 唤醒事件</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 7:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-red-400">STM32 代码实现</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// EXTI 初始化 (按键)
+void EXTI_Key_Init(void) {
+    // 1. 使能时钟
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    // 2. 配置 PA0 为浮空输入
+    GPIOA->CRL &= ~0x0F;
+    GPIOA->CRL |= 0x08;
+
+    // 3. 连接 PA0 到 EXTI0
+    AFIO->EXTICR[0] &= ~0x0F;
+
+    // 4. 配置下降沿触发
+    EXTI->FTSR |= EXTI_FTSR_TR0;
+
+    // 5. 清除中断标志
+    EXTI->PR = EXTI_PR_PR0;
+
+    // 6. 使能中断
+    EXTI->IMR |= EXTI_IMR_MR0;
+
+    // 7. NVIC 配置
+    NVIC_EnableIRQ(EXTI0_IRQn);
+    NVIC_SetPriority(EXTI0_IRQn, 1);
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-orange-400">完整应用示例</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// 中断服务函数 + 消抖
+volatile uint8_t key_flag = 0;
+
+void EXTI0_IRQHandler(void) {
+    EXTI->PR = EXTI_PR_PR0;  // 清除标志
+
+    // 简单消抖：延时后再次检测
+    for (volatile int i = 0; i < 15000; i++);
+
+    if ((GPIOA->IDR & GPIO_IDR_IDR0) == 0) {
+        key_flag = 1;  // 确认按键按下
+    }
+}
+
+// 主循环检测
+int main(void) {
+    EXTI_Key_Init();
+    while (1) {
+        if (key_flag) {
+            key_flag = 0;
+            // 执行按键功能
+        }
+    }
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-green-900 to-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">🔧 实战技巧</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 多个按键：使用不同 EXTI 线</li>
+                                        <li>• 长按检测：定时器 + 状态机</li>
+                                        <li>• 组合键：多个标志位判断</li>
+                                        <li>• 中断嵌套：合理设置优先级</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-4">
+                            <h1 className="text-2xl font-bold bg-gradient-to-r from-red-400 via-red-500 to-orange-400 bg-clip-text text-transparent">
+                                STM32 外部中断 EXTI 完整指南
+                            </h1>
+                            <p className="text-sm text-gray-400">20 中断线 · 边沿检测 · NVIC 优先级 · 消抖处理 · 低功耗唤醒</p>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 justify-center">
+                            {!isPlaying ? (
+                                <button onClick={handlePlay} className="px-4 py-2 bg-green-600 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                                    <span>▶</span> 播放
+                                </button>
+                            ) : (
+                                <button onClick={handlePause} className="px-4 py-2 bg-yellow-600 rounded-lg hover:bg-yellow-700 transition-colors flex items-center gap-2">
+                                    <span>⏸</span> 暂停
+                                </button>
+                            )}
+                            <button onClick={handleRestart} className="px-4 py-2 bg-red-600 rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2">
+                                <span>🔄</span> 重新开始
+                            </button>
+                            <button
+                                onClick={() => setShowWaveform(!showWaveform)}
+                                className={`px-4 py-2 rounded-lg transition-colors ${showWaveform ? 'bg-red-600' : 'bg-gray-600'} hover:opacity-80`}
+                            >
+                                {showWaveform ? '隐藏波形' : '显示波形'}
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 overflow-x-auto justify-center">
+                            {STEPS.map((step, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => handleStepClick(index)}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                                        index === currentStep
+                                            ? `bg-gradient-to-r ${COLOR_MAP.gradient} text-white shadow-lg`
+                                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                    }`}
+                                >
+                                    {index + 1}. {step.title}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">代码区</h3>
+                                <div className="bg-gray-900 rounded p-3 font-mono text-xs overflow-x-auto">
+                                    <pre className="text-green-400">{`// EXTI 操作函数
+void EXTI_Init(void);
+void EXTI_Enable(uint8_t line);
+void EXTI_Disable(uint8_t line);
+void EXTI_SetTrigger(uint8_t line,
+                     uint8_t mode);
+void EXTI_ClearFlag(uint8_t line);`}</pre>
+                                </div>
+                                <div className="mt-4">
+                                    <div className="text-xs text-gray-400 mb-2">中断统计:</div>
+                                    <div className="bg-gray-900 rounded p-3 text-center">
+                                        <div className="text-3xl font-bold text-red-400">{interruptCount}</div>
+                                        <div className="text-sm text-gray-400">中断次数</div>
+                                    </div>
+                                </div>
+                                {showWaveform && (
+                                    <div className="mt-4">
+                                        {renderWaveform()}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">可视化区</h3>
+                                <div className="space-y-4">
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <span className="text-xs text-gray-400">手动触发中断</span>
+                                            <span className={`text-xs px-2 py-1 rounded ${isInterruptActive ? 'bg-red-600 animate-pulse' : 'bg-gray-600'}`}>
+                                                {signalState ? '高电平' : '低电平'}
+                                            </span>
+                                        </div>
+                                        <button
+                                            onClick={toggleSignal}
+                                            className={`w-full py-4 rounded-lg text-lg font-bold transition-all ${
+                                                signalState
+                                                    ? 'bg-green-600 hover:bg-green-700'
+                                                    : 'bg-red-600 hover:bg-red-700'
+                                            }`}
+                                        >
+                                            {signalState ? '高电平 (1)' : '低电平 (0)'} - 点击切换
+                                        </button>
+                                    </div>
+
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="text-xs text-gray-400 mb-2">触发方式</div>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <button
+                                                onClick={() => setTriggerMode('rising')}
+                                                className={`py-2 rounded text-xs font-bold transition-all ${
+                                                    triggerMode === 'rising' ? 'bg-green-600' : 'bg-gray-800 hover:bg-gray-700'
+                                                }`}
+                                            >
+                                                上升沿
+                                            </button>
+                                            <button
+                                                onClick={() => setTriggerMode('falling')}
+                                                className={`py-2 rounded text-xs font-bold transition-all ${
+                                                    triggerMode === 'falling' ? 'bg-red-600' : 'bg-gray-800 hover:bg-gray-700'
+                                                }`}
+                                            >
+                                                下降沿
+                                            </button>
+                                            <button
+                                                onClick={() => setTriggerMode('both')}
+                                                className={`py-2 rounded text-xs font-bold transition-all ${
+                                                    triggerMode === 'both' ? 'bg-purple-600' : 'bg-gray-800 hover:bg-gray-700'
+                                                }`}
+                                            >
+                                                双边沿
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex items-center gap-2">
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={debounceEnabled}
+                                                    onChange={(e) => setDebounceEnabled(e.target.checked)}
+                                                    className="w-4 h-4"
+                                                />
+                                                <span className="text-sm">软件消抖 (15ms)</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">说明区</h3>
+                                <div className="space-y-4">
+                                    <div className="bg-gradient-to-r from-red-900 to-orange-900 rounded-lg p-3">
+                                        <div className="font-bold text-red-400 mb-2">步骤 {currentStep + 1}: {STEPS[currentStep].title}</div>
+                                        <div className="text-xs text-gray-300">{STEPS[currentStep].voice}</div>
+                                    </div>
+                                    {renderContent()}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="text-center mt-4 text-xs text-gray-500">
+                            STM32 外部中断 EXTI 完整指南 | 20 中断线 | NVIC 优先级 | 遵循 SKILL.md v3.0 标准
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

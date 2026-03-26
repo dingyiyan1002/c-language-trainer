@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1195. CAN 总线协议深入解析 - 可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+        @keyframes highlight { 0%, 100% { background-color: #3b82f6; } 50% { background-color: #60a5fa; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes differential { 0% { transform: translateY(0); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+        @keyframes propagate { 0% { opacity: 0; transform: translateX(-50px); } 100% { opacity: 1; transform: translateX(0); } }
+        @keyframes仲裁 { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .pulse { animation: pulse 1.5s ease-in-out infinite; }
+        .blink { animation: blink 0.8s ease-in-out infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.4s ease-out; }
+        .flow { animation: flow 2s ease-in-out infinite; }
+        .highlight { animation: highlight 1s ease-in-out infinite; }
+        .differential { animation: differential 1s ease-in-out infinite; }
+        .propagate { animation: propagate 0.8s ease-out; }
+        .arbitrate { animation: 仲裁 1s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#3b82f6',    // Blue - CAN_H
+            secondary: '#f97316',  // Orange - CAN_L
+            accent1: '#22c55e',    // Green - Dominant
+            accent2: '#ef4444',    // Red - Recessive
+            accent3: '#a855f7',    // Purple - ID
+            accent4: '#eab308',    // Yellow - Data
+        };
+
+        const STEPS = [
+            {
+                title: "CAN 总线基础",
+                description: "控制器局域网与差分信号",
+                code: `// CAN 总线特性
+// 1. 差分信号：CAN_H + CAN_L
+// 2. 多主架构，无需片选
+// 3. 基于消息的广播通信
+// 4. 硬件仲裁 (ID 越小优先级越高)
+// 5. 错误检测与自动重发
+// 6. 速率：高速 CAN (1Mbps), 低速 CAN (125kbps)
+
+// 物理层
+// CAN_H: 显性 3.5V, 隐性 2.5V
+// CAN_L: 显性 1.5V, 隐性 2.5V
+// 差分电压：显性 2V, 隐性 0V
+
+// 终端电阻
+// 总线两端各接 120Ω 终端电阻
+// 防止信号反射
+
+// 硬件连接
+// Node1 CAN_H ──┬── Node2 CAN_H ──┬── Node3 CAN_H
+//               │                 │
+//            [120Ω]            [120Ω]
+//               │                 │
+// Node1 CAN_L ──┴── Node2 CAN_L ──┴── Node3 CAN_L`,
+                visualState: { showBus: true, showDifferential: true, showTermination: true }
+            },
+            {
+                title: "CAN 帧结构",
+                description: "标准帧与扩展帧格式",
+                code: `// CAN 标准帧 (2.0A) - 11 位 ID
+// ┌────┬─────┬────┬─────┬──────┬─────────┬─────┬──────┬────┐
+// │SOF │ID[10:0]│RTR│IDE│DLC[3:0]│Data[0:N]│CRC│ACK│EOF│IFS│
+// └────┴─────┴────┴─────┴──────┴─────────┴─────┴──────┴────┘
+//  │    │      │    │     │       │         │    │      │
+//  │    │      │    │     │       │         │    │      └─ 帧间隔
+//  │    │      │    │     │       │         │    └─ 应答槽
+//  │    │      │    │     │       │         └─ CRC 校验
+//  │    │      │    │     │       └─ 数据场 (0-8 字节)
+//  │    │      │    │     └─ 数据长度码
+//  │    │      │    └─ 扩展标识
+//  │    │      └─ 远程发送请求
+//  │    └─ 仲裁场 (11 位 ID)
+//  └─ 帧起始
+
+// CAN 扩展帧 (2.0B) - 29 位 ID
+// 在标准帧基础上增加 18 位 ID (SRR + IDE + ID[28:11])
+
+// 帧类型:
+// 数据帧 (Data Frame) - 发送数据
+// 远程帧 (Remote Frame) - 请求数据
+// 错误帧 (Error Frame) - 错误标志
+// 过载帧 (Overload Frame) - 请求延迟`,
+                visualState: { showFrame: true, showStandard: true }
+            },
+            {
+                title: "CAN 位时序",
+                description: "显性与隐性位",
+                code: `// CAN 位时序定义
+// 显性位 (Dominant) = 逻辑 0
+//   CAN_H = 3.5V, CAN_L = 1.5V
+//   差分电压 = 2V (驱动能力强)
+
+// 隐性位 (Recessive) = 逻辑 1
+//   CAN_H = CAN_L = 2.5V
+//   差分电压 = 0V (被动状态)
+
+// 位仲裁规则:
+// 0 (显性) + 0 (显性) = 0 (显性) ✓
+// 0 (显性) + 1 (隐性) = 0 (显性) ✓
+// 1 (隐性) + 0 (显性) = 0 (显性) ← 隐性节点失去仲裁
+// 1 (隐性) + 1 (隐性) = 1 (隐性) ✓
+
+// 位时间分段 (Bit Time Segments)
+// ┌────┬──────────┬────────┬─────────┐
+// │SYNC│ PROP_SEG │ PHASE1 │ PHASE2  │
+// └────┴──────────┴────────┴─────────┘
+//   │      │         │         │
+//   │      │         │         └─ 相位缓冲段 2
+//   │      │         └─ 相位缓冲段 1
+//   │      └─ 传播段 (补偿延迟)
+//   └─ 同步段
+
+// 采样点通常位于 PHASE1 末尾`,
+                visualState: { showTiming: true, showDominant: true, showRecessive: true }
+            },
+            {
+                title: "CAN 硬件仲裁",
+                description: "ID 越小优先级越高",
+                code: `// CAN 仲裁机制 (无损仲裁)
+// 原理：线与逻辑 (Wired-AND)
+// 显性 (0) 覆盖隐性 (1)
+
+// 仲裁过程:
+// 1. 所有节点同时发送 ID
+// 2. 每发送一位就检测总线
+// 3. 如果发送 1 但检测到 0 → 失去仲裁
+// 4. 失去仲裁的节点立即停止发送并转为接收
+
+// 仲裁示例 (两个节点):
+// Node A ID: 0x123 (二进制：0100100011)
+// Node B ID: 0x456 (二进制：10001010110)
+//                    ↑ 第一位不同
+// Node A 发送 0 (显性), Node B 发送 1 (隐性)
+// 总线结果：0 (显性)
+// Node B 检测到不一致 → 失去仲裁，停止发送
+// Node A 赢得仲裁，继续发送
+
+// 优先级: ID 值越小，优先级越高
+// 0x000 (最高优先级) → 0x7FF (最低优先级)
+
+void CAN_SendMessage(uint32_t id, uint8_t *data, uint8_t len) {
+    // 硬件自动处理仲裁
+    CAN1->TXIR = (id << 21) | len;  // 写入 ID 和 DLC
+    for (int i = 0; i < len; i++) {
+        CAN1->TDR[i] = data[i];      // 写入数据
+    }
+    CAN1->TCR |= CAN_TCR_TXRQ;      // 请求发送
+}`,
+                visualState: { showArbitration: true, showID: true }
+            },
+            {
+                title: "CAN 错误处理",
+                description: "错误检测与自动重发",
+                code: `// CAN 错误类型
+// 1. 位错误 (Bit Error) - 发送与检测不一致
+// 2. 填充错误 (Stuff Error) - 连续 6 个相同位
+// 3. CRC 错误 (CRC Error) - CRC 校验失败
+// 4. 格式错误 (Form Error) - 固定格式错误
+// 5. ACK 错误 (ACK Error) - 无节点应答
+
+// 错误状态机
+// 每个节点维护两个计数器:
+// - TEC (Transmit Error Counter) - 发送错误计数
+// - REC (Receive Error Counter) - 接收错误计数
+
+// 三种状态:
+// 1. 错误主动 (Error Active): TEC<128, REC<128
+//    - 可正常收发
+//    - 发送主动错误帧
+
+// 2. 错误被动 (Error Passive): TEC≥128 或 REC≥128
+//    - 可收发但受限
+//    - 发送被动错误帧
+
+// 3. 总线关闭 (Bus Off): TEC≥256
+//    - 与总线隔离
+//    - 需软件恢复或自动恢复
+
+// 错误帧结构
+// 主动错误帧：6 个显性位 + 8 个隐性位
+// 被动错误帧：6 个隐性位 + 8 个隐性位
+
+void CAN_ErrorHandler(void) {
+    uint32_t esr = CAN1->ESR;
+    if (esr & CAN_ESR_BOFF) {
+        // 总线关闭 - 需要复位
+        CAN_Reset();
+    }
+    if (esr & CAN_ESR_EPV) {
+        // 错误被动 - 记录日志
+        log_warning("CAN error passive");
+    }
+}`,
+                visualState: { showError: true, showState: 'active' }
+            },
+            {
+                title: "CAN 数据帧发送",
+                description: "完整发送流程",
+                code: `// CAN 数据帧发送流程
+
+// 1. 初始化
+void CAN_Init(void) {
+    // 波特率配置 (1Mbps @ 80MHz)
+    // Prescaler = 4, BS1 = 15, BS2 = 4
+    // Baud = 80M / (4 * (1+15+4)) = 1Mbps
+    CAN1->BTR = (3 << CAN_BTR_BRP_Pos) |     // Prescaler = 4
+                (14 << CAN_BTR_TS1_Pos) |     // BS1 = 15
+                (3 << CAN_BTR_TS2_Pos);       // BS2 = 4
+
+    // 进入正常工作模式
+    CAN1->MCR &= ~CAN_MCR_INRQ;
+    while (CAN1->MSR & CAN_MSR_INAK);
+}
+
+// 2. 发送数据帧
+int CAN_Transmit(uint32_t id, uint8_t *data, uint8_t len) {
+    // 等待发送邮箱空闲
+    if (CAN1->TSR & CAN_TSR_TME0 == 0) {
+        return -1;  // 邮箱忙
+    }
+
+    // 写入仲裁寄存器 (ID + RTR + DLC)
+    CAN1->TI0R = (id << 21) | (len & 0x0F);
+
+    // 写入数据寄存器
+    CAN1->TDL0R = (data[3] << 24) | (data[2] << 16) |
+                  (data[1] << 8) | data[0];
+    CAN1->TDH0R = (data[7] << 24) | (data[6] << 16) |
+                  (data[5] << 8) | data[4];
+
+    // 请求发送
+    CAN1->TCT0R |= CAN_TCT0R_TXRQ;
+    return 0;
+}`,
+                visualState: { showTransmit: true, showMailbox: true }
+            },
+            {
+                title: "CAN 数据帧接收",
+                description: "接收过滤与 FIFO",
+                code: `// CAN 接收过滤器配置
+void CAN_FilterInit(void) {
+    // 过滤器组 0: 接收 ID 0x100-0x1FF 的消息
+    CAN1->FMR |= CAN_FMR_FINIT;  // 进入初始化模式
+
+    // 掩码模式 (Mask Mode)
+    CAN1->sFilterRegister[0].FR1 = (0x100 << 21);  // ID 低位
+    CAN1->sFilterRegister[0].FR2 = (0x100 << 21);  // 掩码 (0=忽略)
+
+    CAN1->FM1R |= CAN_FM1R_FBM0;   // 掩码模式
+    CAN1->FS1R |= CAN_FS1R_FSC0;   // 32 位滤波
+    CAN1->FFA1R &= ~CAN_FFA1R_FFA0; // FIFO 0
+    CAN1->FA1R |= CAN_FA1R_FACT0;  // 激活过滤器
+
+    CAN1->FMR &= ~CAN_FMR_FINIT;   // 退出初始化
+}
+
+// 接收中断处理
+void USB0_CAN1_IRQHandler(void) {
+    if (CAN1->RF0R & CAN_RF0R_FMP0) {  // FIFO 非空
+        uint32_t id = (CAN1->RIR0 >> 21) & 0x7FF;
+        uint8_t len = CAN1->RDTR0 & 0x0F;
+        uint8_t data[8];
+        data[0] = CAN1->RDL0R & 0xFF;
+        data[1] = (CAN1->RDL0R >> 8) & 0xFF;
+        // ... 读取剩余数据
+
+        CAN1->RF0R |= CAN_RF0R_RFOM0;  // 释放 FIFO
+    }
+}`,
+                visualState: { showReceive: true, showFilter: true }
+            },
+            {
+                title: "CAN 应用实例",
+                description: "汽车电子与工业控制",
+                code: `// CAN 应用：汽车仪表系统
+
+// 节点定义
+// Node 1: 发动机 ECU (ID: 0x100)
+// Node 2: ABS 系统 (ID: 0x200)
+// Node 3: 仪表盘 (ID: 0x300)
+// Node 4: 空调系统 (ID: 0x400)
+
+// 发动机数据发送
+typedef struct {
+    uint16_t rpm;        // 转速 (0-8000)
+    uint8_t  temp;       // 温度 (-40~215°C)
+    uint8_t  throttle;   // 油门 (0-100%)
+} EngineData_t;
+
+void EngineECU_SendData(void) {
+    EngineData_t data = {
+        .rpm = GetEngineRPM(),
+        .temp = GetEngineTemp(),
+        .throttle = GetThrottlePos()
+    };
+
+    uint8_t buffer[8];
+    memcpy(buffer, &data, sizeof(data));
+    CAN_Transmit(0x100, buffer, 8);
+}
+
+// 仪表盘接收处理
+void Dashboard_CANHandler(uint32_t id, uint8_t *data) {
+    switch (id) {
+        case 0x100:  // 发动机数据
+            UpdateRPM(data[0] | (data[1] << 8));
+            UpdateTemp(data[2]);
+            break;
+        case 0x200:  // ABS 状态
+            UpdateABSStatus(data[0]);
+            break;
+    }
+}
+
+// CAN 总线负载计算
+// 1Mbps 波特率 = 1μs/bit
+// 标准帧 (8 字节) ≈ 111 bits = 111μs
+// 理论最大帧率：1000000 / 111 ≈ 9000 帧/秒`,
+                visualState: { showApplication: true, showNetwork: true }
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isAutoPlaying, setIsAutoPlaying] = useState(true);
+            const [showAnswer, setShowAnswer] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const speak = (text) => {
+                if (!text) return;
+                const utterance = new SpeechSynthesisUtterance(text);
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v =>
+                    v.lang === 'zh-CN' &&
+                    (v.name.includes('Xiaoxiao') || v.name.includes('Chinese'))
+                );
+                if (zhVoice) utterance.voice = zhVoice;
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.lang = 'zh-CN';
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (isAutoPlaying && currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (isAutoPlaying && currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        }
+                    }, 800);
+                };
+                speechSynthesis.speak(utterance);
+            };
+
+            useEffect(() => {
+                speak(STEPS[currentStep].title + '。' + STEPS[currentStep].description);
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const handleRestart = () => {
+                setCurrentStep(0);
+                speechSynthesis.cancel();
+                setTimeout(() => speak(STEPS[0].title + '。' + STEPS[0].description), 100);
+            };
+
+            const CANVisualization = () => {
+                const step = STEPS[currentStep];
+                const vs = step.visualState;
+
+                return (
+                    <div className="w-full h-96 bg-gray-800 rounded-lg p-6 relative overflow-hidden">
+                        {/* CAN Bus Physical Layer */}
+                        {(vs.showBus || vs.showDifferential) && (
+                            <g>
+                                {/* Differential Lines */}
+                                <line x1="50" y1="80" x2="350" y2="80" stroke={COLOR_MAP.primary} strokeWidth="4" className={vs.showDifferential ? 'differential' : ''} />
+                                <line x1="50" y1="100" x2="350" y2="100" stroke={COLOR_MAP.secondary} strokeWidth="4" className={vs.showDifferential ? 'differential' : ''} />
+
+                                <text x="20" y="85" fill={COLOR_MAP.primary} fontSize="12">CAN_H</text>
+                                <text x="20" y="105" fill={COLOR_MAP.secondary} fontSize="12">CAN_L</text>
+
+                                {/* Termination Resistors */}
+                                {vs.showTermination && (
+                                    <g>
+                                        <rect x="50" y="80" width="10" height="20" fill="none" stroke={COLOR_MAP.accent4} strokeWidth="2" />
+                                        <text x="35" y="125" fill={COLOR_MAP.accent4} fontSize="10">120Ω</text>
+
+                                        <rect x="340" y="80" width="10" height="20" fill="none" stroke={COLOR_MAP.accent4} strokeWidth="2" />
+                                        <text x="330" y="125" fill={COLOR_MAP.accent4} fontSize="10">120Ω</text>
+                                    </g>
+                                )}
+
+                                {/* Nodes */}
+                                <g>
+                                    <circle cx="100" cy="90" r="15" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                    <text x="100" y="95" fill={COLOR_MAP.accent1} fontSize="8" textAnchor="middle">Node1</text>
+
+                                    <circle cx="180" cy="90" r="15" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                    <text x="180" y="95" fill={COLOR_MAP.accent2} fontSize="8" textAnchor="middle">Node2</text>
+
+                                    <circle cx="260" cy="90" r="15" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                    <text x="260" y="95" fill={COLOR_MAP.accent3} fontSize="8" textAnchor="middle">Node3</text>
+
+                                    <circle cx="340" cy="90" r="15" fill={COLOR_MAP.accent4} opacity="0.3" stroke={COLOR_MAP.accent4} strokeWidth="2" />
+                                    <text x="340" y="95" fill={COLOR_MAP.accent4} fontSize="8" textAnchor="middle">Node4</text>
+                                </g>
+
+                                {/* Voltage Labels */}
+                                <text x="20" y="150" fill="#fff" fontSize="10">差分信号:</text>
+                                <text x="20" y="170" fill={COLOR_MAP.accent1} fontSize="9">显性 (0): CAN_H=3.5V, CAN_L=1.5V</text>
+                                <text x="20" y="190" fill={COLOR_MAP.accent2} fontSize="9">隐性 (1): CAN_H=2.5V, CAN_L=2.5V</text>
+                            </g>
+                        )}
+
+                        {/* CAN Frame Structure */}
+                        {(vs.showFrame || vs.showStandard) && (
+                            <g>
+                                <text x="20" y="40" fill="#fff" fontSize="11">CAN 标准帧结构:</text>
+
+                                {/* SOF */}
+                                <rect x="20" y="50" width="25" height="30" fill={COLOR_MAP.primary} opacity="0.3" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <text x="32" y="70" fill={COLOR_MAP.primary} fontSize="8" textAnchor="middle">SOF</text>
+
+                                {/* ID Field */}
+                                <rect x="50" y="50" width="60" height="30" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                <text x="80" y="70" fill={COLOR_MAP.accent3} fontSize="8" textAnchor="middle">ID[10:0]</text>
+
+                                {/* RTR + IDE */}
+                                <rect x="115" y="50" width="30" height="30" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="130" y="70" fill={COLOR_MAP.accent2} fontSize="7" textAnchor="middle">RTR</text>
+
+                                {/* DLC */}
+                                <rect x="150" y="50" width="35" height="30" fill={COLOR_MAP.accent4} opacity="0.3" stroke={COLOR_MAP.accent4} strokeWidth="2" />
+                                <text x="167" y="70" fill={COLOR_MAP.accent4} fontSize="8" textAnchor="middle">DLC</text>
+
+                                {/* Data Field */}
+                                <rect x="190" y="50" width="100" height="30" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="240" y="70" fill={COLOR_MAP.accent1} fontSize="8" textAnchor="middle">Data[0-7]</text>
+
+                                {/* CRC */}
+                                <rect x="295" y="50" width="30" height="30" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="310" y="70" fill={COLOR_MAP.accent2} fontSize="8" textAnchor="middle">CRC</text>
+
+                                {/* ACK */}
+                                <rect x="330" y="50" width="25" height="30" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="342" y="70" fill={COLOR_MAP.accent1} fontSize="8" textAnchor="middle">ACK</text>
+
+                                {/* EOF */}
+                                <rect x="360" y="50" width="20" height="30" fill={COLOR_MAP.primary} opacity="0.3" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <text x="370" y="70" fill={COLOR_MAP.primary} fontSize="7" textAnchor="middle">EOF</text>
+
+                                {/* Bit Stuffing Explanation */}
+                                <text x="20" y="110" fill="#fff" fontSize="10">位填充:</text>
+                                <text x="20" y="130" fill={COLOR_MAP.accent4} fontSize="9">连续 5 个相同位 → 自动插入相反位</text>
+                                <text x="20" y="150" fill={COLOR_MAP.accent4} fontSize="9">00000 → 000001 (填充位)</text>
+                            </g>
+                        )}
+
+                        {/* Bit Timing */}
+                        {(vs.showTiming || vs.showDominant || vs.showRecessive) && (
+                            <g>
+                                <text x="20" y="40" fill="#fff" fontSize="11">位时序与电平:</text>
+
+                                {/* Dominant Bit */}
+                                <rect x="20" y="50" width="150" height="60" fill={COLOR_MAP.accent1} opacity="0.2" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="95" y="70" fill={COLOR_MAP.accent1} fontSize="10" textAnchor="middle">显性位 (0)</text>
+                                <line x1="30" y1="85" x2="160" y2="85" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <text x="35" y="80" fill={COLOR_MAP.primary} fontSize="8">CAN_H: 3.5V</text>
+                                <line x1="30" y1="100" x2="160" y2="100" stroke={COLOR_MAP.secondary} strokeWidth="2" />
+                                <text x="35" y="95" fill={COLOR_MAP.secondary} fontSize="8">CAN_L: 1.5V</text>
+
+                                {/* Recessive Bit */}
+                                <rect x="190" y="50" width="150" height="60" fill={COLOR_MAP.accent2} opacity="0.2" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="265" y="70" fill={COLOR_MAP.accent2} fontSize="10" textAnchor="middle">隐性位 (1)</text>
+                                <line x1="200" y1="85" x2="330" y2="85" stroke={COLOR_MAP.primary} strokeWidth="2" strokeDasharray="3,3" />
+                                <text x="205" y="80" fill={COLOR_MAP.primary} fontSize="8">CAN_H: 2.5V</text>
+                                <line x1="200" y1="100" x2="330" y2="100" stroke={COLOR_MAP.secondary} strokeWidth="2" strokeDasharray="3,3" />
+                                <text x="205" y="95" fill={COLOR_MAP.secondary} fontSize="8">CAN_L: 2.5V</text>
+
+                                {/* Bit Time Segments */}
+                                <text x="20" y="140" fill="#fff" fontSize="10">位时间分段:</text>
+                                <rect x="20" y="150" width="40" height="20" fill={COLOR_MAP.primary} opacity="0.4" />
+                                <text x="40" y="163" fill="#fff" fontSize="7" textAnchor="middle">SYNC</text>
+                                <rect x="60" y="150" width="50" height="20" fill={COLOR_MAP.secondary} opacity="0.4" />
+                                <text x="85" y="163" fill="#fff" fontSize="7" textAnchor="middle">PROP</text>
+                                <rect x="110" y="150" width="40" height="20" fill={COLOR_MAP.accent1} opacity="0.4" />
+                                <text x="130" y="163" fill="#fff" fontSize="7" textAnchor="middle">PH1</text>
+                                <rect x="150" y="150" width="40" height="20" fill={COLOR_MAP.accent2} opacity="0.4" />
+                                <text x="170" y="163" fill="#fff" fontSize="7" textAnchor="middle">PH2</text>
+                                <text x="210" y="163" fill="#fff" fontSize="8">采样点 ↑</text>
+                            </g>
+                        )}
+
+                        {/* Arbitration */}
+                        {(vs.showArbitration || vs.showID) && (
+                            <g>
+                                <text x="20" y="40" fill="#fff" fontSize="11">硬件仲裁 (ID 越小优先级越高):</text>
+
+                                {/* Node A */}
+                                <rect x="20" y="50" width="120" height="50" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="80" y="70" fill={COLOR_MAP.accent1} fontSize="9" textAnchor="middle">Node A</text>
+                                <text x="80" y="90" fill={COLOR_MAP.accent1} fontSize="9" textAnchor="middle">ID: 0x123</text>
+
+                                {/* Node B */}
+                                <rect x="260" y="50" width="120" height="50" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="320" y="70" fill={COLOR_MAP.accent2} fontSize="9" textAnchor="middle">Node B</text>
+                                <text x="320" y="90" fill={COLOR_MAP.accent2} fontSize="9" textAnchor="middle">ID: 0x456</text>
+
+                                {/* Bus in middle */}
+                                <rect x="150" y="60" width="100" height="30" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                <text x="200" y="80" fill={COLOR_MAP.accent3} fontSize="9" textAnchor="middle">总线结果</text>
+
+                                {/* Arbitration result */}
+                                <text x="20" y="130" fill={COLOR_MAP.accent1} fontSize="9">Node A ID: 0 1 0 0 1...</text>
+                                <text x="20" y="150" fill={COLOR_MAP.accent2} fontSize="9">Node B ID: 1 0 0 0 1...</text>
+                                <text x="20" y="180" fill="#fff" fontSize="10">第一位不同:</text>
+                                <text x="20" y="200" fill={COLOR_MAP.accent1} fontSize="9">A 发送 0(显性), B 发送 1(隐性)</text>
+                                <text x="20" y="220" fill={COLOR_MAP.accent2} fontSize="9">→ B 检测到不一致，失去仲裁</text>
+                                <text x="20" y="240" fill={COLOR_MAP.accent1} fontSize="9" fontWeight="bold">→ A 赢得仲裁，继续发送</text>
+                            </g>
+                        )}
+
+                        {/* Error States */}
+                        {vs.showError && (
+                            <g>
+                                <text x="20" y="40" fill="#fff" fontSize="11">错误状态机:</text>
+
+                                {/* Error Active */}
+                                <rect x="20" y="50" width="100" height="50" rx="5" fill={COLOR_MAP.accent1} opacity={vs.showState === 'active' ? 0.6 : 0.3} stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="70" y="70" fill={COLOR_MAP.accent1} fontSize="8" textAnchor="middle">错误主动</text>
+                                <text x="70" y="85" fill={COLOR_MAP.accent1} fontSize="7" textAnchor="middle">TEC&lt;128</text>
+
+                                {/* Error Passive */}
+                                <rect x="150" y="50" width="100" height="50" rx="5" fill={COLOR_MAP.accent2} opacity={vs.showState === 'passive' ? 0.6 : 0.3} stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="200" y="70" fill={COLOR_MAP.accent2} fontSize="8" textAnchor="middle">错误被动</text>
+                                <text x="200" y="85" fill={COLOR_MAP.accent2} fontSize="7" textAnchor="middle">TEC≥128</text>
+
+                                {/* Bus Off */}
+                                <rect x="280" y="50" width="100" height="50" rx="5" fill={COLOR_MAP.accent3} opacity={vs.showState === 'off' ? 0.6 : 0.3} stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                <text x="330" y="70" fill={COLOR_MAP.accent3} fontSize="8" textAnchor="middle">总线关闭</text>
+                                <text x="330" y="85" fill={COLOR_MAP.accent3} fontSize="7" textAnchor="middle">TEC≥256</text>
+
+                                {/* Transitions */}
+                                <text x="20" y="130" fill="#fff" fontSize="9">错误计数器:</text>
+                                <text x="20" y="150" fill={COLOR_MAP.accent4} fontSize="8">TEC (发送错误计数)</text>
+                                <text x="20" y="170" fill={COLOR_MAP.accent4} fontSize="8">REC (接收错误计数)</text>
+
+                                {/* Error Frame */}
+                                <text x="200" y="130" fill="#fff" fontSize="9">错误帧:</text>
+                                <text x="200" y="150" fill={COLOR_MAP.accent1} fontSize="8">主动：6 显性位</text>
+                                <text x="200" y="170" fill={COLOR_MAP.accent2} fontSize="8">被动：6 隐性位</text>
+                            </g>
+                        )}
+
+                        {/* Transmit Flow */}
+                        {(vs.showTransmit || vs.showMailbox) && (
+                            <g>
+                                <text x="20" y="40" fill="#fff" fontSize="11">发送流程 (邮箱机制):</text>
+
+                                {/* Mailboxes */}
+                                <rect x="20" y="50" width="90" height="40" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="65" y="65" fill={COLOR_MAP.accent1} fontSize="8" textAnchor="middle">邮箱 0</text>
+                                <text x="65" y="80" fill={COLOR_MAP.accent1} fontSize="7" textAnchor="middle">空闲</text>
+
+                                <rect x="120" y="50" width="90" height="40" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="165" y="65" fill={COLOR_MAP.accent2} fontSize="8" textAnchor="middle">邮箱 1</text>
+                                <text x="165" y="80" fill={COLOR_MAP.accent2} fontSize="7" textAnchor="middle">发送中</text>
+
+                                <rect x="220" y="50" width="90" height="40" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                <text x="265" y="65" fill={COLOR_MAP.accent3} fontSize="8" textAnchor="middle">邮箱 2</text>
+                                <text x="265" y="80" fill={COLOR_MAP.accent3} fontSize="7" textAnchor="middle">等待</text>
+
+                                {/* Transmit registers */}
+                                <rect x="320" y="50" width="60" height="40" fill={COLOR_MAP.accent4} opacity="0.3" stroke={COLOR_MAP.accent4} strokeWidth="2" />
+                                <text x="350" y="65" fill={COLOR_MAP.accent4} fontSize="8" textAnchor="middle">TIR</text>
+                                <text x="350" y="80" fill={COLOR_MAP.accent4} fontSize="7" textAnchor="middle">ID+DLC</text>
+
+                                {/* Flow arrows */}
+                                <text x="20" y="120" fill="#fff" fontSize="9">发送步骤:</text>
+                                <text x="20" y="140" fill={COLOR_MAP.accent4} fontSize="8">1. 等待邮箱空闲</text>
+                                <text x="20" y="160" fill={COLOR_MAP.accent4} fontSize="8">2. 写入 TIR (ID+DLC)</text>
+                                <text x="20" y="180" fill={COLOR_MAP.accent4} fontSize="8">3. 写入 TDLR/TDHR (数据)</text>
+                                <text x="20" y="200" fill={COLOR_MAP.accent4} fontSize="8">4. 设置 TXRQ 请求发送</text>
+                                <text x="20" y="220" fill={COLOR_MAP.accent1} fontSize="8">5. 硬件处理仲裁和发送</text>
+                            </g>
+                        )}
+
+                        {/* Receive Filter */}
+                        {(vs.showReceive || vs.showFilter) && (
+                            <g>
+                                <text x="20" y="40" fill="#fff" fontSize="11">接收过滤与 FIFO:</text>
+
+                                {/* Filter Bank */}
+                                <rect x="20" y="50" width="120" height="60" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="80" y="70" fill={COLOR_MAP.accent1} fontSize="9" textAnchor="middle">过滤器组 0</text>
+                                <text x="80" y="90" fill={COLOR_MAP.accent1} fontSize="8" textAnchor="middle">ID: 0x100-0x1FF</text>
+
+                                {/* FIFO */}
+                                <rect x="180" y="50" width="100" height="60" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="230" y="70" fill={COLOR_MAP.accent2} fontSize="9" textAnchor="middle">RX FIFO</text>
+                                <text x="230" y="90" fill={COLOR_MAP.accent2} fontSize="8" textAnchor="middle">深度：3 消息</text>
+
+                                {/* CPU */}
+                                <rect x="320" y="50" width="60" height="60" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                <text x="350" y="80" fill={COLOR_MAP.accent3} fontSize="9" textAnchor="middle">CPU</text>
+
+                                {/* Arrows */}
+                                <line x1="145" y1="80" x2="175" y2="80" stroke={COLOR_MAP.accent4} strokeWidth="2" />
+                                <line x1="285" y1="80" x2="315" y2="80" stroke={COLOR_MAP.accent4} strokeWidth="2" />
+
+                                {/* Filter modes */}
+                                <text x="20" y="140" fill="#fff" fontSize="9">过滤模式:</text>
+                                <text x="20" y="160" fill={COLOR_MAP.accent4} fontSize="8">掩码模式 (Mask)</text>
+                                <text x="20" y="180" fill={COLOR_MAP.accent4} fontSize="8">列表模式 (List)</text>
+                                <text x="20" y="200" fill={COLOR_MAP.accent4} fontSize="8">32 位/16 位配置</text>
+                            </g>
+                        )}
+
+                        {/* Application Network */}
+                        {(vs.showApplication || vs.showNetwork) && (
+                            <g>
+                                <text x="20" y="40" fill="#fff" fontSize="11">汽车 CAN 网络:</text>
+
+                                {/* Central Bus */}
+                                <line x1="50" y1="100" x2="350" y2="100" stroke={COLOR_MAP.primary} strokeWidth="3" />
+                                <line x1="50" y1="120" x2="350" y2="120" stroke={COLOR_MAP.secondary} strokeWidth="3" />
+
+                                {/* ECU Nodes */}
+                                <rect x="30" y="50" width="60" height="40" rx="3" fill={COLOR_MAP.accent1} opacity="0.4" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="60" y="65" fill={COLOR_MAP.accent1} fontSize="7" textAnchor="middle">发动机</text>
+                                <text x="60" y="80" fill={COLOR_MAP.accent1} fontSize="7" textAnchor="middle">ID:0x100</text>
+
+                                <rect x="130" y="50" width="60" height="40" rx="3" fill={COLOR_MAP.accent2} opacity="0.4" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="160" y="65" fill={COLOR_MAP.accent2} fontSize="7" textAnchor="middle">ABS</text>
+                                <text x="160" y="80" fill={COLOR_MAP.accent2} fontSize="7" textAnchor="middle">ID:0x200</text>
+
+                                <rect x="230" y="50" width="60" height="40" rx="3" fill={COLOR_MAP.accent3} opacity="0.4" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                <text x="260" y="65" fill={COLOR_MAP.accent3} fontSize="7" textAnchor="middle">仪表盘</text>
+                                <text x="260" y="80" fill={COLOR_MAP.accent3} fontSize="7" textAnchor="middle">ID:0x300</text>
+
+                                <rect x="330" y="50" width="60" height="40" rx="3" fill={COLOR_MAP.accent4} opacity="0.4" stroke={COLOR_MAP.accent4} strokeWidth="2" />
+                                <text x="360" y="65" fill={COLOR_MAP.accent4} fontSize="7" textAnchor="middle">空调</text>
+                                <text x="360" y="80" fill={COLOR_MAP.accent4} fontSize="7" textAnchor="middle">ID:0x400</text>
+
+                                {/* Message flow */}
+                                <circle cx="60" cy="110" r="6" fill={COLOR_MAP.accent4} className="pulse" />
+                                <circle cx="160" cy="110" r="6" fill={COLOR_MAP.accent4} className="pulse" style={{ animationDelay: '0.2s' }} />
+                                <circle cx="260" cy="110" r="6" fill={COLOR_MAP.accent4} className="pulse" style={{ animationDelay: '0.4s' }} />
+                                <text x="200" y="150" fill={COLOR_MAP.accent4} fontSize="9" textAnchor="middle">消息广播到所有节点</text>
+                            </g>
+                        )}
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="text-center mb-4">
+                            <h1 className="text-3xl font-bold mb-2" style={{ color: COLOR_MAP.primary }}>
+                                1195. CAN 总线协议深入解析
+                            </h1>
+                            <p className="text-gray-400 text-sm">差分信号 · 硬件仲裁 · 错误检测 · 汽车电子</p>
+                        </div>
+
+                        {/* Progress Bar */}
+                        <div className="mb-4">
+                            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                <span>步骤 {currentStep + 1} / {STEPS.length}</span>
+                                <span>{Math.round(((currentStep + 1) / STEPS.length) * 100)}%</span>
+                            </div>
+                            <div className="w-full bg-gray-800 rounded-full h-2">
+                                <div
+                                    className="h-2 rounded-full transition-all duration-500"
+                                    style={{
+                                        width: `${((currentStep + 1) / STEPS.length) * 100}%`,
+                                        background: `linear-gradient(90deg, ${COLOR_MAP.primary}, ${COLOR_MAP.secondary})`
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Main Content - Three Column Layout */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            {/* Left: Code */}
+                            <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <h3 className="text-lg font-semibold mb-3" style={{ color: COLOR_MAP.primary }}>
+                                    💻 代码示例
+                                </h3>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+
+                            {/* Center: Visualization */}
+                            <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <h3 className="text-lg font-semibold mb-3" style={{ color: COLOR_MAP.secondary }}>
+                                    🔬 可视化动画
+                                </h3>
+                                <svg className="w-full h-64" viewBox="0 0 400 320">
+                                    <CANVisualization />
+                                </svg>
+                            </div>
+
+                            {/* Right: Explanation */}
+                            <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <h3 className="text-lg font-semibold mb-3" style={{ color: COLOR_MAP.accent1 }}>
+                                    📖 核心概念
+                                </h3>
+                                <ul className="space-y-2 text-sm text-gray-300">
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.primary }}>差分信号:</strong> CAN_H + CAN_L 抗干扰</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.secondary }}>多主架构:</strong> 无需片选，广播通信</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.accent1 }}>硬件仲裁:</strong> ID 越小优先级越高</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.accent2 }}>显性=0:</strong> 线与逻辑覆盖隐性</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.accent3 }}>错误检测:</strong> 5 种错误类型自动检测</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.primary }}>位填充:</strong> 连续 5 位自动插入填充</span>
+                                    </li>
+                                </ul>
+
+                                {/* Code Challenge */}
+                                <div className="mt-4 p-3 bg-gray-700 rounded">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-semibold">💡 代码挑战</span>
+                                        <button
+                                            onClick={() => setShowAnswer(!showAnswer)}
+                                            className="text-xs px-2 py-1 rounded"
+                                            style={{ backgroundColor: COLOR_MAP.primary, color: '#fff' }}
+                                        >
+                                            {showAnswer ? '隐藏' : '显示'}答案
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-gray-400 mb-2">
+                                        配置过滤器接收 ID 0x123 的消息:
+                                    </p>
+                                    {showAnswer && (
+                                        <pre className="text-xs text-gray-300 overflow-x-auto">
+{`void Filter_Setup_0x123(void) {
+    CAN1->FMR |= CAN_FMR_FINIT;
+    // 列表模式，精确匹配 0x123
+    CAN1->sFilterRegister[0].FR1 = (0x123 << 21);
+    CAN1->sFilterRegister[0].FR2 = 0;
+    CAN1->FM1R &= ~CAN_FM1R_FBM0;  // 列表模式
+    CAN1->FS1R |= CAN_FS1R_FSC0;   // 32 位
+    CAN1->FA1R |= CAN_FA1R_FACT0;  // 激活
+    CAN1->FMR &= ~CAN_FMR_FINIT;
+}`}
+                                        </pre>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Control Buttons */}
+                        <div className="flex justify-center gap-3 mb-4">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0
+                                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        : 'bg-gray-600 text-white hover:bg-gray-500'
+                                }`}
+                            >
+                                ← 上一步
+                            </button>
+
+                            <button
+                                onClick={handleRestart}
+                                className="px-6 py-3 rounded-lg font-semibold bg-gray-700 text-white hover:bg-gray-600 transition-all"
+                            >
+                                🔄 重新开始
+                            </button>
+
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1
+                                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        : 'bg-gray-600 text-white hover:bg-gray-500'
+                                }`}
+                            >
+                                下一步 →
+                            </button>
+                        </div>
+
+                        {/* Autoplay Toggle */}
+                        <div className="text-center">
+                            <button
+                                onClick={() => setIsAutoPlaying(!isAutoPlaying)}
+                                className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                                    isAutoPlaying
+                                        ? 'bg-green-600 text-white'
+                                        : 'bg-gray-700 text-gray-300'
+                                }`}
+                            >
+                                {isAutoPlaying ? '▶️ 自动播放中' : '⏸️ 已暂停'}
+                            </button>
+                        </div>
+
+                        {/* Step Indicators */}
+                        <div className="flex justify-center gap-2 mt-4 flex-wrap">
+                            {STEPS.map((step, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => setCurrentStep(index)}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                                        index === currentStep
+                                            ? 'bg-white text-gray-900'
+                                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                    }`}
+                                >
+                                    {index + 1}. {step.title}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

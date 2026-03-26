@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1127 - const 和 volatile 组合 | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .highlight { box-shadow: 0 0 20px rgba(6, 182, 212, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(6, 182, 212, 0.2); border-left: 3px solid #06b6d4; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#06b6d4', primaryLight: '#22d3ee',
+      secondary: '#0891b2', secondaryLight: '#22d3ee',
+      accent: '#14b8a6', accentLight: '#2dd4bf',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== const 和 volatile 组合 =====
+// const volatile: 程序不能改，但硬件/中断可以改
+
+// 1. 只读状态寄存器 (硬件可改，程序不可改)
+#define STATUS_REG (*(const volatile uint32_t*)0x40021000)
+
+// 使用
+uint32_t status = STATUS_REG;  // ✅ 读取
+STATUS_REG = 0;                // ❌ 编译错误！
+
+// 2. 常量配置表 (存储在 Flash，程序不应改)
+const volatile uint16_t calibration_table[] = {
+  0x1234, 0x5678, 0xABCD
+};
+
+// 3. 组合对比
+const int a = 10;          // 常量，编译期确定
+volatile int b = 20;       // 可变，可能被外部修改
+const volatile int c = 30; // 只读状态，外部可修改
+
+// 典型应用：只读硬件寄存器、校准数据、出厂配置`;
+
+    const VOICE_TEXT_MAP = {
+      1: "第一千一百二十七题，const 和 volatile 组合使用。",
+      2: "const volatile 组合表示变量对程序是只读的，但可能被硬件或中断修改。",
+      3: "只读状态寄存器是典型场景，程序只能读取，硬件会随时更新其值。",
+      4: "尝试写入 const volatile 变量会产生编译错误，编译器强制执行只读约束。",
+      5: "校准数据表存储在 Flash 中，程序运行时读取但不应修改，使用 const volatile 保护。",
+      6: "对比三种限定符：const 是编译期常量，volatile 是运行时可变，组合是只读但外部可变。",
+      7: "const volatile 指针用于访问硬件寄存器，保证程序不意外修改但能读取最新值。",
+      8: "应用：只读硬件状态寄存器、Flash 校准数据、出厂配置、EEPROM 参数表。"
+    };
+
+    const MAX_STEPS = 8;
+
+    function App() {
+      const [step, setStep] = useState(1);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+      const [voiceRate, setVoiceRate] = useState(1);
+      const voiceEndTimerRef = useRef(null);
+
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if (voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if (!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if (voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate]);
+
+      useEffect(() => {
+        if (isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+
+      const handleStepChange = (newStep) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsVoicePlaying(false);
+        setStep(newStep);
+      };
+
+      const togglePlay = () => {
+        if (step >= MAX_STEPS) {
+          handleStepChange(1);
+          setTimeout(() => setIsPlaying(true), 100);
+        } else {
+          setIsPlaying(!isPlaying);
+        }
+      };
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="bg-gradient-to-r from-cyan-900/50 via-sky-900/50 to-blue-900/50 rounded-xl p-6 mb-4 border border-cyan-700/50">
+            <h1 className="text-3xl font-bold text-cyan-400 mb-2">1127 - const 和 volatile 组合</h1>
+            <p className="text-cyan-300 text-sm">只读外部可变 / 硬件寄存器 / 校准数据</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-cyan-700/30">
+              <h2 className="text-lg font-semibold text-cyan-400 mb-3">代码展示</h2>
+              <pre className="text-xs text-gray-300 overflow-x-auto bg-gray-900/50 p-3 rounded-lg font-mono leading-relaxed">
+                {CODE.split('\n').map((line, i) => (
+                  <div key={i} className={`code-line ${
+                    (step === 2 && i >= 4 && i <= 4) ||
+                    (step === 3 && i >= 4 && i <= 9) ||
+                    (step === 4 && i >= 7 && i <= 8) ||
+                    (step === 5 && i >= 12 && i <= 15) ||
+                    (step === 6 && i >= 18 && i <= 21) ||
+                    (step === 7 && i >= 4 && i <= 9)
+                    ? 'active' : ''
+                  }`}>{line || '\u00A0'}</div>
+                ))}
+              </pre>
+            </div>
+
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-cyan-700/30">
+              <h2 className="text-lg font-semibold text-cyan-400 mb-3">可视化演示</h2>
+              <div className="space-y-4">
+                {step === 1 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-cyan-600/20 to-sky-600/20 rounded-lg border border-cyan-500/30">
+                    <p className="text-cyan-300 text-sm font-medium mb-2">💡 const + volatile</p>
+                    <p className="text-xs text-gray-400">const volatile 组合用于只读但外部可修改的变量，是嵌入式开发中重要的类型限定符组合。</p>
+                  </div>
+                )}
+                {step === 2 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-cyan-600/20 to-sky-600/20 rounded-lg border border-cyan-500/30">
+                    <p className="text-cyan-300 text-sm font-medium mb-2">语义解析</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div className="text-cyan-400">const volatile uint32_t reg;</div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 bg-cyan-900/20 rounded border border-cyan-500/30">
+                          <div className="text-cyan-400 text-xs">const</div>
+                          <div className="text-gray-400 text-xs">程序不能写入</div>
+                        </div>
+                        <div className="p-2 bg-sky-900/20 rounded border border-sky-500/30">
+                          <div className="text-sky-400 text-xs">volatile</div>
+                          <div className="text-gray-400 text-xs">每次重新读取</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 3 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-cyan-600/20 to-sky-600/20 rounded-lg border border-cyan-500/30">
+                    <p className="text-cyan-300 text-sm font-medium mb-2">只读状态寄存器</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 bg-cyan-900/20 rounded border border-cyan-500/30">
+                          <div className="text-cyan-400 text-xs">CPU (只读)</div>
+                          <div className="text-xs text-gray-400">status = REG;</div>
+                        </div>
+                        <div className="p-2 bg-sky-900/20 rounded border border-sky-500/30">
+                          <div className="text-sky-400 text-xs">硬件 (可写)</div>
+                          <div className="text-xs text-gray-400">硬件更新 REG</div>
+                        </div>
+                      </div>
+                      <div className="p-2 bg-gray-900/50 rounded font-mono text-xs">
+                        <div>#define STATUS_REG</div>
+                        <div className="text-cyan-400">(*(const volatile uint32_t*)0x40021000)</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 4 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-cyan-600/20 to-sky-600/20 rounded-lg border border-cyan-500/30">
+                    <p className="text-cyan-300 text-sm font-medium mb-2">编译时检查</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="p-2 bg-green-900/20 rounded border border-green-500/30">
+                        <div className="text-green-400">uint32_t s = STATUS_REG;</div>
+                        <div className="text-gray-500 text-xs">// ✅ 允许读取</div>
+                      </div>
+                      <div className="p-2 bg-red-900/20 rounded border border-red-500/30">
+                        <div className="text-red-400">STATUS_REG = 0;</div>
+                        <div className="text-gray-500 text-xs">// ❌ 编译错误!</div>
+                        <div className="text-red-400 text-xs">error: assignment of read-only</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 5 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-cyan-600/20 to-sky-600/20 rounded-lg border border-cyan-500/30">
+                    <p className="text-cyan-300 text-sm font-medium mb-2">校准数据表</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div className="text-cyan-400">const volatile uint16_t cal_table[] = {'{'}</div>
+                        <div>&nbsp;&nbsp;0x1234, 0x5678, 0xABCD</div>
+                        <div>{'}'};</div>
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        存储在 Flash 中，出厂时写入<br/>
+                        程序运行时只能读取，不能修改<br/>
+                        const 防止意外写入，volatile 确保每次读内存
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 6 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-cyan-600/20 to-sky-600/20 rounded-lg border border-cyan-500/30">
+                    <p className="text-cyan-300 text-sm font-medium mb-2">三种限定符对比</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono text-xs">
+                        <div className="text-purple-400">const int a = 10;</div>
+                        <div className="text-gray-500">// 编译期常量，不可变</div>
+                      </div>
+                      <div className="p-2 bg-gray-900/50 rounded font-mono text-xs">
+                        <div className="text-orange-400">volatile int b = 20;</div>
+                        <div className="text-gray-500">// 可变，每次重新读取</div>
+                      </div>
+                      <div className="p-2 bg-gray-900/50 rounded font-mono text-xs">
+                        <div className="text-cyan-400">const volatile int c = 30;</div>
+                        <div className="text-gray-500">// 只读，但外部可修改</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 7 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-cyan-600/20 to-sky-600/20 rounded-lg border border-cyan-500/30">
+                    <p className="text-cyan-300 text-sm font-medium mb-2">指针场景</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded text-xs">
+                        <div className="text-cyan-400">const volatile uint32_t* ptr = (uint32_t*)0x40021000;</div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-2 bg-green-900/20 rounded border border-green-500/30 text-xs">
+                          <div className="text-green-400">*ptr</div>
+                          <div className="text-gray-500">✅ 可读</div>
+                        </div>
+                        <div className="p-2 bg-red-900/20 rounded border border-red-500/30 text-xs">
+                          <div className="text-red-400">*ptr = x</div>
+                          <div className="text-gray-500">❌ 不可写</div>
+                        </div>
+                        <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30 text-xs">
+                          <div className="text-blue-400">ptr++</div>
+                          <div className="text-gray-500">✅ 指针可变</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 8 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-cyan-900/20 rounded-lg border border-cyan-500/30">
+                      <p className="text-cyan-300 text-xs font-medium mb-2">📋 应用场景</p>
+                      <ul className="text-xs text-gray-400 space-y-2">
+                        <li>• <span className="text-cyan-400">只读硬件寄存器</span>: 状态寄存器、数据输入寄存器</li>
+                        <li>• <span className="text-sky-400">校准数据</span>: 存储在 Flash 的校准表、补偿参数</li>
+                        <li>• <span className="text-blue-400">出厂配置</span>: 设备序列号、MAC 地址、配置参数</li>
+                        <li>• <span className="text-purple-400">EEPROM 参数</span>: 用户设置、运行统计数据</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-cyan-700/30">
+                <h2 className="text-lg font-semibold text-cyan-400 mb-3">关键点说明</h2>
+                <div className="space-y-2 text-sm">
+                  <div className={`p-2 rounded transition-colors ${step >= 2 ? 'bg-cyan-900/30 text-cyan-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">①</span> const volatile = 只读 + 外部可变
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 4 ? 'bg-cyan-900/30 text-cyan-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">②</span> 编译器阻止写入操作
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 6 ? 'bg-cyan-900/30 text-cyan-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">③</span> 与单独 const 或 volatile 区分
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-cyan-700/30">
+                <h2 className="text-lg font-semibold text-cyan-400 mb-3">限定符组合</h2>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-cyan-900/20 rounded border border-cyan-500/30">
+                    <p className="text-cyan-300 font-medium">const</p>
+                    <p className="text-gray-400">程序不可改，编译期确定</p>
+                  </div>
+                  <div className="p-2 bg-sky-900/20 rounded border border-sky-500/30">
+                    <p className="text-sky-300 font-medium">volatile</p>
+                    <p className="text-gray-400">程序可改，每次重新读取</p>
+                  </div>
+                  <div className="p-2 bg-blue-900/20 rounded border border-blue-500/30">
+                    <p className="text-blue-300 font-medium">const volatile</p>
+                    <p className="text-gray-400">程序不可改，外部可改，每次重新读取</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-gray-800/80 rounded-xl p-4 border border-cyan-700/30">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <button onClick={togglePlay} className={`px-4 py-2 rounded-lg font-medium transition-colors ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-cyan-600 hover:bg-cyan-700'} text-white`}>
+                  {step >= MAX_STEPS ? '🔄 重新播放' : isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                </button>
+                <button onClick={() => handleStepChange(Math.max(1, step - 1))} disabled={step <= 1} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  ◀ 上一步
+                </button>
+                <span className="text-cyan-400 font-medium px-3">步骤 {step} / {MAX_STEPS}</span>
+                <button onClick={() => handleStepChange(Math.min(MAX_STEPS, step + 1))} disabled={step >= MAX_STEPS} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  下一步 ▶
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-cyan-300">
+                  语速：
+                  <input type="range" min="0.5" max="1.5" step="0.1" value={voiceRate} onChange={(e) => setVoiceRate(parseFloat(e.target.value))} className="ml-2 w-24" />
+                  <span className="ml-2 text-cyan-400">{voiceRate.toFixed(1)}x</span>
+                </label>
+                {isVoicePlaying && <span className="text-cyan-400 animate-pulse">🔊 语音播放中...</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 蜂鸣器控制完整指南 - 题库动画生成器</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { visibility: visible; } 50% { visibility: hidden; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 100% { transform: translateY(20px); } }
+        @keyframes press { 0% { transform: scale(1); } 50% { transform: scale(0.95); } 100% { transform: scale(1); } }
+        @keyframes release { 0% { transform: scale(0.95); } 100% { transform: scale(1); } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        @keyframes jitter { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+        @keyframes debounce { 0% { transform: scale(1); } 50% { transform: scale(0.8); } 100% { transform: scale(1); } }
+        @keyframes longpress { 0% { transform: scale(1); } 100% { transform: scale(1.1); } }
+        @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(255,255,0,0.3); } 50% { background-color: rgba(255,255,0,0.8); } }
+        @keyframes activate { 0% { box-shadow: 0 0 5px currentColor; } 50% { box-shadow: 0 0 20px currentColor; } 100% { box-shadow: 0 0 5px currentColor; } }
+        @keyframes wave { 0% { transform: rotate(0deg); } 25% { transform: rotate(-10deg); } 75% { transform: rotate(10deg); } 100% { transform: rotate(0deg); } }
+        @keyframes staircase { 0% { transform: translateY(0); } 25% { transform: translateY(-5px); } 50% { transform: translateY(-10px); } 75% { transform: translateY(-15px); } 100% { transform: translateY(0); } }
+        @keyframes smooth { 0% { transform: translateY(0); } 100% { transform: translateY(-20px); } }
+        @keyframes triangle { 0% { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); } 50% { clip-path: polygon(50% 100%, 0% 0%, 100% 0%); } 100% { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); } }
+        @keyframes noise { 0% { transform: translate(0,0); } 25% { transform: translate(-2px,2px); } 50% { transform: translate(2px,-2px); } 75% { transform: translate(-2px,-2px); } 100% { transform: translate(0,0); } }
+        @keyframes tick { 0% { transform: rotate(-30deg); } 100% { transform: rotate(0deg); } }
+        @keyframes second { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes update { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        @keyframes alarm { 0%, 100% { background-color: rgba(255,0,0,0.3); } 50% { background-color: rgba(255,0,0,0.8); } }
+        @keyframes backup { 0% { transform: translateX(0); } 50% { transform: translateX(10px); } 100% { transform: translateX(0); } }
+        @keyframes circular { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes transfer { 0% { transform: translateX(0) scale(1); } 50% { transform: translateX(50px) scale(0.8); } 100% { transform: translateX(0) scale(1); } }
+        @keyframes read { 0% { transform: scaleX(1); } 50% { transform: scaleX(1.2); } 100% { transform: scaleX(1); } }
+        @keyframes write { 0% { transform: scaleY(1); } 50% { transform: scaleY(0.8); } 100% { transform: scaleY(1); } }
+        @keyframes move { 0% { transform: translate(0,0); } 25% { transform: translate(10px,0); } 50% { transform: translate(20px,10px); } 75% { transform: translate(10px,20px); } 100% { transform: translate(0,0); } }
+        @keyframes vibrate { 0% { transform: translateY(0); } 25% { transform: translateY(-2px); } 75% { transform: translateY(2px); } 100% { transform: translateY(0); } }
+        @keyframes soundWave { 0% { transform: scaleX(1); opacity: 1; } 100% { transform: scaleX(2); opacity: 0; } }
+        @keyframes pwmToggle { 0%, 100% { height: 100%; } 50% { height: 0%; } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s infinite; }
+        .animate-press { animation: press 0.2s ease-out; }
+        .animate-release { animation: release 0.2s ease-out; }
+        .animate-bounce { animation: bounce 1s infinite; }
+        .animate-jitter { animation: jitter 0.3s infinite; }
+        .animate-debounce { animation: debounce 0.3s ease-out; }
+        .animate-longpress { animation: longpress 1.5s infinite; }
+        .animate-scan { animation: scan 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-activate { animation: activate 1s infinite; }
+        .animate-wave { animation: wave 1s infinite; }
+        .animate-staircase { animation: staircase 2s infinite; }
+        .animate-smooth { animation: smooth 1.5s infinite; }
+        .animate-triangle { animation: triangle 2s infinite; }
+        .animate-noise { animation: noise 0.3s infinite; }
+        .animate-tick { animation: tick 0.3s ease-out; }
+        .animate-second { animation: second 1s linear infinite; }
+        .animate-update { animation: update 1s infinite; }
+        .animate-alarm { animation: alarm 0.5s infinite; }
+        .animate-backup { animation: backup 0.5s infinite; }
+        .animate-circular { animation: circular 1s linear infinite; }
+        .animate-transfer { animation: transfer 1s infinite; }
+        .animate-read { animation: read 0.5s ease-out; }
+        .animate-write { animation: write 0.5s ease-out; }
+        .animate-move { animation: move 2s infinite; }
+        .animate-vibrate { animation: vibrate 0.1s infinite; }
+        .animate-soundWave { animation: soundWave 0.5s infinite; }
+        .animate-pwmToggle { animation: pwmToggle 0.5s infinite; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#f97316',
+            secondary: '#ea580c',
+            accent: '#fb923c',
+            light: '#ffedd5',
+            dark: '#7c2d12',
+            highlight: '#fdba74'
+        };
+
+        const STEPS = [
+            {
+                title: "蜂鸣器基础",
+                narration: "蜂鸣器分为有源和无源两种。有源蜂鸣器通电即响，无源蜂鸣器需要 PWM 方波驱动。STM32 通过 GPIO 或定时器 PWM 控制。",
+                code: `// 蜂鸣器类型对比
+// ┌─────────────┬─────────────┬─────────────┐
+// │ 特性        │ 有源蜂鸣器  │ 无源蜂鸣器  │
+// ├─────────────┼─────────────┼─────────────┤
+// │ 内部振荡源  │ 有          │ 无          │
+// │ 驱动方式    │ 直流电平    │ PWM 方波    │
+// │ 频率控制    │ 固定频率    │ 可调频率    │
+// │ 音调控制    │ 不可调      │ 可调        │
+// │ 成本        │ 较高        │ 较低        │
+// │ 应用        │ 简单提示音  │ 音乐播放    │
+// └─────────────┴─────────────┴─────────────┘
+
+// 常用频率参考
+// 1kHz: 标准提示音
+// 2kHz: 报警音
+// 4kHz: 尖锐警报
+// C 调音阶：262Hz(Do), 294Hz(Re), 330Hz(Mi)...`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-orange-900 to-orange-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">蜂鸣器类型对比</div>
+                        {/* 有源蜂鸣器 */}
+                        <div className="absolute top-16 left-8">
+                            <div className="w-24 h-24 bg-gradient-to-b from-gray-700 to-gray-800 rounded-lg border-4 border-gray-500 flex flex-col items-center justify-center">
+                                <div className="text-white text-xs font-bold">有源</div>
+                                <div className="w-12 h-12 rounded-full bg-gray-600 border-4 border-gray-400 flex items-center justify-center">
+                                    <div className="text-orange-400 text-2xl">🔊</div>
+                                </div>
+                                <div className="text-orange-300 text-xs mt-1">DC 驱动</div>
+                            </div>
+                            <div className="text-white text-xs text-center mt-2">通电即响</div>
+                        </div>
+                        {/* 无源蜂鸣器 */}
+                        <div className="absolute top-16 right-8">
+                            <div className="w-24 h-24 bg-gradient-to-b from-gray-700 to-gray-800 rounded-lg border-4 border-gray-500 flex flex-col items-center justify-center">
+                                <div className="text-white text-xs font-bold">无源</div>
+                                <div className="w-12 h-12 rounded-full bg-gray-600 border-4 border-gray-400 flex items-center justify-center animate-vibrate">
+                                    <div className="text-orange-400 text-2xl">🔔</div>
+                                </div>
+                                <div className="text-orange-300 text-xs mt-1">PWM 驱动</div>
+                            </div>
+                            <div className="text-white text-xs text-center mt-2">需方波</div>
+                        </div>
+                        {/* 声波 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <svg width="200" height="40">
+                                <ellipse cx="20" cy="20" rx="10" ry="15" fill="#f97316" opacity="0.6" className="animate-soundWave" />
+                                <ellipse cx="40" cy="20" rx="15" ry="20" fill="#f97316" opacity="0.5" className="animate-soundWave" style={{animationDelay:'0.1s'}} />
+                                <ellipse cx="70" cy="20" rx="20" ry="25" fill="#f97316" opacity="0.4" className="animate-soundWave" style={{animationDelay:'0.2s'}} />
+                                <ellipse cx="110" cy="20" rx="25" ry="30" fill="#f97316" opacity="0.3" className="animate-soundWave" style={{animationDelay:'0.3s'}} />
+                            </svg>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "有源蜂鸣器：内部带振荡源，DC 驱动",
+                    "无源蜂鸣器：需外部 PWM 方波驱动",
+                    "有源：通电即响，频率固定",
+                    "无源：可编程频率，可播放音乐",
+                    "成本：无源更便宜",
+                    "应用：简单提示用有源，音乐用无源",
+                    "常用频率：1kHz 提示，2-4kHz 警报",
+                    "音阶频率：C 调 Do=262Hz"
+                ]
+            },
+            {
+                title: "工作原理",
+                narration: "无源蜂鸣器通过电磁感应驱动振膜。PWM 方波频率决定音调，占空比影响音量。STM32 定时器输出 PWM 或 GPIO 翻转。",
+                code: `// 蜂鸣器发声原理
+// ┌────────────────────────────────┐
+// │  PWM 方波 → 线圈 → 磁场       │
+// │      ↓           ↓            │
+// │  振膜振动 → 空气压缩 → 声音   │
+// └────────────────────────────────┘
+
+// 频率计算公式
+// f = 1 / (T_high + T_low)
+// 例如：1kHz → T = 1ms → 高电平 0.5ms, 低电平 0.5ms
+
+// STM32 实现方式:
+// 1. GPIO 翻转 (软件延时)
+// 2. 定时器 PWM (硬件输出)
+// 3. 定时器中断 + GPIO 翻转
+
+// 音调与频率关系
+// C4(Do)=262Hz, D4(Re)=294Hz, E4(Mi)=330Hz
+// F4(Fa)=349Hz, G4(Sol)=392Hz, A4(La)=440Hz
+// B4(Si)=494Hz, C5(Do)=523Hz`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-orange-900 to-orange-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">PWM 驱动原理</div>
+                        {/* PWM 波形 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 w-64 h-20">
+                            <svg className="w-full h-full">
+                                <polyline points="0,40 0,10 50,10 50,40 100,40 100,10 150,10 150,40 200,40 200,10 250,10 250,40"
+                                    fill="none" stroke="#f97316" strokeWidth="2" className="animate-flow" />
+                                <text x="10" y="35" fill="white" fontSize="10">T</text>
+                                <line x1="50" y1="25" x2="100" y2="25" stroke="white" strokeWidth="1" markerEnd="url(#arrow)" />
+                            </svg>
+                        </div>
+                        {/* 振动膜 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <div className="flex items-center space-x-4">
+                                <div className="text-white text-xs">线圈</div>
+                                <div className="w-16 h-16 rounded-full bg-gray-600 border-4 border-gray-400 flex items-center justify-center animate-vibrate">
+                                    <div className="text-orange-400">🔔</div>
+                                </div>
+                                <div className="text-white text-xs">振膜</div>
+                                <svg width="60" height="40">
+                                    <ellipse cx="10" cy="20" rx="5" ry="15" fill="#f97316" opacity="0.6" />
+                                    <ellipse cx="25" cy="20" rx="8" ry="20" fill="#f97316" opacity="0.5" />
+                                    <ellipse cx="45" cy="20" rx="10" ry="25" fill="#f97316" opacity="0.4" />
+                                </svg>
+                                <div className="text-white text-xs">声波</div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "PWM 方波：驱动无源蜂鸣器",
+                    "频率 f=1/T: 决定音调高低",
+                    "占空比：影响音量和音色",
+                    "电磁感应：线圈产生磁场",
+                    "振膜振动：推动空气发声",
+                    "GPIO 翻转：软件延时方式",
+                    "定时器 PWM: 硬件精确频率",
+                    "音阶频率：C4=262Hz 起"
+                ]
+            },
+            {
+                title: "硬件连接",
+                narration: "STM32 通过三极管或 MOSFET 驱动蜂鸣器。GPIO 输出电流不足，需要驱动电路。串联二极管续流保护。",
+                code: `// STM32 与蜂鸣器连接
+// ┌─────────────────────────────────────┐
+// │ STM32 GPIO → 1kΩ → 三极管基极     │
+// │                     发射极 → GND   │
+// │                     集电极 → 蜂鸣器-│
+// │ 蜂鸣器 + → 3.3V/5V                 │
+// │ 蜂鸣器 - → 三极管集电极            │
+// │ 续流二极管：蜂鸣器两端反向并联     │
+// └─────────────────────────────────────┘
+
+// 推荐 GPIO 引脚
+// PA0-PA15: 通用 GPIO，可 PWM 复用
+// PB6-PB9:  定时器 PWM 输出 (TIM4)
+// PA0-PA3:  定时器 PWM 输出 (TIM2)
+
+// 驱动电流计算
+// 蜂鸣器工作电流：30mA 典型
+// 三极管放大倍数β: 100
+// 基极电流：Ib = Ic/β = 0.3mA
+// 限流电阻：R = (3.3V-0.7V)/0.3mA ≈ 8.7kΩ
+// 选用：1kΩ 确保饱和导通`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-orange-900 to-orange-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">驱动电路</div>
+                        {/* 电路图 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="flex items-center space-x-4">
+                                {/* GPIO */}
+                                <div className="bg-blue-800 rounded p-2 border-2 border-blue-500">
+                                    <div className="text-white text-xs text-center">GPIO</div>
+                                    <div className="text-cyan-300 text-xs text-center font-mono">PA0</div>
+                                </div>
+                                {/* 电阻 */}
+                                <div className="bg-yellow-600 rounded p-2 border-2 border-yellow-400">
+                                    <div className="text-white text-xs text-center">1kΩ</div>
+                                </div>
+                                {/* 三极管 */}
+                                <div className="bg-gray-700 rounded p-2 border-2 border-gray-500">
+                                    <div className="text-white text-xs text-center">NPN</div>
+                                    <div className="text-gray-300 text-xs text-center">2N3904</div>
+                                </div>
+                                {/* 蜂鸣器 */}
+                                <div className="bg-orange-800 rounded p-2 border-2 border-orange-500">
+                                    <div className="text-white text-xs text-center">Buzzer</div>
+                                    <div className="text-orange-300 text-xs text-center">5V</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* 电流流向 */}
+                        <svg className="absolute inset-0 w-full h-full">
+                            <path d="M 100 150 L 100 180 L 150 180" stroke="#f97316" strokeWidth="2" fill="none" strokeDasharray="5,5" className="animate-flow" />
+                            <path d="M 200 180 L 250 180 L 250 150" stroke="#f97316" strokeWidth="2" fill="none" strokeDasharray="5,5" className="animate-flow" />
+                        </svg>
+                        {/* 标注 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white text-xs">
+                            <div className="text-center">GPIO→基极→集电极→蜂鸣器</div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "GPIO 电流不足：需三极管驱动",
+                    "NPN 三极管：2N3904/S8050",
+                    "基极限流电阻：1kΩ",
+                    "蜂鸣器正极：接 3.3V 或 5V",
+                    "蜂鸣器负极：接集电极",
+                    "续流二极管：保护三极管",
+                    "发射极：接地",
+                    "MOSFET 替代：2N7000"
+                ]
+            },
+            {
+                title: "GPIO 配置",
+                narration: "配置 GPIO 为推挽输出模式。PA0 连接蜂鸣器控制端。推挽输出可提供足够基极电流。",
+                code: `void BUZZER_GPIO_Init(void) {
+    // 使能 GPIOA 时钟
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    // PA0: 推挽输出，50MHz
+    GPIOA->CRL &= ~0x0000000F;  // 清除 0-3 位
+    GPIOA->CRL |= 0x00000003;   // 输出，50MHz，推挽
+
+    // 默认关闭
+    GPIOA->BRR = (1 << 0);  // PA0=0
+}
+
+// 控制宏
+#define BUZZER_ON()   GPIOA->BSRR = (1 << 0)   // PA0=1
+#define BUZZER_OFF()  GPIOA->BRR = (1 << 0)    // PA0=0
+#define BUZZER_TOGGLE()  GPIOA->ODR ^= (1 << 0)
+
+// 有源蜂鸣器使用示例
+void Buzzer_Beep(uint16_t duration_ms) {
+    BUZZER_ON();
+    Delay_ms(duration_ms);
+    BUZZER_OFF();
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-orange-900 to-orange-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">GPIO 配置 (推挽输出)</div>
+                        {/* GPIO 寄存器 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="bg-blue-900 rounded-lg p-4 border-2 border-blue-500">
+                                <div className="text-white text-sm font-bold mb-2">GPIOA CRL</div>
+                                <div className="grid grid-cols-8 gap-1">
+                                    {Array.from({length: 8}).map((_, i) => (
+                                        <div key={i} className={`p-2 rounded text-center text-xs ${i===0 ? 'bg-orange-500 animate-pulse' : 'bg-gray-700'}`}>
+                                            <div className="text-white">P{i}</div>
+                                            <div className="text-orange-200 font-mono">{i===0 ? '0011' : '----'}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="text-cyan-300 text-xs mt-2">CNF[1:0]=00, MODE[1:0]=11</div>
+                            </div>
+                        </div>
+                        {/* 控制状态 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center space-x-8">
+                            <div className="bg-green-600 rounded p-3 border-2 border-green-400 animate-activate">
+                                <div className="text-white text-xs text-center">ON</div>
+                                <div className="text-green-200 text-lg font-mono text-center">1</div>
+                            </div>
+                            <div className="text-white text-2xl">↔</div>
+                            <div className="bg-gray-600 rounded p-3 border-2 border-gray-400">
+                                <div className="text-white text-xs text-center">OFF</div>
+                                <div className="text-gray-300 text-lg font-mono text-center">0</div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "RCC->APB2ENR: 使能 GPIOA 时钟",
+                    "CRL 寄存器：控制引脚 0-7",
+                    "MODE[1:0]=11:50MHz 输出",
+                    "CNF[1:0]=00: 通用推挽输出",
+                    "BSRR: 原子置位操作",
+                    "BRR: 原子复位操作",
+                    "ODR^=：翻转输出状态",
+                    "默认关闭：省电能效"
+                ]
+            },
+            {
+                title: "GPIO 翻转",
+                narration: "软件延时方式产生方波。通过控制 GPIO 高低电平时间和翻转次数来调节频率和持续时间。适用于无源蜂鸣器。",
+                code: `// 软件延时产生方波
+void Buzzer_Tone(uint16_t frequency, uint16_t duration_ms) {
+    uint32_t period_us = 1000000 / frequency;
+    uint32_t half_period = period_us / 2;
+    uint32_t cycles = (duration_ms * 1000) / period_us;
+
+    for (uint32_t i = 0; i < cycles; i++) {
+        BUZZER_TOGGLE();
+        Delay_us(half_period);
+    }
+    BUZZER_OFF();
+}
+
+// 播放音阶
+void Buzzer_PlayNote(uint8_t note, uint16_t duration_ms) {
+    const uint16_t freq_table[] = {
+        262, 294, 330, 349, 392, 440, 494, 523  // C4-B4
+    };
+    Buzzer_Tone(freq_table[note], duration_ms);
+}
+
+// 播放和弦音 (简单版)
+void Buzzer_Chord(uint8_t note1, uint8_t note2, uint16_t duration) {
+    // 快速交替两个音符
+    for (int i = 0; i < 10; i++) {
+        Buzzer_PlayNote(note1, duration/20);
+        Buzzer_PlayNote(note2, duration/20);
+    }
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-orange-900 to-orange-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">GPIO 翻转产生方波</div>
+                        {/* 方波生成 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 w-64">
+                            <div className="text-white text-xs mb-2 text-center">方波输出 (频率=1kHz)</div>
+                            <svg className="w-full h-24">
+                                <polyline points="0,60 0,20 25,20 25,60 50,60 50,20 75,20 75,60 100,60 100,20 125,20 125,60 150,60 150,20 175,20 175,60 200,60 200,20 225,20 225,60 250,60"
+                                    fill="none" stroke="#f97316" strokeWidth="3" className="animate-flow" />
+                                <text x="30" y="45" fill="white" fontSize="12">T/2</text>
+                                <text x="80" y="45" fill="white" fontSize="12">T/2</text>
+                            </svg>
+                        </div>
+                        {/* 频率显示 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 grid grid-cols-4 gap-4">
+                            {[
+                                {freq:'262Hz',note:'Do'},
+                                {freq:'330Hz',note:'Mi'},
+                                {freq:'392Hz',note:'Sol'},
+                                {freq:'523Hz',note:'Do5'}
+                            ].map(item => (
+                                <div key={item.freq} className="bg-orange-800 rounded p-2 border border-orange-500">
+                                    <div className="text-white text-xs text-center">{item.freq}</div>
+                                    <div className="text-orange-300 text-xs text-center">{item.note}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "周期 T=1/f: 计算翻转时间",
+                    "半周期：高/低电平各占 T/2",
+                    "循环次数：duration/period",
+                    "BUZZER_TOGGLE: 翻转 GPIO",
+                    "Delay_us: 精确微秒延时",
+                    "音阶表：预定义频率数组",
+                    "和弦：快速交替音符",
+                    "精度限制：软件延时误差"
+                ]
+            },
+            {
+                title: "PWM 驱动",
+                narration: "使用定时器 PWM 硬件输出精确频率。配置定时器ARR 和 PPR 寄存器设置频率，CCR 寄存器设置占空比。",
+                code: `// 定时器 PWM 配置 (TIM2)
+void BUZZER_PWM_Init(uint16_t frequency) {
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+
+    // PA0(TIM2_CH1): 复用推挽输出
+    GPIOA->CRL &= ~0x0000000F;
+    GPIOA->CRL |= 0x00000008;  // AF_PP
+
+    // 定时器配置
+    TIM2->PSC = 71;  // 72MHz/72 = 1MHz 计数
+    TIM2->ARR = (1000000 / frequency) - 1;  // 频率设置
+    TIM2->CCR1 = TIM2->ARR / 2;  // 50% 占空比
+    TIM2->CCMR1 |= TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2;  // PWM 模式 1
+    TIM2->CCER |= TIM_CCER_CC1E;  // 使能输出
+    TIM2->CR1 |= TIM_CR1_CEN;  // 使能定时器
+}
+
+// 改变频率
+void BUZZER_SetFreq(uint16_t freq) {
+    TIM2->ARR = (1000000 / freq) - 1;
+}
+
+// 开启/关闭
+#define BUZZER_PWM_ON()  TIM2->CCER |= TIM_CCER_CC1E
+#define BUZZER_PWM_OFF() TIM2->CCER &= ~TIM_CCER_CC1E`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-orange-900 to-orange-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">PWM 硬件输出</div>
+                        {/* 定时器结构 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="bg-blue-900 rounded-lg p-4 border-2 border-blue-500">
+                                <div className="text-white text-sm font-bold mb-2">TIM2 配置</div>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">PSC</div>
+                                        <div className="text-yellow-400 text-sm font-mono">71</div>
+                                    </div>
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">ARR</div>
+                                        <div className="text-green-400 text-sm font-mono">999</div>
+                                    </div>
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">CCR1</div>
+                                        <div className="text-blue-400 text-sm font-mono">500</div>
+                                    </div>
+                                </div>
+                                <div className="text-white text-xs mt-2">
+                                    <div>f = 72M/(72×1000) = 1kHz</div>
+                                    <div>占空比 = 500/1000 = 50%</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* PWM 波形 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 w-48">
+                            <svg className="w-full h-16">
+                                <polyline points="0,40 0,10 60,10 60,40 120,40 120,10 180,10 180,40 240,40"
+                                    fill="none" stroke="#f97316" strokeWidth="3" />
+                                <text x="70" y="30" fill="white" fontSize="10">50%</text>
+                            </svg>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "TIM2: 通用定时器，4 通道 PWM",
+                    "PSC=71:72MHz 分频为 1MHz",
+                    "ARR: 自动重载值，决定频率",
+                    "CCR1: 比较值，决定占空比",
+                    "PWM 模式 1: 计数<CCR 时有效",
+                    "CC1E: 通道 1 输出使能",
+                    "CEN: 定时器使能",
+                    "频率公式：f=72M/(PSC×ARR)"
+                ]
+            },
+            {
+                title: "音乐播放",
+                narration: "通过数组存储乐谱，包括音符和节拍。循环播放数组中的音符实现音乐播放。支持简谱和五线谱编码。",
+                code: `// 简谱编码 (音符 + 节拍)
+const uint16_t music[][2] = {
+    {3, 1}, {5, 1}, {6, 1}, {1, 2},  // 小星星第一句
+    {6, 1}, {1, 2}, {5, 4},           // Twinkle twinkle
+    {0, 1}  // 结束标记 (0=休止)
+};
+
+// 播放音乐
+void Buzzer_PlayMusic(const uint16_t (*music)[2]) {
+    uint8_t i = 0;
+    while (music[i][0] != 0) {
+        uint8_t note = music[i][0];
+        uint8_t beat = music[i][1];
+        uint16_t duration = beat * 200;  // 节拍转 ms
+
+        if (note == 0) {
+            BUZZER_OFF();
+        } else {
+            Buzzer_PlayNote(note - 1, duration);
+        }
+        Delay_ms(duration / 4);  // 音符间隔
+        i++;
+    }
+}
+
+// 音符频率表 (C 调)
+const uint16_t note_freq[] = {
+    0,    // 休止符
+    262, 294, 330, 349, 392, 440, 494, 523  // 1-8: Do-Si-Do
+};`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-orange-900 to-orange-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">音乐播放</div>
+                        {/* 乐谱显示 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="text-white text-xs mb-2 text-center">小星星简谱</div>
+                            <div className="grid grid-cols-8 gap-1">
+                                {[
+                                    {n:'1',b:'1'},{n:'1',b:'1'},{n:'5',b:'1'},{n:'5',b:'1'},
+                                    {n:'6',b:'1'},{n:'6',b:'1'},{n:'5',b:'2'},
+                                    {n:'4',b:'1'},{n:'4',b:'1'},{n:'3',b:'1'},{n:'3',b:'1'}
+                                ].map((note, i) => (
+                                    <div key={i} className={`bg-orange-800 rounded p-1 border border-orange-500 ${i<4 ? 'animate-pulse' : ''}`}>
+                                        <div className="text-white text-xs text-center">{note.n}</div>
+                                        <div className="text-orange-300 text-xs text-center">{note.b}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        {/* 播放进度 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <div className="flex items-center space-x-2">
+                                <div className="text-orange-400 text-2xl">♪</div>
+                                <div className="bg-orange-600 rounded p-2 animate-vibrate">
+                                    <div className="text-white text-xs">Playing...</div>
+                                </div>
+                                <svg width="100" height="20">
+                                    <rect x="0" y="5" width="20" height="10" fill="#f97316" className="animate-pulse" />
+                                    <rect x="25" y="5" width="15" height="10" fill="#f97316" opacity="0.8" />
+                                    <rect x="45" y="5" width="25" height="10" fill="#f97316" opacity="0.6" />
+                                    <rect x="75" y="5" width="10" height="10" fill="#f97316" opacity="0.4" />
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "简谱编码：音符 + 节拍",
+                    "1-7:Do Re Mi Fa Sol La Si",
+                    "0: 休止符 (不发声)",
+                    "节拍：1=1 拍，2=2 拍",
+                    "节拍转 ms:beat×200ms(BPM=150)",
+                    "音符间隔：时值 1/4",
+                    "频率表：预定义音阶频率",
+                    "循环播放：直到结束标记"
+                ]
+            },
+            {
+                title: "报警音",
+                narration: "实现多种报警音效果。警车声 (高低音交替)、救护车声 (连续变调)、消防车声 (快速双音)。",
+                code: `// 警车报警音 (高低音交替)
+void Buzzer_PoliceSiren(void) {
+    while (1) {
+        for (int i = 0; i < 5; i++) {
+            Buzzer_Tone(800, 100);  // 高音
+            Delay_ms(50);
+        }
+        for (int i = 0; i < 5; i++) {
+            Buzzer_Tone(400, 100);  // 低音
+            Delay_ms(50);
+        }
+    }
+}
+
+// 救护车报警音 (渐变)
+void Buzzer_AmbulanceSiren(void) {
+    while (1) {
+        // 频率从低到高
+        for (uint16_t f = 400; f < 1000; f += 50) {
+            Buzzer_Tone(f, 30);
+        }
+        // 频率从高到低
+        for (uint16_t f = 1000; f > 400; f -= 50) {
+            Buzzer_Tone(f, 30);
+        }
+    }
+}
+
+// 消防车报警音 (快速双音)
+void Buzzer_FireSiren(void) {
+    while (1) {
+        Buzzer_Tone(600, 80);
+        Buzzer_Tone(900, 80);
+        Buzzer_Tone(600, 80);
+        Delay_ms(200);
+    }
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-orange-900 to-orange-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">报警音效果</div>
+                        {/* 警车声 */}
+                        <div className="absolute top-16 left-4">
+                            <div className="text-white text-xs mb-2">警车 (高低交替)</div>
+                            <svg width="80" height="40">
+                                <rect x="0" y="0" width="15" height="30" fill="#f97316" />
+                                <rect x="20" y="15" width="15" height="20" fill="#f97316" opacity="0.7" />
+                                <rect x="40" y="0" width="15" height="30" fill="#f97316" />
+                                <rect x="60" y="15" width="15" height="20" fill="#f97316" opacity="0.7" />
+                            </svg>
+                        </div>
+                        {/* 救护车声 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="text-white text-xs mb-2">救护车 (渐变)</div>
+                            <svg width="80" height="40">
+                                <polyline points="0,35 10,25 20,15 30,5 40,5 50,15 60,25 70,35"
+                                    fill="none" stroke="#f97316" strokeWidth="3" className="animate-flow" />
+                            </svg>
+                        </div>
+                        {/* 消防车声 */}
+                        <div className="absolute top-16 right-4">
+                            <div className="text-white text-xs mb-2">消防车 (快速双音)</div>
+                            <svg width="80" height="40">
+                                <rect x="0" y="10" width="8" height="25" fill="#f97316" />
+                                <rect x="12" y="0" width="8" height="35" fill="#f97316" opacity="0.8" />
+                                <rect x="24" y="10" width="8" height="25" fill="#f97316" />
+                                <rect x="40" y="10" width="8" height="25" fill="#f97316" opacity="0.6" />
+                            </svg>
+                        </div>
+                        {/* 播放按钮 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 grid grid-cols-3 gap-4">
+                            <button className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded">警车</button>
+                            <button className="bg-green-600 hover:bg-green-700 text-white text-xs px-4 py-2 rounded">救护车</button>
+                            <button className="bg-red-600 hover:bg-red-700 text-white text-xs px-4 py-2 rounded">消防车</button>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "警车声：800Hz/400Hz 交替",
+                    "高低音各 5 次循环",
+                    "救护车声：400-1000Hz 渐变",
+                    "频率扫描：步长 50Hz",
+                    "消防车声：600Hz+900Hz 双音",
+                    "快速交替：80ms 每音",
+                    "无限循环：while(1)",
+                    "可扩展：更多报警音模式"
+                ]
+            },
+            {
+                title: "应用实例",
+                narration: "蜂鸣器综合应用：按键提示音、定时闹钟、系统告警、游戏音效。结合传感器实现智能提醒。",
+                code: `// 按键提示音
+void KEY_Beep(void) {
+    Buzzer_Tone(2000, 50);  // 短促 2kHz 提示音
+}
+
+// 定时闹钟
+void ALARM_Set(uint8_t hour, uint8_t minute) {
+    alarm_hour = hour;
+    alarm_minute = minute;
+}
+
+void ALARM_Check(void) {
+    if (current_hour == alarm_hour && current_minute == alarm_minute) {
+        for (int i = 0; i < 3; i++) {
+            Buzzer_Tone(1000, 500);
+            Delay_ms(200);
+        }
+    }
+}
+
+// 系统告警 (低电压检测)
+void SYS_Warning(void) {
+    if (voltage < 3.0V) {
+        // 三短声告警
+        for (int i = 0; i < 3; i++) {
+            Buzzer_Tone(3000, 100);
+            Delay_ms(100);
+        }
+    }
+}
+
+// 游戏音效 (简单版)
+void GAME_StartSound(void) {
+    Buzzer_Tone(523, 100);  // Do
+    Delay_ms(100);
+    Buzzer_Tone(659, 100);  // Mi
+    Delay_ms(100);
+    Buzzer_Tone(784, 200);  // Sol
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-orange-900 to-orange-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">应用实例</div>
+                        {/* 按键提示 */}
+                        <div className="absolute top-16 left-4 w-20 h-20 bg-blue-800 rounded-lg border-2 border-blue-500 flex items-center justify-center">
+                            <div className="text-white text-xs text-center">
+                                <div>按键</div>
+                                <div className="text-blue-300">嘀</div>
+                            </div>
+                        </div>
+                        {/* 闹钟 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 w-20 h-20 bg-green-800 rounded-lg border-2 border-green-500 flex items-center justify-center animate-pulse">
+                            <div className="text-white text-2xl">⏰</div>
+                        </div>
+                        {/* 告警 */}
+                        <div className="absolute top-16 right-4 w-20 h-20 bg-red-800 rounded-lg border-2 border-red-500 flex items-center justify-center animate-alarm">
+                            <div className="text-white text-2xl">⚠️</div>
+                        </div>
+                        {/* 游戏音效 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 w-48 h-16 bg-purple-800 rounded-lg border-2 border-purple-500 p-2">
+                            <div className="text-white text-xs text-center mb-1">游戏音效</div>
+                            <div className="flex justify-center space-x-2">
+                                <div className="bg-purple-600 rounded px-2 py-1 text-white text-xs animate-pulse">Do</div>
+                                <div className="bg-purple-600 rounded px-2 py-1 text-white text-xs animate-pulse" style={{animationDelay:'0.1s'}}>Mi</div>
+                                <div className="bg-purple-600 rounded px-2 py-1 text-white text-xs animate-pulse" style={{animationDelay:'0.2s'}}>Sol</div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "按键提示：2kHz/50ms 短音",
+                    "定时闹钟：3 次 1kHz/500ms",
+                    "系统告警：3kHz 三短声",
+                    "低电压检测：V<3.0V 触发",
+                    "游戏音效：音阶组合",
+                    "开始音效：Do-Mi-Sol",
+                    "结合 RTC: 准时响铃",
+                    "结合 ADC: 阈值告警"
+                ]
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(true);
+            const [isInitialized, setIsInitialized] = React.useState(false);
+            const [availableVoices, setAvailableVoices] = React.useState([]);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                const voices = speechSynthesis.getVoices();
+                setAvailableVoices(voices);
+                const preferredVoice = voices.find(v => v.lang === 'zh-CN' && v.name.includes('Xiaoxiao')) ||
+                                       voices.find(v => v.lang === 'zh-CN') ||
+                                       voices[0];
+                if (preferredVoice && isPlaying && !isInitialized) {
+                    setIsInitialized(true);
+                    speakStep(0, preferredVoice);
+                }
+            }, []);
+
+            const getPreferredVoice = () => {
+                return availableVoices.find(v => v.lang === 'zh-CN' && v.name.includes('Xiaoxiao')) ||
+                       availableVoices.find(v => v.lang === 'zh-CN') ||
+                       availableVoices[0];
+            };
+
+            const speakStep = (stepIndex, voice) => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                    voiceEndTimerRef.current = null;
+                }
+
+                speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(STEPS[stepIndex].narration);
+                utterance.lang = 'zh-CN';
+                utterance.voice = voice || getPreferredVoice();
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            const next = (prev + 1) % STEPS.length;
+                            if (isPlaying) {
+                                setTimeout(() => speakStep(next, voice), 100);
+                            }
+                            return next;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            const next = (prev + 1) % STEPS.length;
+                            if (isPlaying) {
+                                setTimeout(() => speakStep(next, voice), 100);
+                            }
+                            return next;
+                        });
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            const handleStepClick = (index) => {
+                setCurrentStep(index);
+                const voice = getPreferredVoice();
+                speakStep(index, voice);
+            };
+
+            const togglePlayPause = () => {
+                if (isPlaying) {
+                    speechSynthesis.cancel();
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                        voiceEndTimerRef.current = null;
+                    }
+                    setIsPlaying(false);
+                } else {
+                    setIsPlaying(true);
+                    const voice = getPreferredVoice();
+                    speakStep(currentStep, voice);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-900 via-orange-900 to-gray-900 p-8">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="text-center mb-8">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 蜂鸣器控制完整指南</h1>
+                            <p className="text-orange-300">有源/无源蜂鸣器 / PWM 驱动 / 音乐播放</p>
+                        </div>
+
+                        {/* Controls */}
+                        <div className="flex justify-center items-center space-x-4 mb-6">
+                            <button
+                                onClick={() => handleStepClick((currentStep - 1 + STEPS.length) % STEPS.length)}
+                                className="px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors"
+                            >
+                                ← 上一步
+                            </button>
+                            <button
+                                onClick={togglePlayPause}
+                                className={`px-8 py-3 rounded-lg transition-colors ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'} text-white`}
+                            >
+                                {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                            </button>
+                            <button
+                                onClick={() => handleStepClick((currentStep + 1) % STEPS.length)}
+                                className="px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors"
+                            >
+                                下一步 →
+                            </button>
+                        </div>
+
+                        {/* Progress */}
+                        <div className="flex justify-center space-x-2 mb-8">
+                            {STEPS.map((_, index) => (
+                                <div
+                                    key={index}
+                                    className={`w-3 h-3 rounded-full transition-colors ${index === currentStep ? 'bg-orange-400' : 'bg-gray-600'}`}
+                                />
+                            ))}
+                        </div>
+
+                        {/* Main Content */}
+                        <div className="grid grid-cols-3 gap-6">
+                            {/* Code */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-orange-400 mb-4">💻 代码</h3>
+                                <pre className="text-orange-400 text-sm overflow-auto h-80 font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+
+                            {/* Visualization */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-orange-400 mb-4">🎨 可视化</h3>
+                                <div className="h-80">
+                                    {STEPS[currentStep].visualization()}
+                                </div>
+                            </div>
+
+                            {/* Explanations */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-orange-400 mb-4">📖 解释</h3>
+                                <ul className="space-y-3">
+                                    {STEPS[currentStep].explanations.map((exp, index) => (
+                                        <li key={index} className="text-white text-sm flex items-start">
+                                            <span className="text-orange-400 mr-2">•</span>
+                                            <span>{exp}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+
+                        {/* Step Info */}
+                        <div className="mt-8 text-center">
+                            <h2 className="text-2xl font-bold text-orange-400">
+                                {currentStep + 1}. {STEPS[currentStep].title}
+                            </h2>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1183 - 嵌入式 C 语言编程规范 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: transparent; } 50% { background-color: rgba(251,191,36,0.2); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes checkAnim { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes crossAnim { from { transform: scale(1); } to { transform: scale(0); } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-check { animation: checkAnim 0.3s ease-out forwards; }
+        .animate-cross { animation: crossAnim 0.3s ease-out forwards; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: 'from-slate-500 to-gray-600',
+            light: 'from-slate-50 to-gray-50',
+            text: 'text-slate-600',
+            bg: 'bg-slate-50',
+            border: 'border-slate-200',
+            hover: 'hover:bg-slate-100'
+        };
+
+        const CODE_EXAMPLES = [
+            {
+                title: "命名规范",
+                code: `// ✅ 推荐命名风格
+
+// 1. 宏定义：全大写下划线分隔
+#define MAX_BUFFER_SIZE     256
+#define GPIO_PIN_MASK       0x00FF
+#define STATUS_OK           0
+#define STATUS_ERROR        (-1)
+
+// 2. 类型定义：驼峰 +_t 后缀
+typedef uint32_t Timeout_ms;
+typedef struct SensorData SensorData;
+typedef void (*CallbackFunc)(int);
+
+// 3. 结构体/联合体：帕斯卡命名
+typedef struct {
+    int x;
+    int y;
+} Point;
+
+typedef union {
+    uint32_t word;
+    uint8_t bytes[4];
+} WordUnion;
+
+// 4. 函数名：帕斯卡命名 (模块_功能)
+void System_Init(void);
+int Sensor_ReadData(Sensor *s);
+bool ValidateChecksum(uint8_t *data);
+
+// 5. 变量名：小写或驼峰
+int counter;
+int globalCounter;      // 全局加 g_前缀
+static int s_private;   // 静态加 s_前缀
+
+// 6. 常量：kPrefix 或 g_前缀
+const int kMaxRetries = 3;
+const float g_pi = 3.14159f;
+
+// ❌ 避免
+int cnt;                // 语义不明
+#define size 100        // 小写宏易冲突
+void foo(void);         // 无意义函数名`,
+                highlight: "语义化",
+                explanation: "命名规范提高代码可读性。宏全大写，类型加_t 后缀，函数帕斯卡命名带模块前缀，变量小写或驼峰，全局变量加 g_前缀，静态变量加 s_前缀。"
+            },
+            {
+                title: "注释规范",
+                code: `// ✅ 推荐注释风格
+
+// 1. 文件头注释 (每个源文件)
+/**
+ * @file    sensor.c
+ * @brief   传感器数据采集模块
+ * @author  Your Name
+ * @version 1.0.0
+ * @date    2024-01-01
+ */
+
+// 2. 函数注释 (Doxygen 风格)
+/**
+ * @brief 读取传感器数据
+ * @param  sensor    传感器指针
+ * @param  buffer    数据缓冲区
+ * @param  length    缓冲区长度
+ * @return int       成功返回 0，失败返回错误码
+ *
+ * @note 此函数会阻塞最多 100ms
+ * @pre  sensor 不能为 NULL
+ */
+int Sensor_Read(Sensor *sensor, uint8_t *buffer, int length);
+
+// 3. 关键算法注释
+// 使用移动平均滤波消除噪声
+// 公式：y[n] = (x[n] + x[n-1] + ... + x[n-N+1]) / N
+float movingAverage(float *samples, int N) {
+    float sum = 0;
+    for (int i = 0; i < N; i++) {
+        sum += samples[i];
+    }
+    return sum / N;
+}
+
+// 4. TODO/FIXME 标记
+// TODO: 添加错误恢复机制
+// FIXME: 高温环境下可能溢出
+// XXX: 性能瓶颈，需要优化`,
+                highlight: "Doxygen",
+                explanation: "注释规范使用 Doxygen 风格。文件头包含作者版本日期，函数注释包含参数返回值和前置条件，关键算法说明原理，TODO/FIXME 标记待办事项。"
+            },
+            {
+                title: "代码排版规范",
+                code: `// ✅ 推荐排版风格
+
+// 1. 缩进：4 空格 (不用 Tab)
+void function(void) {
+    if (condition) {
+        doSomething();    // 4 空格缩进
+    }
+}
+
+// 2. 大括号：K&R 风格 (函数除外)
+if (x > 0) {
+    doSomething();
+} else {
+    doOther();
+}
+
+// 函数大括号独占一行
+int main(void)
+{
+    return 0;
+}
+
+// 3. 空行：逻辑分隔
+void process(void) {
+    // 初始化
+    initHardware();
+    initVariables();
+
+    // 主处理
+    loadData();
+    processData();
+
+    // 清理
+    saveResults();
+}
+
+// 4. 行宽：≤80 字符
+// 长表达式分行
+int result = veryLongVariableName1 +
+             veryLongVariableName2 +
+             veryLongVariableName3;
+
+// 5. 运算符两侧空格
+int x = a + b * c;    // ✓
+int y=a+b*c;          // ✗`,
+                highlight: "4 空格",
+                explanation: "代码排版规范：4 空格缩进不用 Tab，K&R 风格大括号 (函数除外)，空行分隔逻辑块，行宽不超过 80 字符，运算符两侧加空格。"
+            },
+            {
+                title: "变量与常量规范",
+                code: `// ✅ 变量使用规范
+
+// 1. 限制全局变量
+// ❌ 不推荐
+int g_data1, g_data2, g_data3, g_counter;
+
+// ✅ 推荐：封装在结构体中
+typedef struct {
+    int data1;
+    int data2;
+    int counter;
+} SystemState;
+SystemState g_system;
+
+// 2. 使用 const 限定只读数据
+const float PI = 3.14159f;
+const int MAX_RETRY = 3;
+const char * const ERROR_MSGS[] = {
+    "OK",
+    "Error",
+    "Timeout"
+};
+
+// 3. 使用 enum 代替魔术数字
+// ❌ 不推荐
+if (state == 0) { ... }
+if (state == 1) { ... }
+
+// ✅ 推荐
+typedef enum {
+    STATE_IDLE = 0,
+    STATE_RUNNING,
+    STATE_ERROR
+} SystemState;
+
+// 4. 变量初始化
+int counter = 0;          // 全局变量显式初始化
+int *ptr = NULL;          // 指针初始化为 NULL
+float buffer[10] = {0};   // 数组清零`,
+                highlight: "const",
+                explanation: "变量规范：限制全局变量使用，优先封装在结构体中；使用 const 限定只读数据；使用 enum 代替魔术数字；变量显式初始化。"
+            },
+            {
+                title: "函数设计规范",
+                code: `// ✅ 函数设计原则
+
+// 1. 单一职责：一个函数只做一件事
+// ❌ 不推荐
+void processAndSaveAndSend(Data *d) {
+    // 50 行代码做三件事
+}
+
+// ✅ 推荐
+void processData(Data *d);
+void saveData(Data *d);
+void sendData(Data *d);
+
+// 2. 函数长度：<50 行
+// 超过 50 行考虑拆分
+
+// 3. 参数数量：≤4 个
+// ❌ 不推荐
+void createWindow(int x, int y, int w, int h,
+                  int color, int style, int flags,
+                  void *parent, char *title);
+
+// ✅ 推荐
+typedef struct {
+    int x, y, w, h;
+    int color, style, flags;
+    void *parent;
+    char *title;
+} WindowConfig;
+void createWindow(WindowConfig *cfg);
+
+// 4. 返回值检查所有错误
+int result = Sensor_Read(&sensor);
+if (result != STATUS_OK) {
+    handleError(result);
+    return result;
+}
+
+// 5. 函数命名：动词 + 名词
+Sensor_readData();     // ✓
+Data_read();           // ✓
+read();                // ✗ 太泛`,
+                highlight: "单一职责",
+                explanation: "函数设计规范：单一职责一个函数只做一件事，函数长度不超过 50 行，参数数量不超过 4 个，检查所有返回值，命名使用动词 + 名词结构。"
+            },
+            {
+                title: "错误处理规范",
+                code: `// ✅ 错误处理规范
+
+// 1. 定义统一错误码
+typedef enum {
+    ERR_OK              = 0,
+    ERR_INVALID_ARG     = -1,
+    ERR_NO_MEMORY       = -2,
+    ERR_TIMEOUT         = -3,
+    ERR_NOT_FOUND       = -4,
+    ERR_HARDWARE        = -5
+} ErrorCode;
+
+// 2. 函数开头验证参数
+int Sensor_Read(Sensor *s, uint8_t *buf, int len) {
+    if (s == NULL) {
+        return ERR_INVALID_ARG;
+    }
+    if (buf == NULL) {
+        return ERR_INVALID_ARG;
+    }
+    if (len <= 0) {
+        return ERR_INVALID_ARG;
+    }
+    // ... 正常逻辑
+}
+
+// 3. 统一错误处理出口
+int process(void) {
+    int ret = ERR_OK;
+
+    ret = step1();
+    if (ret != ERR_OK) goto cleanup;
+
+    ret = step2();
+    if (ret != ERR_OK) goto cleanup;
+
+    ret = step3();
+    // fall through
+
+cleanup:
+    if (ret != ERR_OK) {
+        logError("Process failed: %d", ret);
+    }
+    return ret;
+}
+
+// 4. 记录错误日志
+void logError(const char *fmt, ...) {
+    // 记录错误时间、位置、详情
+}`,
+                highlight: "错误码",
+                explanation: "错误处理规范：定义统一错误码枚举，函数开头验证参数，使用统一错误处理出口 (goto cleanup)，记录详细错误日志便于调试。"
+            },
+            {
+                title: "内存管理规范",
+                code: `// ✅ 内存管理规范
+
+// 1. 嵌入式系统慎用动态分配
+// ❌ 不推荐 (可能碎片/失败)
+void *p = malloc(size);
+
+// ✅ 推荐：静态/栈分配
+static uint8_t buffer[BUFFER_SIZE];
+uint8_t localBuffer[256];
+
+// 2. 必须使用时的规范
+void function(void) {
+    void *p = malloc(size);
+    if (p == NULL) {
+        return ERR_NO_MEMORY;  // 检查返回值
+    }
+    // ... 使用
+    free(p);
+    p = NULL;  // 防止悬空指针
+}
+
+// 3. 配对使用原则
+// malloc ↔ free
+// calloc ↔ free
+// realloc ↔ free
+// 开辟 ↔ 释放
+
+// 4. 避免内存泄漏
+typedef struct {
+    int *data;
+    int size;
+} Buffer;
+
+Buffer* createBuffer(int size) {
+    Buffer *b = calloc(1, sizeof(Buffer));
+    b->data = malloc(size);
+    return b;
+}
+
+void destroyBuffer(Buffer *b) {
+    if (b) {
+        free(b->data);  // 先成员
+        free(b);        // 后容器
+    }
+}
+
+// 5. 栈空间限制
+// 避免大局部变量 (>1KB 用静态/动态)`,
+                highlight: "静态分配",
+                explanation: "嵌入式内存管理规范：慎用动态分配优先静态/栈分配，必须使用时检查返回值并配对释放，避免内存泄漏，局部变量避免过大占用栈空间。"
+            },
+            {
+                title: "安全检查清单",
+                code: `// ✅ 嵌入式 C 安全检查清单
+
+// 编译时检查:
+// □ 开启所有警告 -Wall -Wextra -Werror
+// □ 静态分析工具 (PC-lint, Cppcheck)
+// □ MISRA C 规则检查 (汽车/医疗)
+
+// 代码审查检查:
+// □ 所有指针使用前验证非 NULL
+// □ 数组访问检查边界
+// □ 除法检查除数非零
+// □ 缓冲区检查不溢出
+// □ 中断共享变量用 volatile
+// □ 临界区保护共享数据
+
+// 运行时检查:
+// □ 断言验证前置条件
+// □ 看门狗检测死循环
+// □ 堆栈溢出检测 (canary)
+// □ 内存分配检查返回值
+
+// 文档检查:
+// □ 接口文档完整
+// □ 注释与代码同步
+// □ 版本变更记录
+
+// 测试检查:
+// □ 单元测试覆盖率>80%
+// □ 边界条件测试
+// □ 错误注入测试
+// □ 长时间稳定性测试
+
+// 目标：零警告、零缺陷、零事故`,
+                highlight: "检查清单",
+                explanation: "安全检查清单覆盖编译时、代码审查、运行时、文档和测试五个维度。开启所有警告，使用静态分析工具，验证指针和边界，断言前置条件，测试覆盖率 80% 以上。"
+            }
+        ];
+
+        function App() {
+            const [step, setStep] = React.useState(0);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                speakCurrentStep();
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, []);
+
+            const speakCurrentStep = () => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                }
+
+                const currentExample = CODE_EXAMPLES[step];
+                const explanations = [
+                    "命名规范提高代码可读性。宏定义全大写下划线分隔，类型定义加_t 后缀，函数帕斯卡命名带模块前缀，变量小写或驼峰，全局变量加 g_前缀，静态变量加 s_前缀。",
+                    "注释规范使用 Doxygen 风格。文件头注释包含作者版本日期，函数注释包含参数返回值和前置条件，关键算法说明实现原理，TODO 和 FIXME 标记待办事项。",
+                    "代码排版规范：4 空格缩进不使用 Tab，K&R 风格大括号但函数大括号独占一行，使用空行分隔逻辑块，行宽不超过 80 字符，运算符两侧加空格。",
+                    "变量规范：限制全局变量使用优先封装在结构体中，使用 const 限定只读数据，使用 enum 枚举代替魔术数字，所有变量显式初始化。",
+                    "函数设计规范：单一职责原则一个函数只做一件事，函数长度不超过 50 行，参数数量不超过 4 个，检查所有返回值，命名使用动词加名词结构。",
+                    "错误处理规范：定义统一错误码枚举类型，函数开头验证参数有效性，使用统一错误处理出口，记录详细错误日志便于调试定位问题。",
+                    "嵌入式内存管理规范：慎用动态分配优先静态或栈分配，必须使用时检查返回值并配对释放，避免内存泄漏，局部变量避免过大占用栈空间。",
+                    "安全检查清单覆盖编译时、代码审查、运行时、文档和测试五个维度。开启所有警告使用静态分析工具，验证指针和边界，断言前置条件，测试覆盖率 80% 以上。"
+                ];
+
+                const text = `第${step + 1}步：${currentExample.title}。${explanations[step]}`;
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                const voices = speechSynthesis.getVoices();
+                const xiaoxiaoVoice = voices.find(voice =>
+                    voice.name.includes('Xiaoxiao') ||
+                    voice.name.includes('zh-CN')
+                );
+                if (xiaoxiaoVoice) {
+                    utterance.voice = xiaoxiaoVoice;
+                }
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            React.useEffect(() => {
+                speakCurrentStep();
+            }, [step]);
+
+            const renderCheckList = () => {
+                const items = [
+                    {text: '编译器警告清零', checked: true},
+                    {text: '静态分析通过', checked: true},
+                    {text: '单元测试>80%', checked: true},
+                    {text: '代码审查完成', checked: false},
+                    {text: '文档完整', checked: false}
+                ];
+
+                return (
+                    <div className="p-4 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-slate-800 mb-4">代码质量检查</h4>
+                        <div className="space-y-3">
+                            {items.map((item, i) => (
+                                <div key={i} className="flex items-center gap-3 p-2 bg-white rounded border">
+                                    <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                                        item.checked ? 'bg-green-500' : 'bg-gray-300'
+                                    }`}>
+                                        {item.checked ? (
+                                            <span className="text-white text-sm animate-check">✓</span>
+                                        ) : (
+                                            <span className="text-gray-500 text-sm">□</span>
+                                        )}
+                                    </div>
+                                    <span className={item.checked ? 'text-green-700' : 'text-gray-500'}>
+                                        {item.text}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderCompareTable = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-slate-800 mb-4">命名规范对比</h4>
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b-2 border-slate-300">
+                                    <th className="p-2 text-left">类型</th>
+                                    <th className="p-2">✅ 推荐</th>
+                                    <th className="p-2">❌ 避免</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td className="p-2 font-bold">宏</td>
+                                    <td className="p-2 text-green-600">MAX_SIZE</td>
+                                    <td className="p-2 text-red-600">max_size</td>
+                                </tr>
+                                <tr>
+                                    <td className="p-2 font-bold">函数</td>
+                                    <td className="p-2 text-green-600">Sensor_Read</td>
+                                    <td className="p-2 text-red-600">read</td>
+                                </tr>
+                                <tr>
+                                    <td className="p-2 font-bold">全局变量</td>
+                                    <td className="p-2 text-green-600">g_counter</td>
+                                    <td className="p-2 text-red-600">cnt</td>
+                                </tr>
+                                <tr>
+                                    <td className="p-2 font-bold">静态变量</td>
+                                    <td className="p-2 text-green-600">s_private</td>
+                                    <td className="p-2 text-red-600">p</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-slate-50 via-gray-50 to-blue-50 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="text-center mb-6">
+                            <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-600 to-gray-600 bg-clip-text text-transparent mb-2">
+                                1183 - 嵌入式 C 语言编程规范
+                            </h1>
+                            <p className="text-lg text-gray-700">C 语言核心 - 命名/注释/排版/错误处理/安全检查</p>
+                            <div className="flex justify-center gap-2 mt-4">
+                                <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-sm">命名规范</span>
+                                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">代码排版</span>
+                                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">错误处理</span>
+                                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">安全检查</span>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-slate-500">
+                                    <h3 className="text-xl font-bold text-slate-700 mb-3">代码示例</h3>
+                                    <div className="bg-gray-50 rounded p-3 font-mono text-sm overflow-x-auto">
+                                        <pre className="text-gray-800 whitespace-pre-wrap">
+                                            {CODE_EXAMPLES[step].code}
+                                        </pre>
+                                    </div>
+                                    <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                        <p className="text-sm text-yellow-800">
+                                            <span className="font-bold">亮点:</span> {CODE_EXAMPLES[step].highlight}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-gray-500">
+                                    <h3 className="text-xl font-bold text-gray-700 mb-3">可视化演示</h3>
+                                    {step === 0 && renderCompareTable()}
+                                    {step === 1 && (
+                                        <div className="p-4 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-slate-800 mb-4">注释层次</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-blue-50 rounded border-l-4 border-blue-500">
+                                                    <div className="font-bold text-blue-700">文件头</div>
+                                                    <div className="text-xs text-blue-600">@file @brief @author @version</div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded border-l-4 border-green-500">
+                                                    <div className="font-bold text-green-700">函数注释</div>
+                                                    <div className="text-xs text-green-600">@param @return @note @pre</div>
+                                                </div>
+                                                <div className="p-3 bg-yellow-50 rounded border-l-4 border-yellow-500">
+                                                    <div className="font-bold text-yellow-700">算法注释</div>
+                                                    <div className="text-xs text-yellow-600">原理/公式/步骤</div>
+                                                </div>
+                                                <div className="p-3 bg-red-50 rounded border-l-4 border-red-500">
+                                                    <div className="font-bold text-red-700">TODO/FIXME</div>
+                                                    <div className="text-xs text-red-600">待办/修复标记</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 2 && (
+                                        <div className="p-4 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-slate-800 mb-4">排版示例</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-green-50 rounded">
+                                                    <div className="font-bold text-green-700 mb-1">4 空格缩进</div>
+                                                    <pre className="text-xs bg-white p-2 rounded">if (cond) &#123;
+    doX();
+&#125;</pre>
+                                                </div>
+                                                <div className="p-3 bg-blue-50 rounded">
+                                                    <div className="font-bold text-blue-700 mb-1">K&R 大括号</div>
+                                                    <pre className="text-xs bg-white p-2 rounded">if (cond) &#123;
+    // ...
+&#125;</pre>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded">
+                                                    <div className="font-bold text-purple-700 mb-1">运算符空格</div>
+                                                    <pre className="text-xs bg-white p-2 rounded">x = a + b * c;</pre>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 3 && (
+                                        <div className="p-4 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-slate-800 mb-4">变量分类</h4>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="p-3 bg-blue-50 rounded">
+                                                    <div className="font-bold text-blue-700">全局 g_</div>
+                                                    <div className="text-xs font-mono">g_counter</div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded">
+                                                    <div className="font-bold text-green-700">静态 s_</div>
+                                                    <div className="text-xs font-mono">s_private</div>
+                                                </div>
+                                                <div className="p-3 bg-yellow-50 rounded">
+                                                    <div className="font-bold text-yellow-700">常量 k</div>
+                                                    <div className="text-xs font-mono">kMaxSize</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded">
+                                                    <div className="font-bold text-purple-700">const</div>
+                                                    <div className="text-xs font-mono">const int MAX</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 4 && (
+                                        <div className="p-4 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-slate-800 mb-4">函数设计原则</h4>
+                                            <div className="space-y-2">
+                                                <div className="p-3 bg-green-50 rounded">
+                                                    <div className="font-bold text-green-700">单一职责</div>
+                                                    <div className="text-xs text-green-600">一个函数一件事</div>
+                                                </div>
+                                                <div className="p-3 bg-blue-50 rounded">
+                                                    <div className="font-bold text-blue-700">长度限制</div>
+                                                    <div className="text-xs text-blue-600">&lt; 50 行</div>
+                                                </div>
+                                                <div className="p-3 bg-yellow-50 rounded">
+                                                    <div className="font-bold text-yellow-700">参数限制</div>
+                                                    <div className="text-xs text-yellow-600">≤ 4 个参数</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded">
+                                                    <div className="font-bold text-purple-700">检查返回值</div>
+                                                    <div className="text-xs text-purple-600">所有调用检查错误</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 5 && (
+                                        <div className="p-4 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-slate-800 mb-4">错误码定义</h4>
+                                            <div className="space-y-2">
+                                                {[
+                                                    {code: 'ERR_OK', value: 0, color: 'bg-green-100'},
+                                                    {code: 'ERR_INVALID_ARG', value: -1, color: 'bg-yellow-100'},
+                                                    {code: 'ERR_NO_MEMORY', value: -2, color: 'bg-orange-100'},
+                                                    {code: 'ERR_TIMEOUT', value: -3, color: 'bg-red-100'},
+                                                    {code: 'ERR_NOT_FOUND', value: -4, color: 'bg-purple-100'}
+                                                ].map((item, i) => (
+                                                    <div key={i} className={`p-2 ${item.color} rounded flex justify-between items-center`}>
+                                                        <span className="font-mono text-xs font-bold">{item.code}</span>
+                                                        <span className="text-xs">{item.value}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 6 && (
+                                        <div className="p-4 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-slate-800 mb-4">内存分配对比</h4>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="p-3 bg-green-50 rounded border-2 border-green-300">
+                                                    <h5 className="font-bold text-green-700 mb-2">✅ 静态</h5>
+                                                    <pre className="text-xs bg-white p-2 rounded">static uint8_t buf[256];</pre>
+                                                    <div className="text-xs text-green-600 mt-2">无碎片，可预测</div>
+                                                </div>
+                                                <div className="p-3 bg-red-50 rounded border-2 border-red-300">
+                                                    <h5 className="font-bold text-red-700 mb-2">⚠️ 动态</h5>
+                                                    <pre className="text-xs bg-white p-2 rounded">malloc(size);</pre>
+                                                    <div className="text-xs text-red-600 mt-2">可能碎片/失败</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 7 && renderCheckList()}
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-blue-500">
+                                    <h3 className="text-xl font-bold text-blue-700 mb-3">关键要点</h3>
+                                    <div className="space-y-3">
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 0 ? 'bg-slate-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-slate-600">命名:</span> 语义化前缀
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 1 ? 'bg-gray-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-gray-600">注释:</span> Doxygen 风格
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 2 ? 'bg-blue-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-blue-600">排版:</span> 4 空格缩进
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 3 ? 'bg-green-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-green-600">变量:</span> 限制全局
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 4 ? 'bg-yellow-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-yellow-600">函数:</span> 单一职责
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 5 ? 'bg-purple-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-purple-600">错误:</span> 统一码
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 6 ? 'bg-pink-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-pink-600">内存:</span> 优先静态
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 7 ? 'bg-teal-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-teal-600">检查:</span> 5 维度
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 p-3 bg-blue-50 rounded border border-blue-200">
+                                        <p className="text-sm text-blue-800">
+                                            {CODE_EXAMPLES[step].explanation}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-r from-slate-500 to-gray-600 rounded-lg shadow-lg p-4 text-white">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm">进度</span>
+                                        <span className="text-sm font-bold">{step + 1} / {CODE_EXAMPLES.length}</span>
+                                    </div>
+                                    <div className="w-full bg-white bg-opacity-30 rounded-full h-2">
+                                        <div
+                                            className="bg-white rounded-full h-2 transition-all duration-500"
+                                            style={{ width: `${((step + 1) / CODE_EXAMPLES.length) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <footer className="text-center mt-8 text-gray-600">
+                            <p className="text-sm">C 语言核心 · 嵌入式 C 语言编程规范 · 高质量代码基础</p>
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

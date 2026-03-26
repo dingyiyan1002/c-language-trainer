@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1208 - RNG 随机数发生器完整指南 - 嵌入式 C 语言可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(139, 92, 246, 0.2); } 50% { background-color: rgba(139, 92, 246, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes danger { 0%, 100% { background-color: rgba(239, 68, 68, 0.3); } 50% { background-color: rgba(239, 68, 68, 0.6); } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes generate { 0% { transform: scale(1); filter: hue-rotate(0deg); } 50% { transform: scale(1.1); filter: hue-rotate(90deg); } 100% { transform: scale(1); filter: hue-rotate(0deg); } }
+        @keyframes noise { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+        @keyframes shuffle { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .flow { animation: flow 2s infinite; }
+        .highlight { animation: highlight 2s infinite; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .countdown { animation: countdown 0.3s ease-out; }
+        .danger { animation: danger 1s infinite; }
+        .reset { animation: reset 1s linear; }
+        .generate { animation: generate 1s infinite; }
+        .noise { animation: noise 0.5s infinite; }
+        .shuffle { animation: shuffle 2s linear infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // 颜色主题：紫色/粉色渐变 (RNG 随机)
+        const COLOR_MAP = {
+            primary: '#8b5cf6',
+            secondary: '#ec4899',
+            accent: '#a78bfa',
+            highlight: '#c4b5fd',
+            danger: '#ef4444',
+            success: '#10b981'
+        };
+
+        const STEPS = [
+            {
+                title: "RNG 随机数发生器基础",
+                code: `// RNG - Random Number Generator
+// 真随机数发生器基于物理噪声源
+
+// STM32 RNG 模块特性:
+// - 基于模拟噪声源 (PLL 抖动)
+// - 符合 NIST 随机性测试标准
+// - 32 位随机数输出
+// - 硬件错误检测 (噪声源失效)
+
+// RNG 工作原理:
+// 1. 模拟噪声源产生随机信号
+// 2. 经过调理电路整形
+// 3. 采样保持电路采集
+// 4. 32 位移位寄存器输出
+
+// 应用领域:
+// - 加密算法密钥生成
+// - 通信协议序列号
+// - 测试数据生成
+// - 加扰/解扰操作`,
+                description: "RNG 是基于物理噪声源的真随机数发生器，不同于软件伪随机数生成器 (PRNG)。STM32 的 RNG 模块使用内部 PLL 抖动作为噪声源，经过调理和采样后产生 32 位随机数。RNG 输出通过 NIST 随机性测试，可用于加密应用。RNG 还包含错误检测功能，当噪声源失效时产生错误标志。",
+                highlight: "RNG 是真随机数，基于物理噪声源，不可预测"
+            },
+            {
+                title: "RNG 寄存器配置",
+                code: `// RNG 关键寄存器:
+// RNG_CR    - 控制寄存器
+// RNG_SR    - 状态寄存器
+// RNG_DR    - 数据寄存器 (32 位)
+// RNG_HTCR  - 健康测试控制 (H7 系列)
+
+// 启用 RNG 外设
+void RNG_Enable(void) {
+    // 1. 启用 RNG 时钟
+    RCC->AHB2ENR |= RCC_AHB2ENR_RNGEN;
+
+    // 2. 复位 RNG 模块
+    RCC->AHB2RSTR |= RCC_AHB2RSTR_RNGRST;
+    RCC->AHB2RSTR &= ~RCC_AHB2RSTR_RNGRST;
+
+    // 3. 启用 RNG
+    RNG->CR |= RNG_CR_RNGEN;
+
+    // 4. 等待就绪
+    while(!(RNG->SR & RNG_SR_DRDY));
+}
+
+// 禁用 RNG
+void RNG_Disable(void) {
+    RNG->CR &= ~RNG_CR_RNGEN;
+    RCC->AHB2ENR &= ~RCC_AHB2ENR_RNGEN;
+}
+
+// 状态标志:
+// DRDY - 数据就绪
+// CECS - 时钟错误
+// SECS - 种子错误
+// CEIS - 时钟错误中断
+// SEIS - 种子错误中断`,
+                description: "RNG 配置步骤：启用时钟→复位模块→启动 RNG→等待就绪。状态寄存器 SR 包含 DRDY(数据就绪)、CECS(时钟错误)、SECS(种子错误) 等标志。新型号 STM32(H7/G4) 还支持健康测试控制寄存器 HTCR，用于连续监测噪声源质量。时钟错误和种子错误会触发中断。",
+                highlight: "读取 RNG_DR 前必须检查 DRDY 位，否则读到无效数据"
+            },
+            {
+                title: "生成随机数",
+                code: `// 生成单个随机数
+uint32_t RNG_GetRandom(void) {
+    // 等待数据就绪
+    while(!(RNG->SR & RNG_SR_DRDY));
+
+    // 检查错误标志
+    if(RNG->SR & (RNG_SR_CECS | RNG_SR_SECS)) {
+        RNG->CR |= RNG_CR_IE;  // 清除错误
+        return 0;  // 错误，返回 0
+    }
+
+    // 读取随机数 (读取自动清除 DRDY)
+    return RNG->DR;
+}
+
+// 生成随机数数组
+void RNG_GetRandomArray(uint32_t *buffer, uint32_t count) {
+    for(uint32_t i = 0; i < count; i++) {
+        buffer[i] = RNG_GetRandom();
+    }
+}
+
+// 生成范围内随机数
+uint32_t RNG_Range(uint32_t min, uint32_t max) {
+    uint32_t range = max - min + 1;
+    uint32_t random = RNG_GetRandom();
+    return min + (random % range);
+}
+
+// 使用示例
+uint32_t rand_val = RNG_GetRandom();
+uint32_t rand_0_99 = RNG_Range(0, 99);
+uint32_t rand_1_100 = RNG_Range(1, 100);`,
+                description: "生成随机数前先等待 DRDY 位置位，然后检查错误标志。读取 RNG_DR 寄存器会自动清除 DRDY 位，触发下一次随机数生成。生成数组时循环调用即可。RNG_Range 函数利用取模运算生成指定范围内的随机数，但要注意取模会引入轻微偏差 (对于大范围影响很小)。",
+                highlight: "读取 RNG_DR 后 DRDY 自动清除，无需手动清除"
+            },
+            {
+                title: "RNG 中断处理",
+                code: `// RNG 中断配置
+void RNG_Interrupt_Config(void) {
+    // 启用错误中断
+    RNG->CR |= RNG_CR_IE;
+
+    // 配置 NVIC
+    NVIC_SetPriority(RNG_IRQn, 2);
+    NVIC_EnableIRQ(RNG_IRQn);
+}
+
+// RNG 中断服务程序
+void RNG_IRQHandler(void) {
+    uint32_t sr = RNG->SR;
+
+    // 时钟错误
+    if(sr & RNG_SR_CECS) {
+        RNG->CR |= RNG_CR_IE;  // 清除标志
+        // 处理：检查时钟配置，切换到备用 RNG
+    }
+
+    // 种子错误 (噪声源质量不足)
+    if(sr & RNG_SR_SECS) {
+        RNG->CR |= RNG_CR_IE;  // 清除标志
+        // 处理：重新校准，记录错误日志
+    }
+
+    // 某些型号支持数据就绪中断
+    // if(sr & RNG_SR_DRDY) { ... }
+}
+
+// 错误恢复
+void RNG_Recover(void) {
+    // 1. 禁用 RNG
+    RNG->CR &= ~RNG_CR_RNGEN;
+
+    // 2. 复位
+    RCC->AHB2RSTR |= RCC_AHB2RSTR_RNGRST;
+
+    // 3. 重新启用
+    RCC->AHB2RSTR &= ~RCC_AHB2RSTR_RNGRST;
+    RNG->CR |= RNG_CR_RNGEN;
+}`,
+                description: "RNG 中断主要用于错误处理，包括时钟错误和种子错误。时钟错误可能是外部晶振失效导致，种子错误表示噪声源质量不足。中断服务程序需要清除错误标志，并执行恢复操作。严重错误可能需要禁用 RNG 并切换到软件伪随机数生成器作为备用方案。",
+                highlight: "RNG 错误时应切换到软件 PRNG 备用，保证系统继续运行"
+            },
+            {
+                title: "随机数质量检测",
+                code: `// 随机数质量测试
+// 1. 单比特测试 (0 和 1 的比例)
+int SingleBitTest(uint32_t *data, uint32_t count) {
+    uint32_t ones = 0, total = count * 32;
+    for(uint32_t i = 0; i < count; i++) {
+        uint32_t n = data[i];
+        for(int j = 0; j < 32; j++) {
+            if(n & (1 << j)) ones++;
+        }
+    }
+    // NIST 要求：44.6% - 55.4%
+    float ratio = (float)ones / total;
+    return (ratio >= 0.446 && ratio <= 0.554) ? 1 : 0;
+}
+
+// 2. 游程测试 (连续相同比特)
+int RunsTest(uint32_t *data, uint32_t count);
+
+// 3. 自相关测试
+int AutocorrTest(uint32_t *data, uint32_t count);
+
+// 4. 熵值计算
+float CalculateEntropy(uint32_t *data, uint32_t count) {
+    uint32_t histogram[256] = {0};
+    for(uint32_t i = 0; i < count * 4; i++) {
+        histogram[((uint8_t*)data)[i]]++;
+    }
+    float entropy = 0;
+    for(int i = 0; i < 256; i++) {
+        float p = (float)histogram[i] / (count * 4);
+        if(p > 0) entropy -= p * log2f(p);
+    }
+    return entropy;  // 理想值：8.0
+}
+
+// 健康测试 (H7 系列内置)
+// RNG->HTCR 配置测试阈值`,
+                description: "随机数质量需要统计测试验证。NIST 定义了多项测试标准：单比特测试 (0/1 比例应在 44.6%-55.4%)、游程测试 (连续相同比特的分布)、自相关测试 (比特间的独立性)、熵值计算 (理想熵值为 8.0 比特/字节)。STM32H7 等新型号内置健康测试功能，可实时监测随机数质量。",
+                highlight: "加密应用必须定期测试 RNG 质量，符合 FIPS 140-2 标准"
+            },
+            {
+                title: "加密密钥生成应用",
+                code: `// AES 密钥生成 (128 位)
+#include <stdint.h>
+#include <string.h>
+
+typedef struct {
+    uint32_t key[4];  // 128 位 = 4×32 位
+} AES128_Key;
+
+// 生成 AES 密钥
+void AES128_GenerateKey(AES128_Key *key) {
+    for(int i = 0; i < 4; i++) {
+        key->key[i] = RNG_GetRandom();
+    }
+}
+
+// AES-256 密钥 (256 位)
+typedef struct {
+    uint32_t key[8];  // 256 位 = 8×32 位
+} AES256_Key;
+
+void AES256_GenerateKey(AES256_Key *key) {
+    for(int i = 0; i < 8; i++) {
+        key->key[i] = RNG_GetRandom();
+    }
+}
+
+// 生成 IV(初始化向量)
+void GenerateIV(uint8_t *iv, uint32_t len) {
+    for(uint32_t i = 0; i < len; i++) {
+        iv[i] = RNG_GetRandom() & 0xFF;
+    }
+}
+
+// 使用示例
+AES128_Key aes_key;
+AES128_GenerateKey(&aes_key);
+// 现在 aes_key 包含 128 位真随机密钥`,
+                description: "加密系统的安全性依赖于密钥的随机性。RNG 生成的真随机数非常适合用于 AES、DES 等加密算法的密钥生成。128 位 AES 密钥需要 4 个 32 位随机数，256 位 AES 需要 8 个。IV(初始化向量) 同样需要随机生成，用于 CBC 等加密模式。密钥生成后应安全存储，避免泄露。",
+                highlight: "加密密钥必须使用真随机数，伪随机数可被预测导致安全问题"
+            },
+            {
+                title: "软件 PRNG 种子",
+                code: `// 使用 RNG 为软件 PRNG 提供种子
+// 伪随机数生成器 (PRNG) 需要初始种子
+
+// 简单 LCG(线性同余) 生成器
+static uint32_t prng_state;
+
+void PRNG_Seed(void) {
+    prng_state = RNG_GetRandom();  // 真随机种子
+}
+
+uint32_t PRNG_Next(void) {
+    // LCG 公式：next = (a × current + c) mod m
+    prng_state = prng_state * 1103515245 + 12345;
+    return prng_state;
+}
+
+// 生成范围内随机数 (无偏差)
+uint32_t PRNG_Range(uint32_t min, uint32_t max) {
+    uint32_t range = max - min + 1;
+    uint32_t threshold = (UINT32_MAX - range + 1) % range;
+
+    uint32_t random;
+    do {
+        random = PRNG_Next();
+    } while(random < threshold);  // 避免偏差
+
+    return min + (random % range);
+}
+
+// 使用场景:
+// - 测试数据生成 (不需要加密安全)
+// - 游戏随机事件
+// - 仿真模拟
+// PRNG 比 RNG 快 10 倍，但需要真随机种子`,
+                description: "PRNG(伪随机数生成器) 基于算法产生看似随机的序列，但给定相同种子会产生相同序列。PRNG 速度快 (比 RNG 快 10 倍)，适合大量随机数需求。关键是用真随机数作为种子，否则整个序列可被预测。LCG 是最简单的 PRNG，更好的选择是 xorshift 或 PCG 算法。",
+                highlight: "PRNG 必须用真随机数播种，否则整个序列可被预测"
+            },
+            {
+                title: "RNG 与 TRNG 对比",
+                code: `// 随机数生成器类型对比
+
+// 1. TRNG (True RNG) - 硬件真随机
+// 来源：物理噪声源 (热噪声、PLL 抖动)
+// 特点：不可预测、非确定性、速度较慢
+// 应用：密钥生成、加密、安全协议
+uint32_t TRNG_Get(void) {
+    while(!(RNG->SR & RNG_SR_DRDY));
+    return RNG->DR;
+}
+
+// 2. PRNG (Pseudo RNG) - 软件伪随机
+// 来源：数学算法 (LCG、xorshift、Mersenne Twister)
+// 特点：可预测 (给定种子)、确定性、速度极快
+// 应用：仿真、游戏、测试数据
+static uint32_t seed = 1;
+uint32_t PRNG_Get(void) {
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    return seed;
+}
+
+// 3. CSPRNG (Cryptographic Secure PRNG)
+// 结合 TRNG 和 PRNG，兼顾安全性和速度
+// 定期用 TRNG 重新播种 PRNG
+void CSPRNG_Reseed(void) {
+    seed = TRNG_Get();  // 定期重新播种
+}
+
+// 最佳实践:
+// - 加密应用：使用 TRNG 或 CSPRNG
+// - 普通应用：PRNG(用 TRNG 播种)
+// - 高性能：PRNG + 定期 TRNG 播种`,
+                description: "TRNG 基于物理过程产生真随机数，不可预测但速度较慢。PRNG 基于算法，速度快但可预测。CSPRNG 结合两者优点：用 TRNG 定期重新播种 PRNG，既保证安全性又提高性能。加密应用应使用 TRNG 或 CSPRNG，而仿真、游戏等可用 PRNG(但必须用真随机数播种)。",
+                highlight: "加密安全必须用 TRNG 或 CSPRNG，普通 PRNG 可被攻击者预测"
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [showCode, setShowCode] = useState(true);
+            const [randomValue, setRandomValue] = useState(0);
+            const voiceEndTimerRef = useRef(null);
+
+            // 模拟随机数生成
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    if (isPlaying) {
+                        setRandomValue(Math.floor(Math.random() * 0xFFFFFFFF));
+                    }
+                }, 500);
+                return () => clearInterval(interval);
+            }, [isPlaying]);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v =>
+                        v.lang === 'zh-CN' ||
+                        v.lang === 'zh-CN-XiaoxiaoNeural' ||
+                        v.lang.includes('Chinese')
+                    );
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.description + "。" + step.highlight);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep]);
+
+            // RNG 内部结构可视化
+            const RNGStructure = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-3">RNG 内部结构</h3>
+
+                        {/* 噪声源 */}
+                        <div className="mb-3 p-2 bg-gray-900 rounded">
+                            <div className="text-xs text-gray-400 mb-2">模拟噪声源</div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-12 h-12 rounded-full bg-purple-500 noise flex items-center justify-center">
+                                    <span className="text-xs">噪声</span>
+                                </div>
+                                <div className="text-xs text-gray-400">→</div>
+                                <div className="w-12 h-8 rounded bg-blue-500 flex items-center justify-center">
+                                    <span className="text-xs">调理</span>
+                                </div>
+                                <div className="text-xs text-gray-400">→</div>
+                                <div className="w-12 h-8 rounded bg-green-500 flex items-center justify-center">
+                                    <span className="text-xs">采样</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 移位寄存器 */}
+                        <div className="mb-3">
+                            <div className="text-xs text-gray-400 mb-1">32 位移位寄存器</div>
+                            <div className="flex gap-0.5">
+                                {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+                                    <div key={i} className="flex-1 grid grid-cols-4 gap-0.5">
+                                        {[0, 1, 2, 3].map((j) => (
+                                            <div key={j} className={`h-4 rounded ${
+                                                currentStep >= 2 ? 'bg-purple-500 pulse' : 'bg-gray-600'
+                                            }`}></div>
+                                        ))}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 输出 */}
+                        <div className="p-2 bg-purple-900/30 rounded border border-purple-500/50">
+                            <div className="text-xs text-purple-300 text-center">
+                                随机输出：0x{randomValue.toString(16).toUpperCase().padStart(8, '0')}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // 随机数质量测试可视化
+            const QualityTest = () => {
+                const tests = [
+                    { name: '单比特测试', pass: currentStep >= 4, value: '49.8%' },
+                    { name: '游程测试', pass: currentStep >= 4, value: 'PASS' },
+                    { name: '自相关测试', pass: currentStep >= 4, value: 'PASS' },
+                    { name: '熵值测试', pass: currentStep >= 4, value: '7.998' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-3">随机数质量测试</h3>
+                        <div className="space-y-2">
+                            {tests.map((t, i) => (
+                                <div key={i} className="flex items-center justify-between text-xs">
+                                    <span>{t.name}</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-400">{t.value}</span>
+                                        <span className={t.pass ? 'text-green-400' : 'text-gray-500'}>
+                                            {t.pass ? '✓' : '○'}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // TRNG vs PRNG 对比
+            const TRNGvsPRNG = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-pink-400 mb-3">TRNG vs PRNG</h3>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="p-2 bg-purple-900/50 rounded">
+                                <div className="font-bold text-purple-400 mb-1">TRNG</div>
+                                <div className="text-gray-400">真随机</div>
+                                <div className="text-gray-400">不可预测</div>
+                                <div className="text-gray-400">较慢</div>
+                                <div className="text-green-400 mt-1">✓ 加密安全</div>
+                            </div>
+                            <div className="p-2 bg-pink-900/50 rounded">
+                                <div className="font-bold text-pink-400 mb-1">PRNG</div>
+                                <div className="text-gray-400">伪随机</div>
+                                <div className="text-gray-400">可预测</div>
+                                <div className="text-gray-400">极快</div>
+                                <div className="text-yellow-400 mt-1">⚠ 需真种子</div>
+                            </div>
+                        </div>
+
+                        {/* 生成动画 */}
+                        <div className="mt-3 flex justify-around">
+                            <div className="text-center">
+                                <div className="text-xs text-gray-400 mb-1">TRNG</div>
+                                <div className="w-16 h-8 bg-purple-500 rounded generate flex items-center justify-center text-xs">
+                                    {Math.floor(Math.random() * 255)}
+                                </div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-xs text-gray-400 mb-1">PRNG</div>
+                                <div className="w-16 h-8 bg-pink-500 rounded flex items-center justify-center text-xs">
+                                    {(randomValue % 255)}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // 密钥生成可视化
+            const KeyGeneration = () => {
+                const keyBytes = [];
+                for (let i = 0; i < 16; i++) {
+                    keyBytes.push(Math.floor(Math.random() * 255));
+                }
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-blue-400 mb-3">AES-128 密钥生成</h3>
+                        <div className="grid grid-cols-8 gap-1">
+                            {keyBytes.map((b, i) => (
+                                <div key={i} className={`aspect-square rounded flex items-center justify-center text-xs font-mono ${
+                                    currentStep >= 5 ? 'bg-blue-500 generate' : 'bg-gray-600'
+                                }`}>
+                                    {currentStep >= 5 ? b.toString(16).toUpperCase().padStart(2, '0') : '?'}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-400 text-center">
+                            128 位 = 16 字节 = 4×32 位随机数
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    {/* 头部 */}
+                    <div className="max-w-7xl mx-auto mb-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-purple-400">
+                                1208 - RNG 随机数发生器完整指南
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">
+                                    {isPlaying ? '暂停' : '播放'}
+                                </button>
+                                <button onClick={() => setShowCode(!showCode)} className="px-3 py-1 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                    {showCode ? '隐藏代码' : '显示代码'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div className="flex gap-1 mb-4">
+                            {STEPS.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentStep(i)}
+                                    className={`flex-1 h-2 rounded transition-all ${
+                                        i === currentStep ? 'bg-purple-500 scale-110' :
+                                        i < currentStep ? 'bg-purple-700' : 'bg-gray-600'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 主内容区 - 三列布局 */}
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* 左列：代码 */}
+                        {showCode && (
+                            <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                                <h2 className="text-sm font-bold text-purple-400 mb-2">
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap bg-gray-900 p-3 rounded">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        )}
+
+                        {/* 中列：可视化动画 */}
+                        <div className={`${showCode ? 'col-span-1' : 'col-span-2'} space-y-4`}>
+                            <RNGStructure />
+                            <div className="grid grid-cols-2 gap-4">
+                                {currentStep >= 4 ? <QualityTest /> : <TRNGvsPRNG />}
+                                {currentStep >= 5 ? <KeyGeneration /> : <div className="bg-gray-800 rounded-lg p-4"><h3 className="text-sm font-bold text-gray-400 mb-2">等待下一步...</h3></div>}
+                            </div>
+                        </div>
+
+                        {/* 右列：说明 */}
+                        <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                            <h3 className="text-sm font-bold text-blue-400 mb-2">说明</h3>
+                            <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                                {STEPS[currentStep].description}
+                            </p>
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2">
+                                <p className="text-xs text-yellow-300">
+                                    <span className="font-bold">💡 重点:</span> {STEPS[currentStep].highlight}
+                                </p>
+                            </div>
+
+                            {/* 导航按钮 */}
+                            <div className="flex gap-2 mt-4">
+                                <button
+                                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                                    disabled={currentStep === 0}
+                                    className="flex-1 py-2 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 text-xs"
+                                >
+                                    ← 上一步
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+                                    disabled={currentStep === STEPS.length - 1}
+                                    className="flex-1 py-2 bg-purple-600 rounded hover:bg-purple-500 disabled:opacity-50 text-xs"
+                                >
+                                    下一步 →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部摘要 */}
+                    <div className="max-w-7xl mx-auto mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-2">RNG 随机数核心要点</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-purple-400 font-bold">物理噪声</span>
+                                <p className="text-gray-400 mt-1">真随机不可预测</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-green-400 font-bold">错误检测</span>
+                                <p className="text-gray-400 mt-1">时钟/种子错误中断</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-blue-400 font-bold">密钥生成</span>
+                                <p className="text-gray-400 mt-1">加密应用必备</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-pink-400 font-bold">PRNG 种子</span>
+                                <p className="text-gray-400 mt-1">高性能伪随机</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 ADC 高级应用完整指南 - 1256</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes scan { 0% { transform: translateX(0); } 100% { transform: translateX(400px); } }
+        @keyframes sample { 0%, 100% { transform: scaleY(0.5); } 50% { transform: scaleY(1); } }
+        @keyframes flow { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+        .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+        .animate-scan { animation: scan 2s linear infinite; }
+        .animate-sample { animation: sample 0.5s ease-in-out infinite; }
+        .animate-flow { animation: flow 2s linear infinite; background-size: 200% 200%; }
+        .gradient-theme { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 50%, #6d28d9 100%); }
+        .code-bg { background: #1e293b; }
+        .signal-high { background: linear-gradient(90deg, #10b981, #059669); }
+        .signal-low { background: #374151; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#8b5cf6', secondary: '#7c3aed', accent: '#a78bfa',
+            highlight: '#c4b5fd', signal: '#10b981', low: '#6b7280'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [adcValue, setAdcValue] = React.useState(2048);
+            const [channel, setChannel] = React.useState(0);
+            const [injectMode, setInjectMode] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const steps = [
+                {
+                    title: "ADC 基础架构",
+                    narration: "STM32 内置 12 位 SAR ADC，逐次逼近型转换，最高 1MSPS 采样率。多通道 multiplexer，18 个外部通道加 2 个内部通道。支持单次转换、连续转换、扫描模式。",
+                    code: `// ADC 基本原理
+// 12 位分辨率：0-4095 对应 0-Vref
+// 转换时间 = 采样时间 + 12.5 个周期
+
+// ADC 特性:
+// - 12 位 SAR 逐次逼近
+// - 最高 1MSPS 采样率
+// - 18 个外部通道 +2 个内部
+// - 单次/连续/扫描模式
+// - 中断/DMA 传输
+// - 模拟看门狗
+
+// 转换公式:
+// 电压 = (ADC 值 / 4095) * Vref`,
+                    visual: "adc_arch"
+                },
+                {
+                    title: "ADC 初始化配置",
+                    narration: "配置 ADC 需要使能时钟、配置 GPIO 为模拟输入、设置预分频、配置采样时间、校准 ADC。独立模式使用 ADC1，扫描模式需要配置通道顺序。",
+                    code: `// ADC 初始化配置
+void ADC_Init(void) {
+    // 1. 使能时钟
+    RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    // 2. 配置 PA1 为模拟输入
+    GPIOA->CRL &= ~GPIO_CRL_CNF1;
+    GPIOA->CRL &= ~GPIO_CRL_MODE1;
+
+    // 3. ADC 预分频 (72MHz/6=12MHz)
+    RCC->CFGR |= RCC_CFGR_ADCPRE_1;
+
+    // 4. ADC 配置：连续转换，右对齐
+    ADC1->CR2 |= ADC_CR2_CONT | ADC_CR2_ALIGN;
+
+    // 5. 采样时间：55.5 周期
+    ADC1->SMPR2 = (6 << ADC_SMPR2_SMP1_Pos);
+
+    // 6. 规则通道：通道 1
+    ADC1->SQR3 = (1 << ADC_SQR3_SQ1_Pos);
+
+    // 7. 校准
+    ADC1->CR2 |= ADC_CR2_RSTCAL;
+    while (ADC1->CR2 & ADC_CR2_RSTCAL);
+    ADC1->CR2 |= ADC_CR2_CAL;
+    while (ADC1->CR2 & ADC_CR2_CAL);
+
+    // 8. 启动 ADC
+    ADC1->CR2 |= ADC_CR2_ADON;
+}`,
+                    visual: "adc_init"
+                },
+                {
+                    title: "注入通道应用",
+                    narration: "注入通道可打断规则通道转换，用于高优先级测量。4 个注入通道，独立数据寄存器。用于过流保护、温度监测等需要快速响应的场景。",
+                    code: `// 注入通道配置
+void ADC_Injected_Init(void) {
+    // 注入通道 1：通道 2 (过流检测)
+    ADC1->JSQR = (2 << ADC_JSQR_JSQ1_Pos);
+
+    // 注入通道采样时间：13.5 周期 (更快)
+    ADC1->SMPR1 = (1 << ADC_SMPR1_SMP17_Pos);
+
+    // 使能注入通道中断
+    ADC1->CR1 |= ADC_CR1_JEOCIE;
+
+    // 外部触发：TIM1 TRGO
+    ADC1->CR2 |= (1 << ADC_CR2_JEXTSEL_Pos);
+    ADC1->CR2 |= ADC_CR2_JEXTEN;
+}
+
+// 注入通道中断服务
+void ADC1_2_IRQHandler(void) {
+    if (ADC1->SR & ADC_SR_JEOC) {
+        ADC1->SR &= ~ADC_SR_JEOC;
+        int16_t injected = ADC1->JDR1;
+        // 过流保护逻辑
+        if (injected > 3500) {
+            Emergency_Shutdown();
+        }
+    }
+}`,
+                    visual: "injected_channel"
+                },
+                {
+                    title: "模拟看门狗",
+                    narration: "模拟看门狗监测通道值是否超出阈值，超出时触发中断。用于过压、欠压、过流保护。高阈值和低阈值可独立设置，响应速度快。",
+                    code: `// 模拟看门狗配置
+void ADC_AnalogWatchdog_Init(void) {
+    // 监测通道 1
+    ADC1->CR1 |= (1 << ADC_CR1_AWDCH_Pos);
+
+    // 使能看门狗
+    ADC1->CR1 |= ADC_CR1_AWDEN;
+
+    // 高阈值：3.0V (3.0/3.3 * 4095 = 3723)
+    ADC1->HTR = 3723;
+
+    // 低阈值：0.3V (0.3/3.3 * 4095 = 372)
+    ADC1->LTR = 372;
+
+    // 使能中断
+    ADC1->CR1 |= ADC_CR1_AWDIE;
+}
+
+// 看门狗中断服务
+void ADC1_2_IRQHandler(void) {
+    if (ADC1->SR & ADC_SR_AWD) {
+        ADC1->SR &= ~ADC_SR_AWD;
+        uint16_t value = ADC1->DR;
+        if (value > 3723) {
+            OverVoltage_Protect();
+        } else if (value < 372) {
+            UnderVoltage_Protect();
+        }
+    }
+}`,
+                    visual: "analog_watchdog"
+                },
+                {
+                    title: "多通道扫描",
+                    narration: "扫描模式自动按顺序转换多个通道，配合 DMA 实现连续采集。需要配置通道数量、转换顺序、DMA 使能。适用于多传感器数据采集。",
+                    code: `// 多通道扫描 +DMA 配置
+void ADC_MultiChannel_DMA_Init(void) {
+    // 1. 使能 DMA 时钟
+    RCC->AHBENR |= RCC_AHBENR_DMA1EN;
+
+    // 2. 配置 DMA 通道 1
+    DMA1_Channel1->CPAR = (uint32_t)&ADC1->DR;
+    DMA1_Channel1->CMAR = (uint32_t)adc_buffer;
+    DMA1_Channel1->CNDTR = 4;  // 4 个通道
+    DMA1_Channel1->CCR = DMA_CCR1_TE | DMA_CCR1_HTIE |
+                         DMA_CCR1_CIRC | DMA_CCR1_DIR;
+
+    // 3. ADC 扫描模式
+    ADC1->CR1 |= ADC_CR1_SCAN;
+
+    // 4. 配置 4 个通道 (0,1,2,3)
+    ADC1->SQR3 = (0 << ADC_SQR3_SQ1_Pos) |
+                 (1 << ADC_SQR3_SQ2_Pos) |
+                 (2 << ADC_SQR3_SQ3_Pos) |
+                 (3 << ADC_SQR3_SQ4_Pos);
+    ADC1->SQR1 = (3 << ADC_SQR1_L_Pos);  // 4 个转换
+
+    // 5. ADC->DMA 请求
+    ADC1->CR2 |= ADC_CR2_DMA;
+
+    // 6. 启动 DMA 和 ADC
+    DMA1_Channel1->CCR |= DMA_CCR1_EN;
+    ADC1->CR2 |= ADC_CR2_ADON | ADC_CR2_CONT;
+}
+
+uint16_t adc_buffer[4];  // DMA 缓冲区`,
+                    visual: "multi_channel"
+                },
+                {
+                    title: "过采样技术",
+                    narration: "过采样通过多次采样求平均提高有效分辨率。16 次平均增加 2 位，256 次增加 4 位。用于高精度测量场合，如精密传感器、电池电压监测。",
+                    code: `// 过采样提高分辨率
+#define OVERSAMPLE_COUNT 256
+
+uint32_t ADC_Oversample(void) {
+    uint32_t sum = 0;
+    for (int i = 0; i < OVERSAMPLE_COUNT; i++) {
+        ADC1->CR2 |= ADC_CR2_SWSTART;
+        while (!(ADC1->SR & ADC_SR_EOC));
+        sum += ADC1->DR;
+    }
+    // 256 次平均 = 右移 8 位
+    // 12 位 +4 位 = 16 位有效分辨率
+    return sum >> 8;
+}
+
+// 使用 DMA 过采样
+void ADC_DMA_Oversample_Init(void) {
+    // DMA 缓冲区：256 个采样
+    DMA1_Channel1->CNDTR = OVERSAMPLE_COUNT;
+    // 传输完成后处理
+    DMA1_Channel1->CCR |= DMA_CCR1_TCIE;
+}
+
+// DMA 传输完成中断
+void DMA1_Channel1_IRQHandler(void) {
+    if (DMA1->ISR & DMA_ISR_TCIF1) {
+        DMA1->IFCR = DMA_IFCR_CTCIF1;
+        // 计算 256 次平均
+        uint32_t sum = 0;
+        for (int i = 0; i < OVERSAMPLE_COUNT; i++) {
+            sum += adc_buffer[i];
+        }
+        high_precision_value = sum >> 8;
+    }
+}`,
+                    visual: "oversampling"
+                },
+                {
+                    title: "温度传感器",
+                    narration: "STM32 内置温度传感器连接到 ADC 通道 16(或 17)。典型值：25 度时 1.43V，斜率 4.3mV/度。需要较长采样时间。用于芯片温度监测、温度补偿。",
+                    code: `// 内部温度传感器
+void ADC_TempSensor_Init(void) {
+    // 使能温度传感器
+    ADC1->CR2 |= ADC_CR2_TSVREFE;
+
+    // 配置通道 16(温度传感器)
+    ADC1->SQR3 = (16 << ADC_SQR3_SQ1_Pos);
+
+    // 长采样时间：239.5 周期 (温度传感器需要)
+    ADC1->SMPR1 = (7 << ADC_SMPR1_SMP16_Pos);
+}
+
+// 读取温度
+float ADC_ReadTemperature(void) {
+    // 启动转换
+    ADC1->CR2 |= ADC_CR2_SWSTART;
+    while (!(ADC1->SR & ADC_SR_EOC));
+
+    uint16_t adc_value = ADC1->DR;
+
+    // 转换为电压 (Vref=3.3V)
+    float voltage = (adc_value / 4095.0) * 3.3;
+
+    // 计算温度
+    // Temp = 25 + ((V25 - V) / Avg_Slope)
+    // V25 = 1.43V, Avg_Slope = 4.3mV/C
+    float temperature = 25.0 + ((1.43 - voltage) / 0.0043);
+
+    return temperature;
+}`,
+                    visual: "temp_sensor"
+                },
+                {
+                    title: "应用实例总结",
+                    narration: "ADC 应用广泛：电机电流检测用注入通道快速保护，电池监测用过采样提高精度，多传感器用扫描+DMA，温度保护用内部传感器。掌握 ADC 高级功能，实现精密模拟测量。",
+                    code: `// 应用速查表
+// ================
+
+// 电机电流检测 (注入通道 + 看门狗)
+void Motor_Current_Sense_Init(void) {
+    ADC_Injected_Init();      // 快速过流保护
+    ADC_AnalogWatchdog_Init(); // 模拟看门狗
+}
+
+// 电池电压监测 (过采样)
+float Read_Battery_Voltage(void) {
+    uint32_t avg = ADC_Oversample();
+    return (avg / 255.0) * 3.3 * 2.0; // 分压比 2:1
+}
+
+// 多传感器采集 (扫描+DMA)
+void Sensor_Data_Process(void) {
+    // adc_buffer[0-3] 自动填充
+    float sensors[4];
+    for (int i = 0; i < 4; i++) {
+        sensors[i] = (adc_buffer[i] / 4095.0) * 3.3;
+    }
+}
+
+// 芯片温度监测
+void Thermal_Monitor(void) {
+    float temp = ADC_ReadTemperature();
+    if (temp > 85.0) {
+        Thermal_Throttle();
+    }
+}`,
+                    visual: "applications"
+                }
+            ];
+
+            const speakStep = React.useCallback((stepIndex) => {
+                if ('speechSynthesis' in window) {
+                    const utterance = new SpeechSynthesisUtterance(steps[stepIndex].narration);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.pitch = 1.0;
+                    const voices = speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                    if (zhVoice) utterance.voice = zhVoice;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (stepIndex < steps.length - 1) setCurrentStep(prev => prev + 1);
+                            else setIsPlaying(false);
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        setTimeout(() => {
+                            if (stepIndex < steps.length - 1) setCurrentStep(prev => prev + 1);
+                        }, 800);
+                    };
+                    speechSynthesis.speak(utterance);
+                }
+            }, [steps]);
+
+            React.useEffect(() => {
+                if (isPlaying) speakStep(currentStep);
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, speakStep]);
+
+            const handleStart = () => { setIsPlaying(true); setCurrentStep(0); };
+            const handleNext = () => { if (currentStep < steps.length - 1) setCurrentStep(prev => prev + 1); };
+            const handlePrev = () => { if (currentStep > 0) setCurrentStep(prev => prev - 1); };
+
+            // 模拟 ADC 值变化
+            React.useEffect(() => {
+                const interval = setInterval(() => {
+                    setAdcValue(2048 + Math.floor(Math.random() * 200 - 100));
+                }, 500);
+                return () => clearInterval(interval);
+            }, []);
+
+            const ADCArchVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* SAR ADC 结构 */}
+                    <div className="flex-1 bg-gray-800 rounded-lg p-4 mb-4 relative">
+                        <div className="text-xs text-gray-400 mb-2">SAR 逐次逼近型 ADC</div>
+                        <svg viewBox="0 0 400 80" className="w-full">
+                            <rect x="10" y="30" width="80" height="30" fill="#8b5cf6" rx="4" />
+                            <text x="50" y="50" textAnchor="middle" fill="white" fontSize="10">S&H</text>
+                            <line x1="90" y1="45" x2="130" y2="45" stroke="#a78bfa" strokeWidth="2" />
+                            <rect x="130" y="25" width="100" height="40" fill="#7c3aed" rx="4" />
+                            <text x="180" y="50" textAnchor="middle" fill="white" fontSize="10">比较器</text>
+                            <line x1="230" y1="45" x2="270" y2="45" stroke="#a78bfa" strokeWidth="2" />
+                            <rect x="270" y="30" width="80" height="30" fill="#6d28d9" rx="4" />
+                            <text x="310" y="50" textAnchor="middle" fill="white" fontSize="10">SAR 逻辑</text>
+                            <line x1="350" y1="45" x2="380" y2="45" stroke="#10b981" strokeWidth="2" />
+                            <text x="385" y="50" fill="#10b981" fontSize="10">DOUT</text>
+                        </svg>
+                    </div>
+                    {/* 分辨率显示 */}
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                        <div className="bg-gray-800 rounded p-2">
+                            <div className="text-xs text-gray-400">分辨率</div>
+                            <div className="text-lg font-bold text-purple-400">12 位</div>
+                        </div>
+                        <div className="bg-gray-800 rounded p-2">
+                            <div className="text-xs text-gray-400">范围</div>
+                            <div className="text-lg font-bold text-purple-400">0-4095</div>
+                        </div>
+                        <div className="bg-gray-800 rounded p-2">
+                            <div className="text-xs text-gray-400">采样率</div>
+                            <div className="text-lg font-bold text-purple-400">1MSPS</div>
+                        </div>
+                        <div className="bg-gray-800 rounded p-2">
+                            <div className="text-xs text-gray-400">通道</div>
+                            <div className="text-lg font-bold text-purple-400">18+2</div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const ADCInitVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* 配置流程 */}
+                    <div className="flex-1 flex items-center justify-around mb-4">
+                        {['时钟', 'GPIO', '预分频', '采样时间', '校准', '启动'].map((step, i) => (
+                            <div key={i} className={`w-16 h-16 rounded-full flex items-center justify-center ${i <= 5 ? 'bg-purple-500 animate-pulse' : 'bg-gray-700'}`}>
+                                <span className="text-xs">{step}</span>
+                            </div>
+                        ))}
+                    </div>
+                    {/* 状态显示 */}
+                    <div className="bg-gray-800 rounded-lg p-3 text-center">
+                        <div className="text-xs text-gray-400">ADC 状态</div>
+                        <div className="text-green-400 font-bold">✓ 已初始化 | 连续模式</div>
+                    </div>
+                </div>
+            );
+
+            const InjectedChannelVisual = () => (
+                <div className="h-64 flex flex-col gap-2">
+                    {/* 规则通道 */}
+                    <div className="bg-gray-800 rounded-lg p-2">
+                        <div className="text-xs text-gray-400 mb-1">规则通道 (正常测量)</div>
+                        <div className="flex items-center gap-1">
+                            {[1,2,3,4].map((ch, i) => (
+                                <div key={i} className="flex-1 h-8 signal-low rounded flex items-center justify-center text-xs">CH{ch}</div>
+                            ))}
+                        </div>
+                    </div>
+                    {/* 注入通道打断 */}
+                    <div className="bg-red-900/30 rounded-lg p-2 border border-red-500">
+                        <div className="text-xs text-red-400 mb-1">⚡ 注入通道 (高优先级)</div>
+                        <div className="flex items-center gap-1">
+                            <div className="flex-1 h-8 signal-low rounded"></div>
+                            <div className="w-16 h-8 bg-red-500 animate-pulse rounded flex items-center justify-center text-xs">JCH</div>
+                            <div className="flex-1 h-8 signal-low rounded"></div>
+                        </div>
+                    </div>
+                    {/* 应用 */}
+                    <div className="text-center text-xs text-red-400">过流保护 | 快速响应</div>
+                </div>
+            );
+
+            const AnalogWatchdogVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* 阈值图 */}
+                    <div className="flex-1 bg-gray-800 rounded-lg relative overflow-hidden mb-4">
+                        <svg viewBox="0 0 400 100" className="w-full h-full">
+                            {/* 高阈值线 */}
+                            <line x1="0" y1="25" x2="400" y2="25" stroke="#ef4444" strokeWidth="2" strokeDasharray="4" />
+                            <text x="5" y="20" fill="#ef4444" fontSize="10">HTR=3723 (3.0V)</text>
+                            {/* 低阈值线 */}
+                            <line x1="0" y1="75" x2="400" y2="75" stroke="#ef4444" strokeWidth="2" strokeDasharray="4" />
+                            <text x="5" y="70" fill="#ef4444" fontSize="10">LTR=372 (0.3V)</text>
+                            {/* 正常区域 */}
+                            <rect x="0" y="25" width="400" height="50" fill="#10b981/20" />
+                            {/* ADC 值波形 */}
+                            <polyline points="0,50 50,45 100,55 150,40 200,60 250,30 300,70 350,20 400,50" fill="none" stroke="#8b5cf6" strokeWidth="2" />
+                        </svg>
+                    </div>
+                    {/* 状态 */}
+                    <div className="text-center text-yellow-400">⚠ 看门狗监测中</div>
+                </div>
+            );
+
+            const MultiChannelVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* 通道扫描 */}
+                    <div className="flex-1 grid grid-cols-4 gap-2 mb-4">
+                        {[0,1,2,3].map((ch) => (
+                            <div key={ch} className={`bg-gray-800 rounded-lg flex flex-col items-center justify-center ${channel === ch ? 'ring-2 ring-purple-500' : ''}`}>
+                                <div className="text-xs text-gray-400">CH{ch}</div>
+                                <div className="text-lg font-bold text-purple-400">{adcValue + ch * 100}</div>
+                            </div>
+                        ))}
+                    </div>
+                    {/* DMA 传输 */}
+                    <div className="bg-gray-800 rounded-lg p-2">
+                        <div className="text-xs text-gray-400 mb-1">DMA 缓冲区</div>
+                        <div className="flex gap-1">
+                            {[0,1,2,3].map((i) => (
+                                <div key={i} className="flex-1 h-6 bg-purple-500/50 rounded text-xs flex items-center justify-center">
+                                    {adcValue + i * 100}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const OversamplingVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* 采样点 */}
+                    <div className="flex-1 bg-gray-800 rounded-lg relative overflow-hidden mb-4 p-4">
+                        <div className="text-xs text-gray-400 mb-2">256 次过采样</div>
+                        <div className="grid grid-cols-16 gap-0.5">
+                            {Array.from({length: 64}).map((_, i) => (
+                                <div key={i} className={`h-4 rounded ${Math.random() > 0.5 ? 'bg-purple-500' : 'bg-purple-700'}`}></div>
+                            ))}
+                        </div>
+                    </div>
+                    {/* 结果 */}
+                    <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-gray-800 rounded p-2 text-center">
+                            <div className="text-xs text-gray-400">原始</div>
+                            <div className="text-lg font-bold text-purple-400">12 位</div>
+                        </div>
+                        <div className="bg-gray-800 rounded p-2 text-center">
+                            <div className="text-xs text-gray-400">过采样后</div>
+                            <div className="text-lg font-bold text-green-400">16 位</div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const TempSensorVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* 温度曲线 */}
+                    <div className="flex-1 bg-gray-800 rounded-lg relative overflow-hidden mb-4">
+                        <svg viewBox="0 0 400 100" className="w-full h-full">
+                            {/* 温度 - 电压曲线 */}
+                            <line x1="50" y1="80" x2="350" y2="20" stroke="#8b5cf6" strokeWidth="3" />
+                            <text x="60" y="85" fill="#8b5cf6" fontSize="10">25°C: 1.43V</text>
+                            <text x="280" y="30" fill="#8b5cf6" fontSize="10">85°C: 1.17V</text>
+                            {/* 斜率标注 */}
+                            <line x1="100" y1="70" x2="200" y2="50" stroke="#ef4444" strokeWidth="1" strokeDasharray="4" />
+                            <text x="210" y="55" fill="#ef4444" fontSize="10">-4.3mV/°C</text>
+                        </svg>
+                    </div>
+                    {/* 当前温度 */}
+                    <div className="text-center">
+                        <div className="text-3xl font-bold text-purple-400">{(25 + (1.43 - (adcValue/4095*3.3)) / 0.0043).toFixed(1)}°C</div>
+                        <div className="text-xs text-gray-400">芯片内部温度</div>
+                    </div>
+                </div>
+            );
+
+            const ApplicationsVisual = () => (
+                <div className="h-64 grid grid-cols-2 gap-2">
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">电流检测</div>
+                        <div className="text-2xl">⚡</div>
+                        <div className="text-xs text-purple-400">注入通道</div>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">电池监测</div>
+                        <div className="text-2xl">🔋</div>
+                        <div className="text-xs text-purple-400">过采样</div>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">多传感器</div>
+                        <div className="text-2xl">📊</div>
+                        <div className="text-xs text-purple-400">扫描+DMA</div>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">温度保护</div>
+                        <div className="text-2xl">🌡️</div>
+                        <div className="text-xs text-purple-400">内部传感器</div>
+                    </div>
+                </div>
+            );
+
+            const renderVisual = () => {
+                switch(currentStep) {
+                    case 0: return <ADCArchVisual />;
+                    case 1: return <ADCInitVisual />;
+                    case 2: return <InjectedChannelVisual />;
+                    case 3: return <AnalogWatchdogVisual />;
+                    case 4: return <MultiChannelVisual />;
+                    case 5: return <OversamplingVisual />;
+                    case 6: return <TempSensorVisual />;
+                    case 7: return <ApplicationsVisual />;
+                    default: return <ADCArchVisual />;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-4 gradient-theme">
+                    <div className="max-w-7xl mx-auto">
+                        <h1 className="text-3xl font-bold text-center mb-2">STM32 ADC 高级应用完整指南</h1>
+                        <p className="text-center text-white/80 mb-4">文件编号：1256 | 注入通道 · 模拟看门狗 · 过采样</p>
+                        <div className="flex justify-center gap-4 mb-4">
+                            <button onClick={handlePrev} disabled={currentStep === 0} className="px-6 py-2 bg-white/20 rounded-lg disabled:opacity-50 hover:bg-white/30">上一步</button>
+                            <button onClick={handleStart} disabled={isPlaying} className="px-6 py-2 bg-green-500 rounded-lg hover:bg-green-600 disabled:opacity-50">{isPlaying ? '播放中...' : '开始播放'}</button>
+                            <button onClick={handleNext} disabled={currentStep === steps.length - 1} className="px-6 py-2 bg-white/20 rounded-lg disabled:opacity-50 hover:bg-white/30">下一步</button>
+                        </div>
+                        <div className="flex justify-center gap-2 mb-4">
+                            {steps.map((_, idx) => (<div key={idx} className={`w-3 h-3 rounded-full ${idx === currentStep ? 'bg-white animate-pulse' : 'bg-white/30'}`}></div>))}
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <div className="code-bg rounded-lg p-4 font-mono text-sm overflow-auto">
+                                <pre className="text-green-400 whitespace-pre-wrap">{steps[currentStep].code}</pre>
+                            </div>
+                            <div className="bg-gray-800 rounded-lg p-4">{renderVisual()}</div>
+                            <div className="bg-white/10 rounded-lg p-4">
+                                <h2 className="text-xl font-bold mb-4">{steps[currentStep].title}</h2>
+                                <p className="text-white/80 leading-relaxed">{steps[currentStep].narration}</p>
+                            </div>
+                        </div>
+                        <div className="text-center mt-4 text-white/60 text-sm">步骤 {currentStep + 1} / {steps.length} | 自动播放 | 中文语音</div>
+                    </div>
+                </div>
+            );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

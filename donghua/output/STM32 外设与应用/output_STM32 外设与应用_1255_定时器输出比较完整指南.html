@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 定时器输出比较完整指南 - 1255</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes wave { 0%, 100% { transform: scaleY(0.8); } 50% { transform: scaleY(1.2); } }
+        @keyframes flow { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+        .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+        .animate-blink { animation: blink 0.5s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-wave { animation: wave 1s ease-in-out infinite; }
+        .animate-flow { animation: flow 2s linear infinite; background-size: 200% 200%; }
+        .gradient-theme { background: linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%); }
+        .code-bg { background: #1e293b; }
+        .signal-high { background: linear-gradient(90deg, #f59e0b, #d97706); }
+        .signal-low { background: #374151; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#f59e0b', secondary: '#d97706', accent: '#fbbf24',
+            highlight: '#fcd34d', signal: '#10b981', low: '#6b7280'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [dutyCycle, setDutyCycle] = React.useState(50);
+            const [frequency, setFrequency] = React.useState(1000);
+            const [pwmState, setPwmState] = React.useState(false);
+            const [ocMode, setOcMode] = React.useState('toggle');
+            const voiceEndTimerRef = React.useRef(null);
+
+            const steps = [
+                {
+                    title: "输出比较基础",
+                    narration: "输出比较功能可以精确控制 GPIO 翻转时刻。通过比较计数器值和捕获比较寄存器值，在匹配时触发预设动作。支持 PWM 输出、单脉冲、延时输出等多种模式。",
+                    code: `// 输出比较基本原理
+// 计数器 CNT 与比较值 CCR 比较
+// 匹配时触发预设动作
+
+// 配置步骤:
+// 1. 使能定时器时钟和 GPIO 时钟
+// 2. 配置 GPIO 为复用推挽输出
+// 3. 配置 PSC 和 ARR 确定计数频率
+// 4. 配置 CCMR 设置 OC 模式
+// 5. 配置 CCER 设置输出极性
+// 6. 使能捕获比较通道`,
+                    visual: "oc_basic"
+                },
+                {
+                    title: "PWM 模式配置",
+                    narration: "PWM 模式 1：CNT<CCR 时输出有效电平，CNT>CCR 时输出无效电平。PWM 模式 2 恰好相反。占空比 = CCR / (ARR+1)。频率 = 时钟 / ((PSC+1)*(ARR+1))。",
+                    code: `// PWM 模式 1 配置
+TIM3->PSC = 71;  // 72MHz/72 = 1MHz
+TIM3->ARR = 999; // 1kHz PWM 频率
+TIM3->CCR1 = 500; // 50% 占空比
+
+// CCMR1 配置 OC1M=110(PWM 模式 1)
+// OC1PE=1 使能预装载
+TIM3->CCMR1 = (6 << 12) | (1 << 11) | TIM_CCMR1_OC1PE;
+
+// CCER: CC1E=1 使能输出
+TIM3->CCER |= TIM_CCER_CC1E;
+
+// CR1: CEN=1 启动计数器
+TIM3->CR1 |= TIM_CR1_CEN;`,
+                    visual: "pwm_config"
+                },
+                {
+                    title: "占空比调节",
+                    narration: "动态修改 CCR 寄存器值即可实时调节占空比。CCR 值越大，占空比越高。CCR=0 时 0% 占空比，CCR=ARR 时 100% 占空比。可用于 LED 调光、电机调速等应用。",
+                    code: `// 动态调节占空比
+void PWM_SetDutyCycle(uint16_t duty) {
+    // duty: 0-1000 对应 0%-100%
+    TIM3->CCR1 = duty;
+}
+
+// 渐变调光示例
+void LED_Fade(void) {
+    for (uint16_t i = 0; i <= 1000; i++) {
+        PWM_SetDutyCycle(i);
+        delay_ms(1);
+    }
+    for (uint16_t i = 1000; i > 0; i--) {
+        PWM_SetDutyCycle(i);
+        delay_ms(1);
+    }
+}`,
+                    visual: "duty_adjust"
+                },
+                {
+                    title: "频率调节",
+                    narration: "PWM 频率由 PSC 和 ARR 共同决定。PSC 是分频系数，ARR 是重装载值。频率 = 定时器时钟 / ((PSC+1) × (ARR+1))。高频 PWM 用于电机驱动，低频用于 LED 调光。",
+                    code: `// 频率计算公式
+// f_PWM = f_TIM / ((PSC+1) * (ARR+1))
+
+// 1kHz PWM (72MHz 时钟)
+// PSC=71, ARR=999 → 72M/(72*1000) = 1kHz
+void PWM_Init_1kHz(void) {
+    TIM3->PSC = 71;
+    TIM3->ARR = 999;
+}
+
+// 20kHz PWM (电机驱动)
+// PSC=0, ARR=3599 → 72M/(1*3600) = 20kHz
+void PWM_Init_20kHz(void) {
+    TIM3->PSC = 0;
+    TIM3->ARR = 3599;
+}`,
+                    visual: "freq_adjust"
+                },
+                {
+                    title: "互补输出模式",
+                    narration: "高级定时器支持互补 PWM 输出，两路输出相位相反，带有可编程死区时间。用于 H 桥电机驱动、半桥电源等应用，防止上下管直通。",
+                    code: `// 互补 PWM 配置 (TIM1 高级定时器)
+void PWM_Complementary_Init(void) {
+    // BDTR: 死区时间配置
+    TIM1->BDTR = (16 << 0) | TIM_BDTR_MOE; // 16 个时钟周期死区
+
+    // CCMR1: PWM 模式 1
+    TIM1->CCMR1 = (6 << 12) | (6 << 4);
+
+    // CCER: CH1 和 CH1N 互补输出
+    TIM1->CCER = TIM_CCER_CC1E | TIM_CCER_CC1NE;
+
+    // CR1: 启动
+    TIM1->CR1 |= TIM_CR1_CEN;
+}`,
+                    visual: "complementary"
+                },
+                {
+                    title: "单脉冲模式",
+                    narration: "单脉冲模式下，定时器响应触发信号后输出单个脉冲，然后自动停止。适用于精确延时、单次触发等场景。通过 OPM 位使能单脉冲。",
+                    code: `// 单脉冲模式配置
+void OnePulse_Init(void) {
+    TIM2->PSC = 7199;  // 10kHz 计数 (100us/ tick)
+    TIM2->ARR = 1000;  // 100ms 周期
+    TIM2->CCR1 = 300;  // 30ms 脉宽
+
+    // CR2: 触发输出
+    TIM2->CR2 |= (1 << 6);
+
+    // SMCR: 门控模式
+    TIM2->SMCR |= (5 << 0);
+
+    // CR1: OPM=1 单脉冲模式
+    TIM2->CR1 |= TIM_CR1_OPM | TIM_CR1_CEN;
+}`,
+                    visual: "one_pulse"
+                },
+                {
+                    title: "输出比较中断",
+                    narration: "当计数器值与 CCR 匹配时，可触发输出比较中断。用于需要精确时序控制的场景，如步进电机脉冲生成、精确延时等。中断标志 CC1IF 需要手动清除。",
+                    code: `// 输出比较中断配置
+void OC_Interrupt_Init(void) {
+    TIM3->PSC = 7199;  // 10kHz
+    TIM3->ARR = 1000;
+    TIM3->CCR1 = 500;
+
+    // DIER: 使能 CC1 中断
+    TIM3->DIER |= TIM_DIER_CC1IE;
+
+    // NVIC 配置
+    NVIC_EnableIRQ(TIM3_IRQn);
+}
+
+// 中断服务函数
+void TIM3_IRQHandler(void) {
+    if (TIM3->SR & TIM_SR_CC1IF) {
+        TIM3->SR &= ~TIM_SR_CC1IF; // 清除标志
+        GPIO_ToggleBits(GPIOA, GPIO_5);
+    }
+}`,
+                    visual: "oc_interrupt"
+                },
+                {
+                    title: "应用实例总结",
+                    narration: "输出比较应用广泛：LED 调光用 200Hz-1kHz PWM，电机驱动用 20kHz-50kHz，电源转换用 100kHz-1MHz。舵机控制用 50Hz 特定脉宽。掌握输出比较，解锁精密控制能力。",
+                    code: `// 应用速查表
+// ================
+// LED 调光：1kHz, 占空比 0-100%
+void LED_Dimming(uint8_t brightness) {
+    TIM3->CCR1 = brightness * 10;
+}
+
+// 舵机控制：50Hz, 脉宽 0.5-2.5ms
+void Servo_Control(float angle) {
+    float pulse = 0.5 + (angle / 180.0) * 2.0;
+    TIM3->CCR1 = (uint16_t)(pulse * 10); // 10us 分辨率
+}
+
+// 直流电机调速：20kHz
+void Motor_SetSpeed(int8_t speed) {
+    if (speed >= 0) {
+        TIM3->CCR1 = speed * 10;
+        GPIO_SetBits(DIR_PIN);
+    } else {
+        TIM3->CCR1 = -speed * 10;
+        GPIO_ResetBits(DIR_PIN);
+    }
+}`,
+                    visual: "applications"
+                }
+            ];
+
+            // 语音播放函数
+            const speakStep = React.useCallback((stepIndex) => {
+                if ('speechSynthesis' in window) {
+                    const utterance = new SpeechSynthesisUtterance(steps[stepIndex].narration);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.pitch = 1.0;
+
+                    const voices = speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (stepIndex < steps.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            } else {
+                                setIsPlaying(false);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        setTimeout(() => {
+                            if (stepIndex < steps.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    speechSynthesis.speak(utterance);
+                }
+            }, [steps]);
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    speakStep(currentStep);
+                }
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, speakStep]);
+
+            const handleStart = () => {
+                setIsPlaying(true);
+                setCurrentStep(0);
+            };
+
+            const handleNext = () => {
+                if (currentStep < steps.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            // 可视化组件
+            const OCBasicVisual = () => (
+                <div className="h-64 flex flex-col items-center justify-center">
+                    {/* 计数器显示 */}
+                    <div className="text-center mb-4">
+                        <div className="text-sm text-gray-400">计数器 CNT</div>
+                        <div className="text-3xl font-bold text-yellow-400">0000</div>
+                    </div>
+                    {/* 比较线 */}
+                    <div className="w-full h-20 bg-gray-800 rounded-lg relative overflow-hidden mb-4">
+                        <div className="absolute left-1/4 top-0 bottom-0 w-0.5 bg-red-500 animate-pulse"></div>
+                        <div className="absolute left-1/4 -top-6 text-xs text-red-400">CCR</div>
+                        <div className="absolute inset-0 bg-gradient-to-r from-yellow-500/20 to-transparent" style={{width: '25%'}}></div>
+                    </div>
+                    {/* 输出信号 */}
+                    <div className="w-full h-16 bg-gray-800 rounded-lg flex items-center px-4">
+                        <div className="text-xs text-gray-400 mr-4">OC 输出:</div>
+                        <div className="flex-1 flex items-center">
+                            <div className="h-8 w-16 signal-low rounded-l"></div>
+                            <div className="h-8 w-0.5 bg-yellow-500"></div>
+                            <div className="h-8 w-24 signal-high"></div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const PWMConfigVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* PWM 波形 */}
+                    <div className="flex-1 bg-gray-800 rounded-lg relative overflow-hidden mb-4">
+                        <svg className="w-full h-full" viewBox="0 0 400 100">
+                            <rect x="0" y="20" width="200" height="60" fill="#f59e0b" />
+                            <rect x="200" y="20" width="200" height="60" fill="#374151" />
+                            <line x1="200" y1="0" x2="200" y2="100" stroke="#ef4444" strokeWidth="2" strokeDasharray="4" />
+                            <text x="205" y="15" fill="#ef4444" fontSize="12">CCR</text>
+                        </svg>
+                        <div className="absolute top-2 right-2 text-xs text-yellow-400">50% 占空比</div>
+                    </div>
+                    {/* 参数显示 */}
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-gray-800 rounded p-2">
+                            <div className="text-xs text-gray-400">PSC</div>
+                            <div className="text-lg font-bold text-yellow-400">71</div>
+                        </div>
+                        <div className="bg-gray-800 rounded p-2">
+                            <div className="text-xs text-gray-400">ARR</div>
+                            <div className="text-lg font-bold text-yellow-400">999</div>
+                        </div>
+                        <div className="bg-gray-800 rounded p-2">
+                            <div className="text-xs text-gray-400">CCR</div>
+                            <div className="text-lg font-bold text-yellow-400">500</div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const DutyAdjustVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* 滑块控制 */}
+                    <div className="mb-4 px-4">
+                        <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={dutyCycle}
+                            onChange={(e) => setDutyCycle(parseInt(e.target.value))}
+                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                        />
+                        <div className="text-center mt-2 text-yellow-400 font-bold">{dutyCycle}% 占空比</div>
+                    </div>
+                    {/* 实时波形 */}
+                    <div className="flex-1 bg-gray-800 rounded-lg relative overflow-hidden">
+                        <svg className="w-full h-full" viewBox="0 0 400 80">
+                            <rect x="0" y="10" width={4 * dutyCycle} height="60" fill="#10b981" />
+                            <rect x={4 * dutyCycle} y="10" width={4 * (100 - dutyCycle)} height="60" fill="#374151" />
+                        </svg>
+                    </div>
+                </div>
+            );
+
+            const FreqAdjustVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* 频率选择 */}
+                    <div className="flex gap-2 mb-4">
+                        <button onClick={() => setFrequency(1000)} className={`flex-1 py-2 rounded ${frequency === 1000 ? 'bg-yellow-500' : 'bg-gray-700'}`}>1kHz</button>
+                        <button onClick={() => setFrequency(10000)} className={`flex-1 py-2 rounded ${frequency === 10000 ? 'bg-yellow-500' : 'bg-gray-700'}`}>10kHz</button>
+                        <button onClick={() => setFrequency(100000)} className={`flex-1 py-2 rounded ${frequency === 100000 ? 'bg-yellow-500' : 'bg-gray-700'}`}>100kHz</button>
+                    </div>
+                    {/* 波形对比 */}
+                    <div className="flex-1 bg-gray-800 rounded-lg relative overflow-hidden">
+                        <svg className="w-full h-full" viewBox="0 0 400 80">
+                            {frequency === 1000 && <><rect x="0" y="10" width="200" height="60" fill="#f59e0b" /><rect x="200" y="10" width="200" height="60" fill="#374151" /></>}
+                            {frequency === 10000 && <><rect x="0" y="10" width="40" height="60" fill="#f59e0b" /><rect x="40" y="10" width="40" height="60" fill="#374151" /><rect x="80" y="10" width="40" height="60" fill="#f59e0b" /><rect x="120" y="10" width="40" height="60" fill="#374151" /><rect x="160" y="10" width="40" height="60" fill="#f59e0b" /><rect x="200" y="10" width="40" height="60" fill="#374151" /><rect x="240" y="10" width="40" height="60" fill="#f59e0b" /><rect x="280" y="10" width="40" height="60" fill="#374151" /><rect x="320" y="10" width="40" height="60" fill="#f59e0b" /><rect x="360" y="10" width="40" height="60" fill="#374151" /></>}
+                            {frequency === 100000 && <rect x="0" y="35" width="400" height="10" fill="#f59e0b" />}
+                        </svg>
+                        <div className="absolute top-2 right-2 text-xs text-yellow-400">{frequency / 1000}kHz</div>
+                    </div>
+                </div>
+            );
+
+            const ComplementaryVisual = () => (
+                <div className="h-64 flex flex-col gap-2">
+                    {/* CH1 输出 */}
+                    <div className="bg-gray-800 rounded-lg p-2">
+                        <div className="text-xs text-gray-400 mb-1">CH1</div>
+                        <svg viewBox="0 0 400 40" className="w-full">
+                            <rect x="0" y="5" width="180" height="30" fill="#10b981" />
+                            <rect x="180" y="5" width="20" height="30" fill="#ef4444" />
+                            <rect x="200" y="5" width="180" height="30" fill="#374151" />
+                        </svg>
+                    </div>
+                    {/* CH1N 互补输出 */}
+                    <div className="bg-gray-800 rounded-lg p-2">
+                        <div className="text-xs text-gray-400 mb-1">CH1N (互补)</div>
+                        <svg viewBox="0 0 400 40" className="w-full">
+                            <rect x="0" y="5" width="180" height="30" fill="#374151" />
+                            <rect x="180" y="5" width="20" height="30" fill="#ef4444" />
+                            <rect x="200" y="5" width="180" height="30" fill="#10b981" />
+                        </svg>
+                    </div>
+                    {/* 死区标注 */}
+                    <div className="text-center text-xs text-red-400">← 死区时间防止直通 →</div>
+                </div>
+            );
+
+            const OnePulseVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* 触发信号 */}
+                    <div className="mb-2">
+                        <div className="text-xs text-gray-400">触发信号</div>
+                        <div className="flex items-center gap-1">
+                            <div className="w-24 h-6 signal-low rounded-l"></div>
+                            <div className="w-2 h-6 bg-green-500 animate-pulse"></div>
+                            <div className="flex-1 h-6 signal-low rounded-r"></div>
+                        </div>
+                    </div>
+                    {/* 单脉冲输出 */}
+                    <div>
+                        <div className="text-xs text-gray-400">单脉冲输出</div>
+                        <div className="flex items-center">
+                            <div className="w-32 h-8 signal-low rounded-l"></div>
+                            <div className="w-32 h-8 signal-high animate-pulse"></div>
+                            <div className="flex-1 h-8 signal-low rounded-r"></div>
+                        </div>
+                    </div>
+                    {/* 时间标注 */}
+                    <div className="mt-4 text-center text-xs text-yellow-400">
+                        脉冲宽度：CCR / 计数频率
+                    </div>
+                </div>
+            );
+
+            const OCInterruptVisual = () => (
+                <div className="h-64 flex flex-col">
+                    {/* 中断时序 */}
+                    <div className="flex-1 bg-gray-800 rounded-lg p-4 mb-4">
+                        <div className="text-xs text-gray-400 mb-2">CNT → CCR 匹配 → 中断</div>
+                        <div className="relative h-16">
+                            <div className="absolute left-0 top-0 w-full h-0.5 bg-gray-600"></div>
+                            <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-red-500 animate-pulse"></div>
+                            <div className="absolute left-1/2 -top-6 text-xs text-red-400">匹配点</div>
+                            <div className="absolute left-1/2 bottom-0 text-xs text-green-400">⚡ 中断</div>
+                        </div>
+                    </div>
+                    {/* 中断标志 */}
+                    <div className="bg-gray-800 rounded-lg p-3 text-center">
+                        <div className="text-xs text-gray-400">TIMx_SR 寄存器</div>
+                        <div className="text-lg font-mono text-green-400">CC1IF = 1 → 触发中断</div>
+                        <div className="text-xs text-gray-500 mt-1">软件清除：TIMx_SR &= ~CC1IF</div>
+                    </div>
+                </div>
+            );
+
+            const ApplicationsVisual = () => (
+                <div className="h-64 grid grid-cols-2 gap-2">
+                    {/* LED 调光 */}
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">LED 调光</div>
+                        <div className="text-2xl">💡</div>
+                        <div className="text-xs text-yellow-400">200Hz-1kHz</div>
+                    </div>
+                    {/* 电机驱动 */}
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">电机驱动</div>
+                        <div className="text-2xl">⚙️</div>
+                        <div className="text-xs text-yellow-400">20kHz-50kHz</div>
+                    </div>
+                    {/* 舵机控制 */}
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">舵机控制</div>
+                        <div className="text-2xl">🤖</div>
+                        <div className="text-xs text-yellow-400">50Hz 特定脉宽</div>
+                    </div>
+                    {/* 电源转换 */}
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">电源转换</div>
+                        <div className="text-2xl">🔌</div>
+                        <div className="text-xs text-yellow-400">100kHz-1MHz</div>
+                    </div>
+                </div>
+            );
+
+            const renderVisual = () => {
+                switch(steps[currentStep].visual) {
+                    case "oc_basic": return <OCBasicVisual />;
+                    case "pwm_config": return <PWMConfigVisual />;
+                    case "duty_adjust": return <DutyAdjustVisual />;
+                    case "freq_adjust": return <FreqAdjustVisual />;
+                    case "complementary": return <ComplementaryVisual />;
+                    case "one_pulse": return <OnePulseVisual />;
+                    case "oc_interrupt": return <OCInterruptVisual />;
+                    case "applications": return <ApplicationsVisual />;
+                    default: return <OCBasicVisual />;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-4 gradient-theme">
+                    <div className="max-w-7xl mx-auto">
+                        {/* 标题 */}
+                        <h1 className="text-3xl font-bold text-center mb-2">STM32 定时器输出比较完整指南</h1>
+                        <p className="text-center text-white/80 mb-4">文件编号：1255 | PWM 生成 · 波形输出 · 精密控制</p>
+
+                        {/* 控制按钮 */}
+                        <div className="flex justify-center gap-4 mb-4">
+                            <button onClick={handlePrev} disabled={currentStep === 0} className="px-6 py-2 bg-white/20 rounded-lg disabled:opacity-50 hover:bg-white/30">上一步</button>
+                            <button onClick={handleStart} disabled={isPlaying} className="px-6 py-2 bg-green-500 rounded-lg hover:bg-green-600 disabled:opacity-50">
+                                {isPlaying ? '播放中...' : '开始播放'}
+                            </button>
+                            <button onClick={handleNext} disabled={currentStep === steps.length - 1} className="px-6 py-2 bg-white/20 rounded-lg disabled:opacity-50 hover:bg-white/30">下一步</button>
+                        </div>
+
+                        {/* 进度指示 */}
+                        <div className="flex justify-center gap-2 mb-4">
+                            {steps.map((_, idx) => (
+                                <div key={idx} className={`w-3 h-3 rounded-full ${idx === currentStep ? 'bg-white animate-pulse' : 'bg-white/30'}`}></div>
+                            ))}
+                        </div>
+
+                        {/* 主内容区 - 三列布局 */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            {/* 左列：代码 */}
+                            <div className="code-bg rounded-lg p-4 font-mono text-sm overflow-auto">
+                                <pre className="text-green-400 whitespace-pre-wrap">{steps[currentStep].code}</pre>
+                            </div>
+
+                            {/* 中列：可视化 */}
+                            <div className="bg-gray-800 rounded-lg p-4">
+                                {renderVisual()}
+                            </div>
+
+                            {/* 右列：解释 */}
+                            <div className="bg-white/10 rounded-lg p-4">
+                                <h2 className="text-xl font-bold mb-4">{steps[currentStep].title}</h2>
+                                <p className="text-white/80 leading-relaxed">{steps[currentStep].narration}</p>
+                            </div>
+                        </div>
+
+                        {/* 底部信息 */}
+                        <div className="text-center mt-4 text-white/60 text-sm">
+                            步骤 {currentStep + 1} / {steps.length} | 自动播放 | 中文语音
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

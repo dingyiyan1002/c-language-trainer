@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>volatile 限定符 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#a855f7 0%,#9333ea 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#581c87;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#7e22ce;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#f3e8ff,#e9d5ff);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#c084fc;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#a855f7;box-shadow:0 0 20px rgba(168,85,247,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#581c87;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .memory-container{display:flex;flex-direction:column;gap:12px;margin:16px 0}
+    .memory-box{border-radius:12px;padding:16px;transition:all 0.4s ease;border:3px solid transparent}
+    .memory-box.definition{background:linear-gradient(135deg:#f3e8ff,#e9d5ff);border-color:#a855f7}
+    .memory-box.active{transform:scale(1.02);box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+    .access-row{display:flex;align-items:center;margin-bottom:8px;gap:8px}
+    .access-label{width:80px;font-size:11px;color:#7e22ce;font-weight:600}
+    .access-box{flex:1;background:white;border-radius:8px;padding:12px;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .access-box.active{border-color:#a855f7;background:linear-gradient(135deg:#f3e8ff,#e9d5ff)}
+    .access-value{font-size:12px;font-weight:700;color:#7e22ce;font-family:'Consolas',monospace}
+    .refresh-indicator{display:flex;align-items:center;gap:8px;font-size:10px;color:#64748b}
+    .refresh-dot{width:8px;height:8px;border-radius:50%;background:#e5e7eb;transition:all 0.3s ease}
+    .refresh-dot.active{background:#22c55e;animation:pulse 0.5s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+    .comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+    .compare-card{background:white;border-radius:8px;padding:12px;text-align:center;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .compare-card.active{border-color:#a855f7;background:linear-gradient(135deg:#f3e8ff,#e9d5ff)}
+    .compare-label{font-size:10px;color:#64748b;margin-bottom:4px}
+    .compare-code{font-size:11px;color:#7e22ce;font-family:'Consolas',monospace}
+    .compare-desc{font-size:9px;color:#64748b;margin-top:4px}
+    .use-case-list{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+    .use-item{background:#f3e8ff;border-radius:8px;padding:12px;border-left:4px solid#a855f7;transition:all 0.3s ease}
+    .use-item.active{border-left-color:#22c55e;background:linear-gradient(135deg:#f3e8ff,#e9d5ff)}
+    .use-title{font-size:11px;color:#581c87;font-weight:700;margin-bottom:4px}
+    .use-example{font-size:10px;color:#6b21a8;font-family:'Consolas',monospace}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#22d3ee;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',purple:'#a855f7'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:2,text:'volatile int flag = 0;',color:'#a855f7'},
+      3:{step:3,text:'while(flag == 0) {',color:'#a855f7'},
+      4:{step:4,text:'    // 等待中断',color:'#64748b'},
+      5:{step:4,text:'}',color:'#a855f7'},
+      6:{step:5,text:'printf("Flag: %d\\n", flag);',color:'#eab308'},
+      7:{step:6,text:'return 0;',color:'#3b82f6'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，volatile 告诉编译器变量可能被意外修改，禁止优化',
+      2:'定义 volatile 变量 flag，每次访问都从内存重新读取',
+      3:'while 循环检查 flag，volatile 保证每次都读取最新值',
+      4:'等待外部中断修改 flag，没有 volatile 编译器会优化为死循环',
+      5:'输出 flag 的值，volatile 用于硬件寄存器、中断服务程序',
+      6:'程序结束，volatile 保证可见性，防止编译器优化'
+    };
+    const accesses = [
+      {name:'Read 1',value:'0',active:true},
+      {name:'Read 2',value:'0',active:true},
+      {name:'IRQ Write',value:'1',active:false},
+      {name:'Read 3',value:'1',active:false}
+    ];
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',refresh:'M4 4v5h.58c-.32.93-.58 1.92-.58 2.97 0 4.08 3.32 7.43 7.4 7.43s7.4-3.35 7.4-7.43c0-1.05-.26-2.04-.58-2.97H19V4h-1.12c-.56 1.93-1.72 3.66-3.31 4.87L16 10.28V16h-2v-3.94l-1.29 1.29c-1.16 1.16-2.83 1.65-4.41 1.65-3.4 0-6.17-2.77-6.17-6.17 0-1.58.49-3.25 1.65-4.41L5.06 5.12C3.85 6.71 2.12 7.87.19 8.43H4z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [flagValue,setFlagValue] = useState(0);
+      const [refreshCount,setRefreshCount] = useState(0);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 7; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setFlagValue(0);
+          setRefreshCount(0);
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setFlagValue(0);
+          setRefreshCount(1);
+        } else if(step === 3) {
+          setFlagValue(0);
+          setRefreshCount(2);
+        } else if(step === 4) {
+          setFlagValue(1);
+          setRefreshCount(3);
+        } else if(step === 5) {
+          setTerminalLines(['Flag: 1']);
+        } else if(step === 6) {
+          // Complete
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setFlagValue(0);
+        setRefreshCount(0);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>volatile 限定符 - C 语言可视化</h1>
+            <p>volatile | 禁止优化 | 硬件访问</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.purple,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                volatile_keyword.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.refresh} size={22} />
+                volatile 可视化
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">volatile int flag</span>
+                  <span className="var-type">Always Reload</span>
+                </div>
+                <div className="memory-container">
+                  <div className={`memory-box definition ${step >= 2 ? 'active' : ''}`}>
+                    <div style={{fontSize:13,fontWeight:700,color:'#581c87',marginBottom:12}}>内存访问跟踪</div>
+                    {accesses.map((a, idx) => (
+                      <div key={a.name} className="access-row">
+                        <span className="access-label">{a.name}</span>
+                        <div className={`access-box ${(step >= 2 && idx === 0) || (step >= 3 && idx === 1) || (step >= 4 && idx === 2) || (step >= 5 && idx === 3) ? 'active' : ''}`}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                            <span className="access-value">flag = {a.value}</span>
+                            <div className="refresh-indicator">
+                              <span>刷新</span>
+                              <div className={`refresh-dot ${((step >= 2 && idx === 0) || (step >= 3 && idx === 1) || (step >= 4 && idx === 2) || (step >= 5 && idx === 3)) ? 'active' : ''}`}></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{background:'#fef3c7',borderRadius:12px,padding:16,border:2px dashed'#f59e0b',margin:16px 0}}>
+                  <div style={{fontSize:11,color:'#78350f',fontWeight:700,marginBottom:8}}>⚠️ 没有 volatile 会怎样？</div>
+                  <div style={{fontSize:10,color:'#92400e',fontFamily:'Consolas'}}>编译器可能优化为:</div>
+                  <div style={{fontSize:10,color:'#92400e',fontFamily:'Consolas',marginTop:4}}>if(flag == 0) while(1); // 死循环</div>
+                  <div style={{fontSize:10,color:'#78350f',marginTop:8}}>volatile 强制每次循环都重新读取内存</div>
+                </div>
+                <div className="comparison-grid">
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">int x</div>
+                    <div className="compare-code">可缓存到寄存器</div>
+                    <div className="compare-desc">编译器可优化</div>
+                  </div>
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">volatile int x</div>
+                    <div className="compare-code">必须访问内存</div>
+                    <div className="compare-desc">禁止优化</div>
+                  </div>
+                </div>
+                <div className="use-case-list">
+                  <div className={`use-item ${step >= 2 ? 'active' : ''}`}>
+                    <div className="use-title">硬件寄存器映射</div>
+                    <div className="use-example">volatile uint32_t *reg = 0x40021000;</div>
+                  </div>
+                  <div className={`use-item ${step >= 3 ? 'active' : ''}`}>
+                    <div className="use-title">中断服务程序共享变量</div>
+                    <div className="use-example">volatile int irq_flag;</div>
+                  </div>
+                  <div className={`use-item ${step >= 4 ? 'active' : ''}`}>
+                    <div className="use-title">多线程共享标志</div>
+                    <div className="use-example">volatile bool stop_flag;</div>
+                  </div>
+                  <div className={`use-item ${step >= 5 ? 'active' : ''}`}>
+                    <div className="use-title">内存映射 I/O</div>
+                    <div className="use-example">volatile char *mmio_base;</div>
+                  </div>
+                </div>
+              </div>
+              {step >= 5 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.purple}}>volatile 作用</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>禁止编译器优化</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>每次访问</strong>
+                <p style={{marginTop:8,color:'#78350f'>都从内存重新读取</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>使用场景</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>硬件、中断、多线程</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>注意事项</strong>
+                <p style={{marginTop:8,color:#78350f'}}>不保证原子性</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

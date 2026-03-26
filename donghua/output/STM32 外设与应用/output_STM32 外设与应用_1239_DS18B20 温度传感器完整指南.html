@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 DS18B20 温度传感器完整指南 - 题库动画生成器</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { visibility: visible; } 50% { visibility: hidden; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 100% { transform: translateY(20px); } }
+        @keyframes press { 0% { transform: scale(1); } 50% { transform: scale(0.95); } 100% { transform: scale(1); } }
+        @keyframes release { 0% { transform: scale(0.95); } 100% { transform: scale(1); } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        @keyframes jitter { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+        @keyframes debounce { 0% { transform: scale(1); } 50% { transform: scale(0.8); } 100% { transform: scale(1); } }
+        @keyframes longpress { 0% { transform: scale(1); } 100% { transform: scale(1.1); } }
+        @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(255,255,0,0.3); } 50% { background-color: rgba(255,255,0,0.8); } }
+        @keyframes activate { 0% { box-shadow: 0 0 5px currentColor; } 50% { box-shadow: 0 0 20px currentColor; } 100% { box-shadow: 0 0 5px currentColor; } }
+        @keyframes wave { 0% { transform: rotate(0deg); } 25% { transform: rotate(-10deg); } 75% { transform: rotate(10deg); } 100% { transform: rotate(0deg); } }
+        @keyframes staircase { 0% { transform: translateY(0); } 25% { transform: translateY(-5px); } 50% { transform: translateY(-10px); } 75% { transform: translateY(-15px); } 100% { transform: translateY(0); } }
+        @keyframes smooth { 0% { transform: translateY(0); } 100% { transform: translateY(-20px); } }
+        @keyframes triangle { 0% { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); } 50% { clip-path: polygon(50% 100%, 0% 0%, 100% 0%); } 100% { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); } }
+        @keyframes noise { 0% { transform: translate(0,0); } 25% { transform: translate(-2px,2px); } 50% { transform: translate(2px,-2px); } 75% { transform: translate(-2px,-2px); } 100% { transform: translate(0,0); } }
+        @keyframes tick { 0% { transform: rotate(-30deg); } 100% { transform: rotate(0deg); } }
+        @keyframes second { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes update { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        @keyframes alarm { 0%, 100% { background-color: rgba(255,0,0,0.3); } 50% { background-color: rgba(255,0,0,0.8); } }
+        @keyframes backup { 0% { transform: translateX(0); } 50% { transform: translateX(10px); } 100% { transform: translateX(0); } }
+        @keyframes circular { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes transfer { 0% { transform: translateX(0) scale(1); } 50% { transform: translateX(50px) scale(0.8); } 100% { transform: translateX(0) scale(1); } }
+        @keyframes read { 0% { transform: scaleX(1); } 50% { transform: scaleX(1.2); } 100% { transform: scaleX(1); } }
+        @keyframes write { 0% { transform: scaleY(1); } 50% { transform: scaleY(0.8); } 100% { transform: scaleY(1); } }
+        @keyframes move { 0% { transform: translate(0,0); } 25% { transform: translate(10px,0); } 50% { transform: translate(20px,10px); } 75% { transform: translate(10px,20px); } 100% { transform: translate(0,0); } }
+        @keyframes tempRise { 0% { transform: scaleY(0.3); } 100% { transform: scaleY(1); } }
+        @keyframes dataBit { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        @keyframes wirePulse { 0% { stroke-opacity: 0.3; } 50% { stroke-opacity: 1; } 100% { stroke-opacity: 0.3; } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s infinite; }
+        .animate-press { animation: press 0.2s ease-out; }
+        .animate-release { animation: release 0.2s ease-out; }
+        .animate-bounce { animation: bounce 1s infinite; }
+        .animate-jitter { animation: jitter 0.3s infinite; }
+        .animate-debounce { animation: debounce 0.3s ease-out; }
+        .animate-longpress { animation: longpress 1.5s infinite; }
+        .animate-scan { animation: scan 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-activate { animation: activate 1s infinite; }
+        .animate-wave { animation: wave 1s infinite; }
+        .animate-staircase { animation: staircase 2s infinite; }
+        .animate-smooth { animation: smooth 1.5s infinite; }
+        .animate-triangle { animation: triangle 2s infinite; }
+        .animate-noise { animation: noise 0.3s infinite; }
+        .animate-tick { animation: tick 0.3s ease-out; }
+        .animate-second { animation: second 1s linear infinite; }
+        .animate-update { animation: update 1s infinite; }
+        .animate-alarm { animation: alarm 0.5s infinite; }
+        .animate-backup { animation: backup 0.5s infinite; }
+        .animate-circular { animation: circular 1s linear infinite; }
+        .animate-transfer { animation: transfer 1s infinite; }
+        .animate-read { animation: read 0.5s ease-out; }
+        .animate-write { animation: write 0.5s ease-out; }
+        .animate-move { animation: move 2s infinite; }
+        .animate-tempRise { animation: tempRise 2s ease-out; }
+        .animate-dataBit { animation: dataBit 0.5s infinite; }
+        .animate-wirePulse { animation: wirePulse 0.1s infinite; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#06b6d4',
+            secondary: '#0891b2',
+            accent: '#22d3ee',
+            light: '#cffafe',
+            dark: '#164e63',
+            highlight: '#67e8f9'
+        };
+
+        const STEPS = [
+            {
+                title: "DS18B20 基础",
+                narration: "DS18B20 是单总线数字温度传感器。-55°C 到 +125°C 测量范围，9-12 位可调分辨率，无需外部 ADC。",
+                code: `// DS18B20 主要特性
+// ┌─────────────────────────────────────┐
+// │ 测温范围：-55°C ~ +125°C           │
+// │ 精度：±0.5°C (-10°C~+85°C)        │
+// │ 分辨率：9-12 位可调 (0.5°C~0.0625°C)│
+// │ 接口：单总线 (One-Wire)            │
+// │ 电源：3.0V-5.5V (寄生/外部供电)    │
+// │ 唯一 64 位 ROM ID                    │
+// └─────────────────────────────────────┘
+
+// 温度分辨率配置
+// 9 位：0.5°C    转换时间 93.75ms
+// 10 位：0.25°C   转换时间 187.5ms
+// 11 位：0.125°C  转换时间 375ms
+// 12 位：0.0625°C 转换时间 750ms (默认)
+
+// 单总线特性
+// - 仅需一根数据线
+// - 支持多点组网 (最多 8 个)
+// - 每个器件唯一 64 位地址
+// - 空闲时高电平 (上拉电阻 4.7kΩ)`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">DS18B20 特性</div>
+                        {/* DS18B20 封装 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="bg-gray-800 rounded-lg p-4 border-2 border-gray-500">
+                                <div className="text-white text-sm font-bold text-center">DS18B20</div>
+                                <div className="flex justify-center space-x-4 mt-2">
+                                    <div className="text-cyan-300 text-xs">
+                                        <div>TO-92</div>
+                                        <div>封装</div>
+                                    </div>
+                                    <div className="text-green-300 text-xs">
+                                        <div>-55~125°C</div>
+                                        <div>范围</div>
+                                    </div>
+                                    <div className="text-yellow-300 text-xs">
+                                        <div>12 位</div>
+                                        <div>精度</div>
+                                    </div>
+                                </div>
+                                <div className="text-white text-xs text-center mt-2 font-mono">64 位 ROM</div>
+                            </div>
+                        </div>
+                        {/* 温度显示 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <div className="bg-red-800 rounded-lg p-3 border-2 border-red-500">
+                                <div className="text-white text-xs text-center">当前温度</div>
+                                <div className="text-red-300 text-2xl font-mono text-center">25.5°C</div>
+                                <div className="text-cyan-300 text-xs text-center">12 位精度</div>
+                            </div>
+                        </div>
+                        {/* 引脚 */}
+                        <div className="absolute bottom-4 left-8">
+                            <div className="text-white text-xs">
+                                <div>1: GND</div>
+                                <div>2: DQ</div>
+                                <div>3: VDD</div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "DS18B20:Maxim/Dallas 单总线温度传感器",
+                    "测温范围：-55°C 至 +125°C",
+                    "精度：±0.5°C(常温范围)",
+                    "分辨率：9-12 位软件可调",
+                    "单总线：仅需一根数据线",
+                    "64 位 ROM: 唯一设备地址",
+                    "寄生供电：可从数据线取电",
+                    "转换时间：12 位时 750ms"
+                ]
+            },
+            {
+                title: "工作原理",
+                narration: "单总线协议通过严格时序实现双向通信。主机发起复位，发送 ROM 命令，然后发送功能命令，最后读取温度数据。",
+                code: `// 单总线通信流程
+// 1. 初始化复位
+//    主机：拉低 480-960μs → 释放
+//    从机：检测到上升沿后等待 15-60μs → 拉低 60-240μs
+//
+// 2. ROM 命令 (64 位地址匹配)
+//    0xCC: Skip ROM (单器件时无需地址)
+//    0x33: Read ROM (读取 64 位地址)
+//    0x55: Match ROM (匹配特定地址)
+//    0xF0: Search ROM (总线搜索)
+//
+// 3. 功能命令
+//    0x44: Start Conversion (开始温度转换)
+//    0xBE: Read Scratchpad (读取暂存器)
+//    0x4E: Write Scratchpad (写入配置)
+//
+// 4. 读取温度数据 (16 位)
+//    高 8 位：整数部分 + 符号位
+//    低 8 位：小数部分`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">通信流程</div>
+                        {/* 通信时序 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 w-full">
+                            <div className="text-white text-xs mb-2 text-center">单总线时序</div>
+                            <svg width="400" height="80">
+                                {/* 复位脉冲 */}
+                                <polyline points="10,20 50,20 50,60 200,60 200,20 250,20" fill="none" stroke="#22d3ee" strokeWidth="2" />
+                                <text x="60" y="45" fill="white" fontSize="10">复位 480-960μs</text>
+                                <text x="210" y="45" fill="white" fontSize="10">存在脉冲 60-240μs</text>
+                                {/* ROM 命令 */}
+                                <rect x="270" y="30" width="40" height="20" fill="#3b82f6" />
+                                <text x="275" y="43" fill="white" fontSize="8">ROM</text>
+                                {/* 功能命令 */}
+                                <rect x="320" y="30" width="40" height="20" fill="#10b981" />
+                                <text x="325" y="43" fill="white" fontSize="8">CMD</text>
+                                {/* 数据 */}
+                                <rect x="370" y="30" width="20" height="20" fill="#f59e0b" />
+                                <text x="375" y="43" fill="white" fontSize="8">D</text>
+                            </svg>
+                        </div>
+                        {/* 状态指示 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4">
+                            <div className="bg-blue-800 rounded p-2 border border-blue-500">
+                                <div className="text-white text-xs text-center">复位</div>
+                            </div>
+                            <div className="bg-green-800 rounded p-2 border border-green-500">
+                                <div className="text-white text-xs text-center">ROM 命令</div>
+                            </div>
+                            <div className="bg-yellow-800 rounded p-2 border border-yellow-500">
+                                <div className="text-white text-xs text-center">功能命令</div>
+                            </div>
+                            <div className="bg-red-800 rounded p-2 border border-red-500">
+                                <div className="text-white text-xs text-center">数据</div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "复位：主机拉低 480-960μs",
+                    "存在脉冲：从机响应 60-240μs 低电平",
+                    "ROM 命令：0xCC 跳过 ROM(单设备)",
+                    "功能命令：0x44 转换，0xBE 读取",
+                    "写时隙：主机拉低启动，15μs 内采样",
+                    "读时隙：主机拉低启动，从机驱动数据",
+                    "16 位数据：高 8 位整数 + 符号，低 8 位小数",
+                    "时序严格：us 级延时要求"
+                ]
+            },
+            {
+                title: "硬件连接",
+                narration: "DS18B20 三引脚连接。VDD 接 3.3V，GND 接地，DQ 接 GPIO(如 PA0)。数据线需 4.7kΩ上拉电阻。",
+                code: `// STM32 与 DS18B20 连接
+// DS18B20 引脚    STM32
+// 1  GND       →   GND
+// 2  DQ        →   PA0 (GPIO 开漏/推挽)
+// 3  VDD       →   3.3V (或 GND 寄生供电)
+
+// 上拉电阻
+// DQ 线与 VDD 之间接 4.7kΩ电阻
+// 作用：确保空闲时高电平
+//      提供寄生供电电流
+
+// 寄生供电模式
+// VDD 接 GND，从 DQ 线取电
+// 优点：仅需两根线
+// 缺点：转换期间需强上拉
+
+// 长距离连接
+// 距离&gt;5 米时，减小上拉电阻至 2kΩ
+// 或增加外部供电`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">硬件连接</div>
+                        {/* STM32 */}
+                        <div className="absolute left-4 top-1/2 transform -translate-y-1/2 w-20 h-32 bg-gradient-to-b from-blue-800 to-blue-900 rounded-lg border-2 border-blue-500">
+                            <div className="text-white text-xs text-center py-2 font-bold">STM32</div>
+                            <div className="text-cyan-300 text-xs text-center font-mono mt-4">PA0</div>
+                            <div className="text-cyan-300 text-xs text-center">GPIO</div>
+                        </div>
+                        {/* 上拉电阻 */}
+                        <div className="absolute left-32 top-10">
+                            <div className="bg-yellow-600 rounded p-2 border-2 border-yellow-400">
+                                <div className="text-white text-xs text-center">4.7kΩ</div>
+                            </div>
+                            <div className="text-white text-xs text-center mt-1">上拉</div>
+                        </div>
+                        {/* DS18B20 */}
+                        <div className="absolute right-4 top-1/2 transform -translate-y-1/2 w-24 h-32 bg-gray-800 rounded-lg border-2 border-gray-500">
+                            <div className="text-white text-xs text-center py-2 font-bold">DS18B20</div>
+                            <div className="grid grid-cols-3 gap-2 mt-2">
+                                <div className="text-gray-400 text-xs text-center">GND</div>
+                                <div className="text-cyan-300 text-xs text-center">DQ</div>
+                                <div className="text-green-300 text-xs text-center">VDD</div>
+                            </div>
+                        </div>
+                        {/* 连线 */}
+                        <svg className="absolute inset-0 w-full h-full">
+                            <line x1="130" y1="160" x2="180" y2="160" stroke="#22d3ee" strokeWidth="2" />
+                            <line x1="180" y1="160" x2="180" y2="80" stroke="#fbbf24" strokeWidth="2" strokeDasharray="5,5" />
+                            <line x1="210" y1="160" x2="260" y2="160" stroke="#22d3ee" strokeWidth="2" />
+                        </svg>
+                    </div>
+                ),
+                explanations: [
+                    "GND: 共地连接",
+                    "DQ: 数据线，双向开漏/推挽",
+                    "VDD:3.3V 供电或寄生接地",
+                    "4.7kΩ上拉：确保空闲高电平",
+                    "寄生供电：VDD 接地，从 DQ 取电",
+                    "强上拉：温度转换时需额外电流",
+                    "长线驱动：缩短上拉电阻值",
+                    "多点组网：同一总线多个传感器"
+                ]
+            },
+            {
+                title: "GPIO 配置",
+                narration: "配置 PA0 为开漏输出模式。开漏输出适合单总线，外部上拉确保高电平。也可用推挽输出。",
+                code: `void DS18B20_GPIO_Init(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    // PA0: 开漏输出，50MHz (单总线推荐)
+    GPIOA->CRL &= ~0x0000000F;
+    GPIOA->CRL |= 0x00000007;  // AF_OD, 50MHz
+
+    // 或使用推挽输出 (也适用)
+    // GPIOA->CRL |= 0x00000003;  // 推挽
+
+    // 默认输出高 (释放总线)
+    GPIOA->BSRR = (1 << 0);
+}
+
+// 总线控制宏
+#define DQ_OUT_LOW()   GPIOA->BRR = (1 << 0)    // 输出 0
+#define DQ_OUT_HIGH()  GPIOA->BSRR = (1 << 0)   // 输出 1(释放)
+#define DQ_READ()      (GPIOA->IDR & (1 << 0))  // 读取
+
+// 精确延时 (1μs 基准)
+void Delay_us(uint32_t us) {
+    // 使用定时器或 CPU 循环
+    // 72MHz 时，1 循环≈13.9ns
+    volatile uint32_t delay = us * 5;
+    while (delay--);
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">GPIO 配置 (开漏输出)</div>
+                        {/* GPIO 寄存器 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="bg-blue-900 rounded-lg p-4 border-2 border-blue-500">
+                                <div className="text-white text-sm font-bold mb-2">GPIOA CRL 配置</div>
+                                <div className="grid grid-cols-8 gap-1">
+                                    {Array.from({length: 8}).map((_, i) => (
+                                        <div key={i} className={`p-2 rounded text-center text-xs ${i===0 ? 'bg-cyan-500 animate-pulse' : 'bg-gray-700'}`}>
+                                            <div className="text-white">P{i}</div>
+                                            <div className="text-cyan-200 font-mono">{i===0 ? '0111' : '----'}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="text-cyan-300 text-xs mt-2">MODE[1:0]=11(50MHz), CNF[1:0]=01(开漏)</div>
+                            </div>
+                        </div>
+                        {/* 开漏原理 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <div className="flex items-center space-x-4">
+                                <div className="bg-gray-700 rounded p-2">
+                                    <div className="text-white text-xs">MOSFET</div>
+                                    <div className="text-gray-300 text-xs">导通=GND</div>
+                                </div>
+                                <div className="text-white text-xl">+</div>
+                                <div className="bg-yellow-600 rounded p-2">
+                                    <div className="text-white text-xs">4.7kΩ</div>
+                                    <div className="text-yellow-200 text-xs">上拉</div>
+                                </div>
+                                <div className="text-white text-xl">=</div>
+                                <div className="bg-cyan-600 rounded p-2 animate-pulse">
+                                    <div className="text-white text-xs">DQ 线</div>
+                                    <div className="text-cyan-200 text-xs">0/1</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "RCC 使能：GPIOA 时钟",
+                    "CRL 寄存器：控制引脚 0-7",
+                    "MODE=11:50MHz 高速",
+                    "CNF=01: 复用开漏输出",
+                    "开漏输出：需外部上拉",
+                    "DQ_OUT_LOW: 拉低总线",
+                    "DQ_OUT_HIGH: 释放总线 (高电平)",
+                    "DQ_READ: 读取总线状态"
+                ]
+            },
+            {
+                title: "复位时序",
+                narration: "主机拉低总线 480-960μs 发起复位，释放后等待 15-60μs，DS18B20 拉低 60-240μs 作为存在脉冲响应。",
+                code: `// DS18B20 复位时序
+uint8_t DS18B20_Reset(void) {
+    uint8_t presence;
+
+    // 主机复位脉冲：拉低 480μs
+    DQ_OUT_LOW();
+    Delay_us(480);
+
+    // 释放总线，等待从机响应
+    DQ_OUT_HIGH();
+    Delay_us(15);  // 等待 15-60μs
+
+    // 读取存在脉冲 (60-240μs 低电平)
+    presence = DQ_READ();
+    Delay_us(50);  // 采样窗口
+
+    // 等待总线恢复 (剩余时间)
+    Delay_us(200);
+
+    // presence=0 表示检测到器件
+    return presence;
+}
+
+// 使用示例
+if (DS18B20_Reset() == 0) {
+    // 成功检测到 DS18B20
+} else {
+    // 未检测到器件，检查连接
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">复位时序</div>
+                        {/* 复位波形 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <svg width="350" height="80">
+                                {/* 主机复位 */}
+                                <polyline points="10,20 50,20 50,60 180,60 180,20 200,20" fill="none" stroke="#22d3ee" strokeWidth="2" />
+                                <text x="60" y="45" fill="white" fontSize="10">主机复位 480μs</text>
+                                {/* 等待 */}
+                                <line x1="200" y1="20" x2="220" y2="20" stroke="#22d3ee" strokeWidth="2" />
+                                <text x="205" y="35" fill="white" fontSize="8">15μs</text>
+                                {/* 存在脉冲 */}
+                                <polyline points="220,20 220,60 320,60 320,20 340,20" fill="none" stroke="#10b981" strokeWidth="2" />
+                                <text x="240" y="45" fill="white" fontSize="10">存在脉冲 60-240μs</text>
+                            </svg>
+                        </div>
+                        {/* 状态指示 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4">
+                            <div className="bg-blue-800 rounded p-2 border border-blue-500">
+                                <div className="text-white text-xs text-center">主机拉低</div>
+                                <div className="text-blue-300 text-xs text-center">480μs</div>
+                            </div>
+                            <div className="text-white text-xl">→</div>
+                            <div className="bg-green-800 rounded p-2 border border-green-500 animate-pulse">
+                                <div className="text-white text-xs text-center">从机响应</div>
+                                <div className="text-green-300 text-xs text-center">60-240μs</div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "DQ_OUT_LOW: 主机拉低总线",
+                    "Delay_us(480): 保持 480-960μs",
+                    "DQ_OUT_HIGH: 释放总线",
+                    "Delay_us(15): 等待 15-60μs",
+                    "DQ_READ: 读取存在脉冲",
+                    "存在脉冲=0: 检测到器件",
+                    "存在脉冲=1: 无响应 (故障)",
+                    "应用：每次通信前必须复位"
+                ]
+            },
+            {
+                title: "读写时序",
+                narration: "写时隙：主机拉低启动，15μs 内写入数据。读时隙：主机拉低启动，DS18B20 驱动数据，主机 15μs 后采样。",
+                code: `// 写一个字节
+void DS18B20_WriteByte(uint8_t data) {
+    for (int i = 0; i < 8; i++) {
+        if (data & (1 << i)) {
+            // 写 1: 拉低 1μs 后释放
+            DQ_OUT_LOW();
+            Delay_us(2);
+            DQ_OUT_HIGH();
+            Delay_us(60);  // 整个时隙 60-120μs
+        } else {
+            // 写 0: 拉低 60μs
+            DQ_OUT_LOW();
+            Delay_us(60);
+            DQ_OUT_HIGH();
+        }
+    }
+}
+
+// 读一个字节
+uint8_t DS18B20_ReadByte(void) {
+    uint8_t data = 0;
+    for (int i = 0; i < 8; i++) {
+        DQ_OUT_LOW();
+        Delay_us(2);
+        DQ_OUT_HIGH();
+        Delay_us(10);  // 等待数据稳定
+        if (DQ_READ()) {
+            data |= (1 << i);
+        }
+        Delay_us(50);  // 完成时隙
+    }
+    return data;
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">读写时序</div>
+                        {/* 写时隙 */}
+                        <div className="absolute top-16 left-4">
+                            <div className="text-white text-xs mb-2">写时隙</div>
+                            <svg width="150" height="60">
+                                {/* 写 1 */}
+                                <polyline points="10,20 20,20 20,50 30,50 30,20 60,20" fill="none" stroke="#4ade80" strokeWidth="2" />
+                                <text x="15" y="45" fill="#4ade80" fontSize="8">写 1</text>
+                                {/* 写 0 */}
+                                <polyline points="70,20 80,20 80,50 130,50 130,20 140,20" fill="none" stroke="#f87171" strokeWidth="2" />
+                                <text x="90" y="45" fill="#f87171" fontSize="8">写 0</text>
+                            </svg>
+                        </div>
+                        {/* 读时隙 */}
+                        <div className="absolute top-16 right-4">
+                            <div className="text-white text-xs mb-2">读时隙</div>
+                            <svg width="150" height="60">
+                                <polyline points="10,20 20,20 20,50 40,50 40,35 60,35 60,20 140,20" fill="none" stroke="#60a5fa" strokeWidth="2" />
+                                <text x="45" y="30" fill="#60a5fa" fontSize="8">从机数据</text>
+                                <text x="70" y="50" fill="white" fontSize="8">采样点</text>
+                            </svg>
+                        </div>
+                        {/* 时序参数 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <div className="text-white text-xs text-center">
+                                <div>写 1: 拉低 2μs，总 60-120μs</div>
+                                <div>写 0: 拉低 60μs</div>
+                                <div>读：采样 15μs 后</div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "写时隙：主机发起拉低",
+                    "写 1: 拉低 1-15μs 后释放",
+                    "写 0: 拉低 60-120μs",
+                    "读时隙：主机拉低启动",
+                    "从机驱动：15-60μs 数据有效",
+                    "采样时刻：主机拉低后 15μs",
+                    "时隙完成：60-120μs",
+                    "LSB 先行：先发最低位"
+                ]
+            },
+            {
+                title: "温度读取",
+                narration: "发送 0xCC 跳过 ROM，0x44 启动转换，等待 750ms 后，再发送 0xCC 和 0xBE 读取 16 位温度数据。",
+                code: `// 读取温度 (整数 + 小数)
+float DS18B20_ReadTemp(void) {
+    int16_t raw;
+    float temperature;
+
+    // 复位 + Skip ROM + 启动转换
+    DS18B20_Reset();
+    DS18B20_WriteByte(0xCC);  // Skip ROM
+    DS18B20_WriteByte(0x44);  // Start Conversion
+
+    // 等待转换完成 (12 位=750ms)
+    Delay_ms(750);
+
+    // 复位 + Skip ROM + 读取暂存器
+    DS18B20_Reset();
+    DS18B20_WriteByte(0xCC);
+    DS18B20_WriteByte(0xBE);
+
+    // 读取 16 位温度 (LSB 先行)
+    uint8_t lsb = DS18B20_ReadByte();
+    uint8_t msb = DS18B20_ReadByte();
+    raw = (msb << 8) | lsb;
+
+    // 转换为摄氏度 (12 位分辨率)
+    temperature = raw * 0.0625f;
+
+    return temperature;
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">温度读取流程</div>
+                        {/* 命令序列 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="flex items-center space-x-2">
+                                <div className="bg-blue-600 rounded p-2 border-2 border-blue-400">
+                                    <div className="text-white text-xs text-center">复位</div>
+                                </div>
+                                <div className="text-white text-xl">→</div>
+                                <div className="bg-green-600 rounded p-2 border-2 border-green-400">
+                                    <div className="text-white text-xs text-center">0xCC</div>
+                                    <div className="text-green-200 text-xs text-center">Skip ROM</div>
+                                </div>
+                                <div className="text-white text-xl">→</div>
+                                <div className="bg-yellow-600 rounded p-2 border-2 border-yellow-400">
+                                    <div className="text-white text-xs text-center">0x44</div>
+                                    <div className="text-yellow-200 text-xs text-center">转换</div>
+                                </div>
+                                <div className="text-white text-xl">→</div>
+                                <div className="bg-red-600 rounded p-2 border-2 border-red-400 animate-pulse">
+                                    <div className="text-white text-xs text-center">750ms</div>
+                                    <div className="text-red-200 text-xs text-center">等待</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* 数据格式 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <div className="text-white text-xs text-center mb-2">16 位温度数据</div>
+                            <div className="flex items-center space-x-1">
+                                <div className="bg-blue-800 rounded p-2 border border-blue-500 w-24">
+                                    <div className="text-white text-xs text-center">MSB</div>
+                                    <div className="text-blue-200 text-xs text-center font-mono">S SSS S</div>
+                                    <div className="text-blue-300 text-xs text-center">整数+ 符号</div>
+                                </div>
+                                <div className="bg-green-800 rounded p-2 border border-green-500 w-24">
+                                    <div className="text-white text-xs text-center">LSB</div>
+                                    <div className="text-green-200 text-xs text-center font-mono">FFFF</div>
+                                    <div className="text-green-300 text-xs text-center">小数</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "0xCC:Skip ROM(单设备模式)",
+                    "0x44: 启动温度转换",
+                    "等待 750ms:12 位分辨率转换时间",
+                    "0xBE: 读取暂存器",
+                    "LSB 先行：先发低 8 位",
+                    "raw*0.0625:12 位转摄氏度",
+                    "S 符号位：1 为负温度",
+                    "负温度：补码表示"
+                ]
+            },
+            {
+                title: "ROM 操作",
+                narration: "64 位 ROM 地址包含 8 位家族码、48 位序列号、8 位 CRC。使用 0x33 读取，0x55 匹配特定设备地址。",
+                code: `// 64 位 ROM 结构
+// ┌─────────┬──────────────────┬────────┐
+// │ 家族码  │   48 位序列号      │ CRC8   │
+// │ 8 位     │   唯一 ID         │ 校验   │
+// └─────────┴──────────────────┴────────┘
+
+// 读取 ROM 地址
+void DS18B20_ReadROM(uint8_t *rom) {
+    DS18B20_Reset();
+    DS18B20_WriteByte(0x33);  // Read ROM
+
+    for (int i = 0; i < 8; i++) {
+        rom[i] = DS18B20_ReadByte();
+    }
+}
+
+// 匹配 ROM(多设备寻址)
+void DS18B20_MatchROM(uint8_t *rom) {
+    DS18B20_Reset();
+    DS18B20_WriteByte(0x55);  // Match ROM
+
+    for (int i = 0; i < 8; i++) {
+        DS18B20_WriteByte(rom[i]);
+    }
+}
+
+// CRC8 校验
+uint8_t DS18B20_CRC8(uint8_t *data, uint8_t len) {
+    uint8_t crc = 0;
+    for (int i = 0; i < len; i++) {
+        // CRC8 计算 (x^8+x^5+x^4+1)
+        // ... 实现代码
+    }
+    return crc;
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">64 位 ROM 地址</div>
+                        {/* ROM 结构 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="flex items-center space-x-1">
+                                <div className="bg-blue-600 rounded p-3 border-2 border-blue-400">
+                                    <div className="text-white text-xs text-center">家族码</div>
+                                    <div className="text-blue-200 text-lg font-mono text-center">0x28</div>
+                                    <div className="text-blue-300 text-xs text-center">[7:0]</div>
+                                </div>
+                                <div className="bg-green-600 rounded p-3 border-2 border-green-400">
+                                    <div className="text-white text-xs text-center">48 位序列号</div>
+                                    <div className="text-green-200 text-sm font-mono text-center">唯一 ID</div>
+                                    <div className="text-green-300 text-xs text-center">[55:8]</div>
+                                </div>
+                                <div className="bg-yellow-600 rounded p-3 border-2 border-yellow-400">
+                                    <div className="text-white text-xs text-center">CRC8</div>
+                                    <div className="text-yellow-200 text-lg font-mono text-center">XX</div>
+                                    <div className="text-yellow-300 text-xs text-center">[63:56]</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* 命令 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4">
+                            <div className="bg-purple-800 rounded p-2 border border-purple-500">
+                                <div className="text-white text-xs text-center">0x33</div>
+                                <div className="text-purple-300 text-xs text-center">读 ROM</div>
+                            </div>
+                            <div className="bg-red-800 rounded p-2 border border-red-500">
+                                <div className="text-white text-xs text-center">0x55</div>
+                                <div className="text-red-300 text-xs text-center">匹配 ROM</div>
+                            </div>
+                            <div className="bg-blue-800 rounded p-2 border border-blue-500">
+                                <div className="text-white text-xs text-center">0xF0</div>
+                                <div className="text-blue-300 text-xs text-center">搜索 ROM</div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "家族码：0x28(DS18B20)",
+                    "48 位序列号：全球唯一 ID",
+                    "CRC8: 校验前 56 位正确性",
+                    "0x33:Read ROM(读取地址)",
+                    "0x55:Match ROM(匹配寻址)",
+                    "0xF0:Search ROM(总线搜索)",
+                    "0xCC:Skip ROM(跳过寻址)",
+                    "应用：多设备组网识别"
+                ]
+            },
+            {
+                title: "应用实例",
+                narration: "DS18B20 综合应用：温度监控、恒温控制、温度记录仪、多点测温。结合继电器实现温度报警。",
+                code: `// 温度监控 (带阈值报警)
+void TEMP_Monitor(float threshold_high, float threshold_low) {
+    float temp = DS18B20_ReadTemp();
+
+    if (temp > threshold_high) {
+        // 高温报警
+        LED_Red_ON();
+        Buzzer_Beep(1000, 500);
+    } else if (temp < threshold_low) {
+        // 低温报警
+        LED_Blue_ON();
+        Buzzer_Beep(500, 500);
+    } else {
+        // 正常范围
+        LED_Green_ON();
+    }
+}
+
+// 温度记录 (存储历史数据)
+typedef struct {
+    float temp;
+    uint32_t timestamp;
+} TempRecord_t;
+
+TempRecord_t history[100];
+void TEMP_Log(void) {
+    static uint8_t index = 0;
+    history[index].temp = DS18B20_ReadTemp();
+    history[index].timestamp = GetTimestamp();
+    index = (index + 1) % 100;
+}
+
+// 多点测温 (单总线多设备)
+float DS18B20_ReadMulti(uint8_t *rom) {
+    DS18B20_MatchROM(rom);  // 选择特定设备
+    DS18B20_WriteByte(0x44);
+    Delay_ms(750);
+    DS18B20_Reset();
+    DS18B20_MatchROM(rom);
+    DS18B20_WriteByte(0xBE);
+    // ... 读取数据
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-cyan-900 to-cyan-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">应用实例</div>
+                        {/* 温度监控 */}
+                        <div className="absolute top-16 left-4 w-24 h-24 bg-red-800 rounded-lg border-2 border-red-500 animate-alarm">
+                            <div className="text-white text-xs text-center py-2">高温报警</div>
+                            <div className="text-red-300 text-2xl text-center">45°C</div>
+                            <div className="text-red-400 text-xs text-center animate-pulse">⚠️</div>
+                        </div>
+                        {/* 温度记录 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 w-32 h-24 bg-blue-800 rounded-lg border-2 border-blue-500">
+                            <div className="text-white text-xs text-center py-2">温度记录</div>
+                            <div className="text-blue-300 text-xs text-center font-mono">
+                                <div>25.5°C</div>
+                                <div>25.3°C</div>
+                                <div>25.6°C</div>
+                            </div>
+                        </div>
+                        {/* 多点测温 */}
+                        <div className="absolute top-16 right-4">
+                            <div className="flex space-x-2">
+                                <div className="bg-green-800 rounded p-2 border border-green-500 w-16">
+                                    <div className="text-white text-xs text-center">传感器 1</div>
+                                    <div className="text-green-300 text-sm text-center">25°C</div>
+                                </div>
+                                <div className="bg-green-800 rounded p-2 border border-green-500 w-16">
+                                    <div className="text-white text-xs text-center">传感器 2</div>
+                                    <div className="text-green-300 text-sm text-center">26°C</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* 应用场景 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 grid grid-cols-4 gap-2">
+                            <div className="bg-gray-800 rounded p-2 text-white text-xs text-center">监控</div>
+                            <div className="bg-gray-800 rounded p-2 text-white text-xs text-center">记录</div>
+                            <div className="bg-gray-800 rounded p-2 text-white text-xs text-center">报警</div>
+                            <div className="bg-gray-800 rounded p-2 text-white text-xs text-center">多点</div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "温度监控：阈值比较报警",
+                    "高温报警：红色 LED+ 蜂鸣器",
+                    "低温报警：蓝色 LED+ 蜂鸣器",
+                    "正常范围：绿色 LED 指示",
+                    "温度记录：循环存储 100 条",
+                    "时间戳：记录测量时刻",
+                    "多点测温：单总线多设备",
+                    "MatchROM: 选择特定传感器"
+                ]
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(true);
+            const [isInitialized, setIsInitialized] = React.useState(false);
+            const [availableVoices, setAvailableVoices] = React.useState([]);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                const voices = speechSynthesis.getVoices();
+                setAvailableVoices(voices);
+                const preferredVoice = voices.find(v => v.lang === 'zh-CN' && v.name.includes('Xiaoxiao')) ||
+                                       voices.find(v => v.lang === 'zh-CN') ||
+                                       voices[0];
+                if (preferredVoice && isPlaying && !isInitialized) {
+                    setIsInitialized(true);
+                    speakStep(0, preferredVoice);
+                }
+            }, []);
+
+            const getPreferredVoice = () => {
+                return availableVoices.find(v => v.lang === 'zh-CN' && v.name.includes('Xiaoxiao')) ||
+                       availableVoices.find(v => v.lang === 'zh-CN') ||
+                       availableVoices[0];
+            };
+
+            const speakStep = (stepIndex, voice) => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                    voiceEndTimerRef.current = null;
+                }
+
+                speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(STEPS[stepIndex].narration);
+                utterance.lang = 'zh-CN';
+                utterance.voice = voice || getPreferredVoice();
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            const next = (prev + 1) % STEPS.length;
+                            if (isPlaying) {
+                                setTimeout(() => speakStep(next, voice), 100);
+                            }
+                            return next;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            const next = (prev + 1) % STEPS.length;
+                            if (isPlaying) {
+                                setTimeout(() => speakStep(next, voice), 100);
+                            }
+                            return next;
+                        });
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            const handleStepClick = (index) => {
+                setCurrentStep(index);
+                const voice = getPreferredVoice();
+                speakStep(index, voice);
+            };
+
+            const togglePlayPause = () => {
+                if (isPlaying) {
+                    speechSynthesis.cancel();
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                        voiceEndTimerRef.current = null;
+                    }
+                    setIsPlaying(false);
+                } else {
+                    setIsPlaying(true);
+                    const voice = getPreferredVoice();
+                    speakStep(currentStep, voice);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-900 via-cyan-900 to-gray-900 p-8">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="text-center mb-8">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 DS18B20 温度传感器完整指南</h1>
+                            <p className="text-cyan-300">单总线 / 12 位精度 / -55~125°C / 64 位 ROM</p>
+                        </div>
+
+                        {/* Controls */}
+                        <div className="flex justify-center items-center space-x-4 mb-6">
+                            <button
+                                onClick={() => handleStepClick((currentStep - 1 + STEPS.length) % STEPS.length)}
+                                className="px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
+                            >
+                                ← 上一步
+                            </button>
+                            <button
+                                onClick={togglePlayPause}
+                                className={`px-8 py-3 rounded-lg transition-colors ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'} text-white`}
+                            >
+                                {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                            </button>
+                            <button
+                                onClick={() => handleStepClick((currentStep + 1) % STEPS.length)}
+                                className="px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
+                            >
+                                下一步 →
+                            </button>
+                        </div>
+
+                        {/* Progress */}
+                        <div className="flex justify-center space-x-2 mb-8">
+                            {STEPS.map((_, index) => (
+                                <div
+                                    key={index}
+                                    className={`w-3 h-3 rounded-full transition-colors ${index === currentStep ? 'bg-cyan-400' : 'bg-gray-600'}`}
+                                />
+                            ))}
+                        </div>
+
+                        {/* Main Content */}
+                        <div className="grid grid-cols-3 gap-6">
+                            {/* Code */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-cyan-400 mb-4">💻 代码</h3>
+                                <pre className="text-cyan-400 text-sm overflow-auto h-80 font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+
+                            {/* Visualization */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-cyan-400 mb-4">🎨 可视化</h3>
+                                <div className="h-80">
+                                    {STEPS[currentStep].visualization()}
+                                </div>
+                            </div>
+
+                            {/* Explanations */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-cyan-400 mb-4">📖 解释</h3>
+                                <ul className="space-y-3">
+                                    {STEPS[currentStep].explanations.map((exp, index) => (
+                                        <li key={index} className="text-white text-sm flex items-start">
+                                            <span className="text-cyan-400 mr-2">•</span>
+                                            <span>{exp}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+
+                        {/* Step Info */}
+                        <div className="mt-8 text-center">
+                            <h2 className="text-2xl font-bold text-cyan-400">
+                                {currentStep + 1}. {STEPS[currentStep].title}
+                            </h2>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

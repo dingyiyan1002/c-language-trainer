@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1186 - RTOS 基础任务调度 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: linear-gradient(135deg, #1e3a5f 0%, #0d2137 100%); color: #e0e7ff; min-height: 100vh; overflow-x: hidden; }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(0.98); } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 100% { transform: translateY(20px); } }
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes taskSwitch { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+        @keyframes queueMove { from { transform: translateX(-30px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .flow { animation: flow 2s infinite; }
+        .rotate { animation: rotate 2s linear infinite; }
+        .task-switch { animation: taskSwitch 1.5s infinite; }
+        .queue-move { animation: queueMove 0.5s ease-out; }
+
+        .task-block { transition: all 0.3s ease; }
+        .task-block:hover { transform: translateY(-2px); }
+        .state-transition { transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+
+        .code-line { display: block; padding: 2px 0; }
+        .code-keyword { color: #c678dd; }
+        .code-type { color: #e5c07b; }
+        .code-function { color: #61afef; }
+        .code-string { color: #98c379; }
+        .code-comment { color: #7f8c8d; font-style: italic; }
+        .code-number { color: #d19a66; }
+        .code-operator { color: #56b6c2; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // ========== COLOR MAP - 6 unique colors for this file ==========
+        const COLOR_MAP = {
+            primary: '#3b82f6',    // Blue - Running task
+            secondary: '#10b981',  // Emerald - Ready task
+            accent: '#f59e0b',     // Amber - Blocked task
+            bg: '#0f172a',         // Slate 900
+            text: '#f1f5f9',       // Slate 100
+            border: '#334155'      // Slate 700
+        };
+
+        // ========== SKILL.md v3.0 8 Regions ==========
+        const STEPS = [
+            { title: "任务状态模型", subtitle: "5 种任务状态", duration: 8000 },
+            { title: "任务控制块", subtitle: "TCB 数据结构", duration: 8000 },
+            { title: "调度器原理", subtitle: "优先级抢占式", duration: 8000 },
+            { title: "上下文切换", subtitle: "寄存器保存恢复", duration: 8000 },
+            { title: "任务间通信", subtitle: "队列机制", duration: 8000 },
+            { title: "同步机制", subtitle: "信号量与互斥量", duration: 8000 },
+            { title: "应用案例", subtitle: "多任务系统", duration: 8000 },
+            { title: "最佳实践", subtitle: "RTOS 编程指南", duration: 10000 }
+        ];
+
+        // ========== Main App ==========
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+            const synthRef = useRef(window.speechSynthesis);
+            const currentUtteranceRef = useRef(null);
+
+            // 任务调度状态
+            const [schedulerState, setSchedulerState] = useState({
+                runningTask: 0,
+                readyQueue: [1, 2, 3],
+                blockedTasks: [],
+                stackPointers: { 0: '0x20001000', 1: '0x20002000', 2: '0x20003000', 3: '0x20004000' }
+            });
+
+            // 上下文切换动画
+            const [contextSwitch, setContextSwitch] = useState({
+                animating: false,
+                fromTask: null,
+                toTask: null,
+                stage: 'save' // save -> switch -> restore
+            });
+
+            // ========== 语音合成 ==========
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+
+                // 停止之前的语音
+                if (currentUtteranceRef.current) {
+                    synthRef.current.cancel();
+                }
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                // 尝试使用 XiaoxiaoNeural 声音
+                const voices = synthRef.current.getVoices();
+                const xiaoxiaoVoice = voices.find(v =>
+                    v.name.includes('Xiaoxiao') ||
+                    v.name.includes('zh-CN') ||
+                    v.lang === 'zh-CN'
+                );
+                if (xiaoxiaoVoice) {
+                    utterance.voice = xiaoxiaoVoice;
+                }
+
+                // 语音结束时触发下一步
+                utterance.onend = () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) {
+                                return prev + 1;
+                            } else {
+                                setIsPlaying(false);
+                                return prev;
+                            }
+                        });
+                    }, 800);
+                };
+
+                // 错误处理：语音失败时自动进入下一步
+                utterance.onerror = (event) => {
+                    console.warn('Speech synthesis error:', event);
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) {
+                                return prev + 1;
+                            } else {
+                                setIsPlaying(false);
+                                return prev;
+                            }
+                        });
+                    }, 800);
+                };
+
+                currentUtteranceRef.current = utterance;
+                synthRef.current.speak(utterance);
+            }, [isMuted]);
+
+            // ========== 步骤推进 ==========
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.subtitle);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep, speak]);
+
+            // ========== 模拟任务调度 ==========
+            useEffect(() => {
+                if (currentStep >= 2 && currentStep < 5 && isPlaying) {
+                    const interval = setInterval(() => {
+                        setSchedulerState(prev => {
+                            const currentRunning = prev.runningTask;
+                            const nextReady = prev.readyQueue[0];
+
+                            if (nextReady === undefined) return prev;
+
+                            // 触发上下文切换
+                            setContextSwitch({
+                                animating: true,
+                                fromTask: currentRunning,
+                                toTask: nextReady,
+                                stage: 'save'
+                            });
+
+                            // 切换阶段
+                            setTimeout(() => {
+                                setContextSwitch(prev => ({ ...prev, stage: 'switch' }));
+                            }, 500);
+
+                            setTimeout(() => {
+                                setContextSwitch(prev => ({ ...prev, stage: 'restore' }));
+                            }, 1000);
+
+                            setTimeout(() => {
+                                setContextSwitch({ animating: false, fromTask: null, toTask: null, stage: 'save' });
+                            }, 1500);
+
+                            // 更新调度状态
+                            const newReadyQueue = [...prev.readyQueue.slice(1), currentRunning];
+
+                            return {
+                                runningTask: nextReady,
+                                readyQueue: newReadyQueue,
+                                blockedTasks: prev.blockedTasks,
+                                stackPointers: prev.stackPointers
+                            };
+                        });
+                    }, 3000);
+
+                    return () => clearInterval(interval);
+                }
+            }, [currentStep, isPlaying]);
+
+            // ========== 手动控制 ==========
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(currentStep + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(currentStep - 1);
+                }
+            };
+
+            const handleRestart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+                setSchedulerState({
+                    runningTask: 0,
+                    readyQueue: [1, 2, 3],
+                    blockedTasks: [],
+                    stackPointers: { 0: '0x20001000', 1: '0x20002000', 2: '0x20003000', 3: '0x20004000' }
+                });
+            };
+
+            // ========== 渲染代码区域 ==========
+            const renderCode = () => {
+                const codeSnippets = {
+                    0: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 任务状态枚举 */</span><br/>
+                            <span className="code-keyword">typedef enum</span> {<br/>
+                            &nbsp;&nbsp;TASK_STATE_DELETED,  <span className="code-comment">// 已删除</span><br/>
+                            &nbsp;&nbsp;TASK_STATE_READY,    <span className="code-comment">// 就绪态</span><br/>
+                            &nbsp;&nbsp;TASK_STATE_RUNNING,  <span className="code-comment">// 运行态</span><br/>
+                            &nbsp;&nbsp;TASK_STATE_BLOCKED,  <span className="code-comment">// 阻塞态</span><br/>
+                            &nbsp;&nbsp;TASK_STATE_SUSPENDED <span className="code-comment">// 挂起态</span><br/>
+                            } TaskState_t;<br/><br/>
+                            <span className="code-comment">/* 状态转换图 */</span><br/>
+                            <span className="code-function">Ready</span> <span className="code-operator">→</span> <span className="code-function">Running</span>: 调度器选中<br/>
+                            <span className="code-function">Running</span> <span className="code-operator">→</span> <span className="code-function">Blocked</span>: 等待事件<br/>
+                            <span className="code-function">Blocked</span> <span className="code-operator">→</span> <span className="code-function">Ready</span>: 事件到达<br/>
+                            <span className="code-function">Running</span> <span className="code-operator">→</span> <span className="code-function">Ready</span>: 时间片用完<br/>
+                        </div>
+                    ),
+                    1: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 任务控制块 TCB */</span><br/>
+                            <span className="code-keyword">typedef struct</span> {<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint32_t</span>* pStack;<br/>
+                            &nbsp;&nbsp;<span className="code-type">TaskState_t</span> state;<br/>
+                            &nbsp;&nbsp;<span className="code-type">uint8_t</span> priority;<br/>
+                            &nbsp;&nbsp;<span className="code-type">TickType_t</span> blockTime;<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">char</span> taskName[16];<br/>
+                            &nbsp;&nbsp;<span className="code-type">void</span>* pvParameters;<br/>
+                            } TCB_t;<br/><br/>
+                            <span className="code-comment">/* 栈帧结构 (Cortex-M) */</span><br/>
+                            <span className="code-comment">// 高地址 → 低地址:</span><br/>
+                            <span className="code-comment">// [R0-R3, R12, LR, PC, xPSR]</span><br/>
+                            <span className="code-comment">// 共 8 个寄存器 = 32 字节</span><br/>
+                        </div>
+                    ),
+                    2: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 调度器核心代码 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">vTaskSchedule</span>(<span className="code-keyword">void</span>) {<br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 1. 查找最高优先级就绪任务</span><br/>
+                            &nbsp;&nbsp;<span className="code-type">uint8_t</span> uxTopReadyPriority =<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">portGET_HIGHEST_PRIORITY</span>();<br/>
+                            <br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 2. 检查是否需要切换</span><br/>
+                            &nbsp;&nbsp;<span className="code-keyword">if</span> (uxTopReadyPriority !=<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;pxCurrentTCB->priority) {<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">vTaskSwitchContext</span>();<br/>
+                            &nbsp;&nbsp;}<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    3: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* PendSV 上下文切换 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">PendSV_Handler</span>(<span className="code-keyword">void</span>) {<br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 保存当前任务上下文 */</span><br/>
+                            &nbsp;&nbsp;<span className="code-function">vPortSaveContext</span>(pxCurrentTCB);<br/>
+                            <br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 选择下一个任务 */</span><br/>
+                            &nbsp;&nbsp;<span className="code-function">vTaskSelectNext</span>();<br/>
+                            <br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 恢复新任务上下文 */</span><br/>
+                            &nbsp;&nbsp;<span className="code-function">vPortRestoreContext</span>(pxCurrentTCB);<br/>
+                            }<br/><br/>
+                            <span className="code-comment">/* 汇编实现要点 */</span><br/>
+                            <span className="code-comment">// - 使用 PSP (进程栈指针)</span><br/>
+                            <span className="code-comment">// - 自动保存 R0-R3, R12, LR, PC, xPSR</span><br/>
+                            <span className="code-comment">// - 手动保存 R4-R11 ( callee-saved )</span><br/>
+                        </div>
+                    ),
+                    4: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 队列创建与使用 */</span><br/>
+                            <span className="code-type">QueueHandle_t</span> xQueue;<br/><br/>
+                            <span className="code-comment">// 创建队列 (长度 10, 项大小 4 字节)</span><br/>
+                            xQueue = <span className="code-function">xQueueCreate</span>(10, <span className="code-keyword">sizeof</span>(<span className="code-type">int32_t</span>));<br/><br/>
+                            <span className="code-comment">// 发送数据 (阻塞 100 ticks)</span><br/>
+                            <span className="code-type">int32_t</span> data = 42;<br/>
+                            <span className="code-function">xQueueSend</span>(xQueue, &data, 100);<br/><br/>
+                            <span className="code-comment">// 接收数据 (阻塞 100 ticks)</span><br/>
+                            <span className="code-type">int32_t</span> received;<br/>
+                            <span className="code-function">xQueueReceive</span>(xQueue, &received, 100);<br/>
+                        </div>
+                    ),
+                    5: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 二值信号量 */</span><br/>
+                            <span className="code-type">SemaphoreHandle_t</span> xSemaphore;<br/><br/>
+                            <span className="code-comment">// ISR 中给出信号量 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">EXTI_IRQHandler</span>(<span className="code-keyword">void</span>) {<br/>
+                            &nbsp;&nbsp;BaseType_t xHigherPriority = pdFALSE;<br/>
+                            &nbsp;&nbsp;<span className="code-function">xSemaphoreGiveFromISR</span>(<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;xSemaphore, &xHigherPriority);<br/>
+                            &nbsp;&nbsp;<span className="code-function">portYIELD_FROM_ISR</span>(xHigherPriority);<br/>
+                            }<br/><br/>
+                            <span className="code-comment">// 任务中获取信号量 */</span><br/>
+                            <span className="code-keyword">if</span> (<span className="code-function">xSemaphoreTake</span>(xSemaphore,<br/>
+                            &nbsp;&nbsp;portMAX_DELAY) == pdTRUE) {<br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 处理事件 */</span><br/>
+                            }<br/>
+                        </div>
+                    ),
+                    6: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 多任务系统示例 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">vTask1</span>(<span className="code-keyword">void</span>* pvParams) {<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">while</span>(1) {<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-comment">// LED 闪烁 (100ms)</span><br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">LED_Toggle</span>();<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">vTaskDelay</span>(100 / portTICK_PERIOD_MS);<br/>
+                            &nbsp;&nbsp;}<br/>
+                            }<br/><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">vTask2</span>(<span className="code-keyword">void</span>* pvParams) {<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">while</span>(1) {<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-comment">// 传感器读取 (500ms)</span><br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;sensor = <span className="code-function">Sensor_Read</span>();<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">xQueueSend</span>(xQueue, &sensor, 0);<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">vTaskDelay</span>(500 / portTICK_PERIOD_MS);<br/>
+                            &nbsp;&nbsp;}<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    7: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 最佳实践清单 */</span><br/>
+                            <span className="code-comment">// ✓ 1. 合理设置优先级 (0=最高)</span><br/>
+                            <span className="code-comment">// ✓ 2. 使用 vTaskDelay 而非忙等待</span><br/>
+                            <span className="code-comment">// ✓ 3. ISR 使用 FromISR 后缀 API</span><br/>
+                            <span className="code-comment">// ✓ 4. 临界区使用 taskENTER_CRITICAL</span><br/>
+                            <span className="code-comment">// ✓ 5. 避免优先级反转 (使用互斥量)</span><br/>
+                            <span className="code-comment">// ✓ 6. 监控栈水位线 (uxTaskGetStackHighWaterMark)</span><br/>
+                            <span className="code-comment">// ✓ 7. 任务名称有意义 (便于调试)</span><br/>
+                            <span className="code-comment">// ✓ 8. 超时时间避免 portMAX_DELAY 死锁</span><br/>
+                        </div>
+                    )
+                };
+                return codeSnippets[currentStep];
+            };
+
+            // ========== 渲染可视化区域 ==========
+            const renderVisualization = () => {
+                if (currentStep === 0) {
+                    // 任务状态模型
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>任务五态模型</h3>
+                            <div className="grid grid-cols-2 gap-3">
+                                {['已删除', '就绪', '运行', '阻塞', '挂起'].map((state, idx) => (
+                                    <div key={idx}
+                                        className={`p-3 rounded-lg text-center font-bold state-transition ${idx === 2 ? 'pulse' : ''}`}
+                                        style={{
+                                            backgroundColor: idx === 2 ? COLOR_MAP.primary : idx === 1 ? COLOR_MAP.secondary : idx === 3 ? COLOR_MAP.accent : '#475569',
+                                            opacity: idx === 2 ? 1 : 0.7
+                                        }}>
+                                        {state}
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="mt-6 space-y-2 text-sm">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 rounded" style={{backgroundColor: COLOR_MAP.primary}}></div>
+                                    <span>运行态 (Running) - 正在 CPU 执行</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 rounded" style={{backgroundColor: COLOR_MAP.secondary}}></div>
+                                    <span>就绪态 (Ready) - 等待 CPU 时间</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 rounded" style={{backgroundColor: COLOR_MAP.accent}}></div>
+                                    <span>阻塞态 (Blocked) - 等待事件</span>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 1) {
+                    // TCB 结构
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>任务控制块 TCB</h3>
+                            <div className="border-2 rounded-lg overflow-hidden" style={{borderColor: COLOR_MAP.border}}>
+                                <div className="p-2 font-bold text-center" style={{backgroundColor: COLOR_MAP.primary}}>TCB_t (64 字节)</div>
+                                {[
+                                    {field: 'pStack', value: '0x20001000', color: '#8b5cf6'},
+                                    {field: 'state', value: 'Running', color: COLOR_MAP.primary},
+                                    {field: 'priority', value: '3', color: '#f59e0b'},
+                                    {field: 'blockTime', value: '0', color: '#10b981'},
+                                    {field: 'taskName', value: 'Task1', color: '#ec4899'},
+                                    {field: 'pvParameters', value: '0x00000000', color: '#8b5cf6'}
+                                ].map((item, idx) => (
+                                    <div key={idx}
+                                        className="p-2 border-t flex justify-between items-center"
+                                        style={{borderColor: COLOR_MAP.border, backgroundColor: idx === 0 ? 'rgba(139,92,246,0.2)' : 'transparent'}}>
+                                        <span className="text-xs" style={{color: item.color}}>{item.field}</span>
+                                        <span className="font-mono text-sm">{item.value}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="text-xs text-center" style={{color: COLOR_MAP.text}}>
+                                每个任务都有独立的 TCB 和栈空间
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 2 || currentStep === 3) {
+                    // 调度器与上下文切换
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>
+                                {currentStep === 2 ? '优先级抢占式调度' : '上下文切换过程'}
+                            </h3>
+
+                            {/* 任务展示 */}
+                            <div className="space-y-2">
+                                <div className="text-xs text-center" style={{color: COLOR_MAP.text}}>运行态 (Running)</div>
+                                <div className={`p-3 rounded-lg text-center font-bold state-transition ${contextSwitch.animating && contextSwitch.fromTask === schedulerState.runningTask ? 'opacity-50' : ''}`}
+                                    style={{backgroundColor: COLOR_MAP.primary}}>
+                                    Task {schedulerState.runningTask} (优先级：{schedulerState.runningTask})
+                                </div>
+
+                                <div className="text-xs text-center mt-4" style={{color: COLOR_MAP.text}}>就绪队列 (Ready Queue)</div>
+                                <div className="space-y-2">
+                                    {schedulerState.readyQueue.map((taskId, idx) => (
+                                        <div key={taskId}
+                                            className={`p-2 rounded-lg text-center font-bold queue-move state-transition ${contextSwitch.toTask === taskId ? 'ring-2 ring-yellow-400' : ''}`}
+                                            style={{
+                                                backgroundColor: COLOR_MAP.secondary,
+                                                animationDelay: `${idx * 0.1}s`
+                                            }}>
+                                            Task {taskId} (优先级：{taskId})
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* 上下文切换指示器 */}
+                            {contextSwitch.animating && (
+                                <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-70 z-50">
+                                    <div className="bg-slate-800 p-8 rounded-lg space-y-4">
+                                        <div className="text-center text-lg font-bold">上下文切换中...</div>
+                                        <div className="flex justify-center gap-8">
+                                            <div className={`text-center ${contextSwitch.stage === 'save' ? 'opacity-100' : 'opacity-50'}`}>
+                                                <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-2" style={{backgroundColor: COLOR_MAP.primary}}>
+                                                    <span className="text-2xl font-bold">T{contextSwitch.fromTask}</span>
+                                                </div>
+                                                <div className="text-sm">保存 R0-R11, PC, SP</div>
+                                            </div>
+                                            <div className={`text-center ${contextSwitch.stage === 'switch' ? 'opacity-100' : 'opacity-50'}`}>
+                                                <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-2" style={{backgroundColor: '#6b7280'}}>
+                                                    <svg className="w-8 h-8 rotate" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeLinecap="round" strokeLinejoin="round"/>
+                                                    </svg>
+                                                </div>
+                                                <div className="text-sm">切换 TCB 指针</div>
+                                            </div>
+                                            <div className={`text-center ${contextSwitch.stage === 'restore' ? 'opacity-100' : 'opacity-50'}`}>
+                                                <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-2" style={{backgroundColor: COLOR_MAP.secondary}}>
+                                                    <span className="text-2xl font-bold">T{contextSwitch.toTask}</span>
+                                                </div>
+                                                <div className="text-sm">恢复 R0-R11, PC, SP</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    );
+                }
+
+                if (currentStep === 4) {
+                    // 队列通信
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>队列 (Queue) 机制</h3>
+                            <div className="border-2 rounded-lg p-4" style={{borderColor: COLOR_MAP.border}}>
+                                <div className="text-center mb-2" style={{color: COLOR_MAP.text}}>xQueue (容量：10)</div>
+                                <div className="flex gap-1 overflow-hidden">
+                                    {[...Array(10)].map((_, idx) => (
+                                        <div key={idx}
+                                            className="flex-1 h-12 border-r flex items-center justify-center transition-all"
+                                            style={{
+                                                borderColor: COLOR_MAP.border,
+                                                backgroundColor: idx < 5 ? COLOR_MAP.secondary : 'transparent',
+                                                opacity: idx < 5 ? 1 : 0.3
+                                            }}>
+                                            {idx < 5 && <span className="font-bold">{idx * 7}</span>}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex justify-between mt-2 text-xs" style={{color: COLOR_MAP.text}}>
+                                    <span>Head (读取端)</span>
+                                    <span>Tail (写入端)</span>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(59,130,246,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.primary}}>xQueueSend</div>
+                                    <div>从尾部写入数据</div>
+                                    <div>队列满时阻塞</div>
+                                </div>
+                                <div className="p-3 rounded" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.secondary}}>xQueueReceive</div>
+                                    <div>从头部读取数据</div>
+                                    <div>队列空时阻塞</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 5) {
+                    // 信号量与互斥量
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>同步机制对比</h3>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(59,130,246,0.2)'}}>
+                                    <div className="font-bold mb-2" style={{color: COLOR_MAP.primary}}>二值信号量</div>
+                                    <div className="text-xs space-y-1">
+                                        <div>✓ 事件同步</div>
+                                        <div>✓ ISR → 任务通知</div>
+                                        <div>✓ 0/1 状态</div>
+                                        <div>✗ 不解决优先级反转</div>
+                                    </div>
+                                    <div className="mt-3 h-8 rounded flex items-center justify-center pulse" style={{backgroundColor: COLOR_MAP.primary}}>
+                                        <span className="font-bold">0 → 1 (Give)</span>
+                                    </div>
+                                </div>
+                                <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(245,158,11,0.2)'}}>
+                                    <div className="font-bold mb-2" style={{color: COLOR_MAP.accent}}>互斥量</div>
+                                    <div className="text-xs space-y-1">
+                                        <div>✓ 资源独占</div>
+                                        <div>✓ 优先级继承</div>
+                                        <div>✓ 防止优先级反转</div>
+                                        <div>✗ 不能用于 ISR</div>
+                                    </div>
+                                    <div className="mt-3 h-8 rounded flex items-center justify-center pulse" style={{backgroundColor: COLOR_MAP.accent}}>
+                                        <span className="font-bold">Unlock → Lock</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 6) {
+                    // 应用案例
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>多任务系统架构</h3>
+                            <div className="relative">
+                                {/* 任务 1 */}
+                                <div className="p-3 rounded-lg mb-2 task-switch" style={{backgroundColor: COLOR_MAP.primary, animationDelay: '0s'}}>
+                                    <div className="font-bold">Task1 - LED 控制</div>
+                                    <div className="text-xs">优先级：2 | 周期：100ms</div>
+                                    <div className="flex gap-1 mt-2">
+                                        {[...Array(5)].map((_, i) => (
+                                            <div key={i} className={`w-6 h-6 rounded-full ${i % 2 === 0 ? 'blink' : ''}`} style={{backgroundColor: i % 2 === 0 ? '#fbbf24' : '#374151'}}></div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* 任务 2 */}
+                                <div className="p-3 rounded-lg mb-2 task-switch" style={{backgroundColor: COLOR_MAP.secondary, animationDelay: '0.5s'}}>
+                                    <div className="font-bold">Task2 - 传感器读取</div>
+                                    <div className="text-xs">优先级：3 | 周期：500ms</div>
+                                    <div className="text-xs mt-2">→ 队列 →</div>
+                                </div>
+
+                                {/* 任务 3 */}
+                                <div className="p-3 rounded-lg task-switch" style={{backgroundColor: COLOR_MAP.accent, animationDelay: '1s'}}>
+                                    <div className="font-bold">Task3 - 数据处理</div>
+                                    <div className="text-xs">优先级：4 | 事件驱动</div>
+                                    <div className="text-xs mt-2">← 队列 ←</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 7) {
+                    // 最佳实践
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>RTOS 编程最佳实践</h3>
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                                {[
+                                    {icon: '⚠️', text: '避免优先级 0-1 (保留系统)', color: '#ef4444'},
+                                    {icon: '⏱️', text: '使用 vTaskDelay 非忙等', color: COLOR_MAP.primary},
+                                    {icon: '🔒', text: '临界区保护共享资源', color: COLOR_MAP.accent},
+                                    {icon: '📊', text: '监控栈水位线', color: COLOR_MAP.secondary},
+                                    {icon: '🔄', text: '互斥量防优先级反转', color: '#8b5cf6'},
+                                    {icon: '⚡', text: 'ISR 用 FromISR API', color: '#ec4899'},
+                                    {icon: '📝', text: '任务名称有意义', color: '#14b8a6'},
+                                    {icon: '⏰', text: '超时避免死锁', color: '#f97316'}
+                                ].map((item, idx) => (
+                                    <div key={idx} className="p-2 rounded flex items-center gap-2" style={{backgroundColor: 'rgba(255,255,255,0.05)'}}>
+                                        <span className="text-lg">{item.icon}</span>
+                                        <span style={{color: item.color}}>{item.text}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                }
+
+                return null;
+            };
+
+            // ========== 渲染解释区域 ==========
+            const renderExplanation = () => {
+                const explanations = {
+                    0: {
+                        title: "任务状态模型",
+                        points: [
+                            "RTos 将任务分为 5 种状态：已删除、就绪、运行、阻塞、挂起",
+                            "运行态任务只有一个 (单核 CPU)，其他就绪任务在就绪队列等待",
+                            "阻塞态任务正在等待事件 (信号量、队列、超时等)",
+                            "状态转换由调度器控制，确保 CPU 资源合理分配"
+                        ]
+                    },
+                    1: {
+                        title: "任务控制块 (TCB)",
+                        points: [
+                            "TCB 是 RTOS 管理任务的核心数据结构",
+                            "包含栈指针、状态、优先级、阻塞时间等关键信息",
+                            "Cortex-M 架构下，栈帧包含 R0-R3, R12, LR, PC, xPSR (32 字节)",
+                            "每个任务都有独立的 TCB 和栈空间，实现任务隔离"
+                        ]
+                    },
+                    2: {
+                        title: "调度器原理",
+                        points: [
+                            "FreeRTOS 使用优先级抢占式调度算法",
+                            "总是运行就绪态中优先级最高的任务",
+                            "相同优先级任务采用时间片轮转 (Round-Robin)",
+                            "高优先级任务就绪时立即抢占当前任务 (上下文切换)"
+                        ]
+                    },
+                    3: {
+                        title: "上下文切换",
+                        points: [
+                            "通过 PendSV 异常处理器实现上下文切换",
+                            "保存当前任务的 R0-R11, PC, SP 到 TCB",
+                            "从新任务的 TCB 恢复寄存器值",
+                            "切换过程约 1-3 微秒，取决于保存的寄存器数量"
+                        ]
+                    },
+                    4: {
+                        title: "任务间通信 - 队列",
+                        points: [
+                            "队列是 RTOS 最基础的 IPC 机制",
+                            "支持多生产者、多消费者模式",
+                            "发送/接收时可设置阻塞超时时间",
+                            "数据按值复制，非指针传递 (安全但开销大)"
+                        ]
+                    },
+                    5: {
+                        title: "同步机制",
+                        points: [
+                            "二值信号量：用于事件同步，ISR 和任务均可使用",
+                            "互斥量：用于资源独占，含优先级继承机制",
+                            "计数信号量：用于资源计数 (如信号量槽)",
+                            "事件组：多事件组合等待 (与/或逻辑)"
+                        ]
+                    },
+                    6: {
+                        title: "应用案例",
+                        points: [
+                            "Task1: LED 控制 (100ms 周期，低优先级)",
+                            "Task2: 传感器读取 (500ms 周期，中优先级)",
+                            "Task3: 数据处理 (事件驱动，高优先级)",
+                            "队列连接 Task2→Task3，实现数据流传递"
+                        ]
+                    },
+                    7: {
+                        title: "最佳实践总结",
+                        points: [
+                            "优先级规划：0-1 保留系统，应用层从 2 开始",
+                            "避免忙等待：使用 vTaskDelay 释放 CPU",
+                            "临界区最小化：taskENTER_CRITICAL 尽快退出",
+                            "栈空间监控：使用 uxTaskGetStackHighWaterMark",
+                            "超时机制：避免 portMAX_DELAY 导致死锁",
+                            "ISR 规范：仅使用 FromISR 后缀的 API"
+                        ]
+                    }
+                };
+
+                const exp = explanations[currentStep];
+                return (
+                    <div>
+                        <h3 className="text-lg font-bold mb-3" style={{color: COLOR_MAP.primary}}>{exp.title}</h3>
+                        <ul className="space-y-2">
+                            {exp.points.map((point, idx) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                    <span className="text-green-400 mt-1">▸</span>
+                                    <span>{point}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="flex flex-col h-screen p-4 gap-4">
+                    {/* 顶部标题 */}
+                    <div className="text-center py-3 rounded-lg" style={{backgroundColor: 'rgba(0,0,0,0.3)'}}>
+                        <h1 className="text-2xl font-bold mb-1">1186 - RTOS 基础任务调度</h1>
+                        <p className="text-sm opacity-75">C 语言核心 | 嵌入式实时操作系统核心机制</p>
+                    </div>
+
+                    {/* 三列主布局 */}
+                    <div className="flex-1 grid grid-cols-3 gap-4 overflow-hidden">
+                        {/* 左列：代码 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>📝</span> 代码示例
+                            </h2>
+                            <div className="font-mono text-xs leading-relaxed" style={{color: COLOR_MAP.text}}>
+                                {renderCode()}
+                            </div>
+                        </div>
+
+                        {/* 中列：可视化 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>🎬</span> 可视化演示
+                            </h2>
+                            <div className="text-sm">
+                                {renderVisualization()}
+                            </div>
+                        </div>
+
+                        {/* 右列：解释 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>📖</span> 原理解析
+                            </h2>
+                            <div className="text-sm space-y-3" style={{color: COLOR_MAP.text}}>
+                                {renderExplanation()}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部控制栏 */}
+                    <div className="rounded-lg p-3 flex items-center justify-between" style={{backgroundColor: 'rgba(0,0,0,0.3)'}}>
+                        <div className="flex items-center gap-4">
+                            <button onClick={handlePrev} disabled={currentStep === 0}
+                                className="px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.primary}}>上一步</button>
+                            <button onClick={handleNext} disabled={currentStep === STEPS.length - 1}
+                                className="px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.secondary}}>下一步</button>
+                            <button onClick={handleRestart}
+                                className="px-4 py-2 rounded hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.accent}}>重新开始</button>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            <div className="text-sm">
+                                <span className="opacity-75">进度：</span>
+                                <span className="font-bold">{currentStep + 1} / {STEPS.length}</span>
+                            </div>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className="px-3 py-2 rounded text-sm"
+                                style={{backgroundColor: isMuted ? '#ef4444' : '#10b981'}}>
+                                {isMuted ? '🔇 静音' : '🔊 有声'}
+                            </button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className="px-4 py-2 rounded font-bold"
+                                style={{backgroundColor: isPlaying ? COLOR_MAP.primary : COLOR_MAP.accent}}>
+                                {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

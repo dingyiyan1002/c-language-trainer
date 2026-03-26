@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>高级指针 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#ec4899 0%,#db2777 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#831843;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#be185d;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#fce7f3,#fbcfe8);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#f472b6;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#ec4899;box-shadow:0 0 20px rgba(236,72,153,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#831843;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .pointer-container{display:flex;flex-direction:column;gap:16px;margin:16px 0}
+    .memory-box{border-radius:12px;padding:16px;transition:all 0.4s ease;border:3px solid transparent}
+    .memory-box.stack{background:linear-gradient(135deg:#fce7f3,#fbcfe8);border-color:#f472b6}
+    .memory-box.heap{background:linear-gradient(135deg:#e0e7ff,#c7d2fe);border-color:#818cf8}
+    .memory-box.active{transform:scale(1.02);box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+    .memory-label{font-size:11px;color:#831843;font-weight:700;margin-bottom:8px;font-family:'Consolas',monospace}
+    .memory-row{display:flex;justify-content:space-between;align-items:center;padding:8px;background:white;border-radius:6px;margin-bottom:6px}
+    .memory-addr{font-size:10px;color:#64748b;font-family:'Consolas',monospace}
+    .memory-value{font-size:12px;font-weight:700;color:#be185d;font-family:'Consolas',monospace}
+    .pointer-arrow{display:flex;align-items:center;justify-content:center;margin:8px 0}
+    .arrow-line{flex:1;height:3px;background:linear-gradient(90deg,#f472b6,#ec4899);position:relative}
+    .arrow-head{font-size:24px;color:#ec4899}
+    .level-indicator{display:flex;gap:8px;margin:16px 0}
+    .level-box{flex:1;background:white;border-radius:8px;padding:12px;text-align:center;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .level-box.active{border-color:#ec4899;background:linear-gradient(135deg,#fce7f3,#fbcfe8)}
+    .level-name{font-size:10px;color:#64748b;margin-bottom:4px;font-family:'Consolas',monospace}
+    .level-value{font-size:14px;font-weight:700;color:#be185d}
+    .operation-list{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+    .op-item{background:white;border-radius:8px;padding:12px;border-left:4px solid#e5e7eb;transition:all 0.3s ease}
+    .op-item.active{border-left-color:#ec4899;background:linear-gradient(135deg,#fce7f3,#fbcfe8)}
+    .op-title{font-size:11px;color:#831843;font-weight:700;margin-bottom:4px}
+    .op-example{font-size:10px;color:#9d174d;font-family:'Consolas',monospace}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#22d3ee;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',pink:'#ec4899'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'',color:'#94a3b8'},
+      3:{step:2,text:'int x = 42;',color:'#ec4899'},
+      4:{step:2,text:'int *p = &x;',color:'#3b82f6'},
+      5:{step:3,text:'int **pp = &p;',color:'#7c3aed'},
+      6:{step:4,text:'printf("%d\\n", *p);',color:'#22c55e'},
+      7:{step:5,text:'printf("%d\\n", **pp);',color:'#eab308'},
+      8:{step:6,text:'return 0;',color:'#3b82f6'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，指针是 C 语言最强大的特性，直接操作内存地址',
+      2:'声明整型变量 x 值 42，指针 p 指向 x，存储 x 的地址',
+      3:'二级指针 pp 指向 p，形成指针的指针，多级间接寻址',
+      4:'一元解引用*p 得到 x 的值 42，指针基本操作',
+      5:'二元解引用**pp 通过 pp 找到 p 再找到 x，多级指针链',
+      6:'程序结束，指针用于动态内存、函数指针、数据结构'
+    };
+    const memoryData = {
+      stack: [{addr:'0x7fff1000',name:'x',value:42},{addr:'0x7fff1004',name:'p',value:'0x7fff1000'},{addr:'0x7fff1008',name:'pp',value:'0x7fff1004'}],
+      heap: []
+    };
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',pointer:'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [activeLevel,setActiveLevel] = useState(0);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 8; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setActiveLevel(0);
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setActiveLevel(1);
+        } else if(step === 3) {
+          setActiveLevel(2);
+        } else if(step === 4) {
+          setActiveLevel(1);
+          setTerminalLines(['42']);
+        } else if(step === 5) {
+          setActiveLevel(2);
+          setTerminalLines(['42','42']);
+        } else if(step === 6) {
+          // Complete
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setActiveLevel(0);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>高级指针 - C 语言可视化</h1>
+            <p>二级指针 | 多级间接寻址 | 指针链</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.pink,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                advanced_pointer.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.pointer} size={22} />
+                二级指针可视化
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">int **pp</span>
+                  <span className="var-type">Pointer to Pointer</span>
+                </div>
+                <div className="level-indicator">
+                  <div className={`level-box ${step >= 2 && activeLevel <= 1 ? 'active' : ''}`}>
+                    <div className="level-name">int *p</div>
+                    <div className="level-value">一级指针</div>
+                  </div>
+                  <div className={`level-box ${step >= 3 ? 'active' : ''}`}>
+                    <div className="level-name">int **pp</div>
+                    <div className="level-value">二级指针</div>
+                  </div>
+                </div>
+                <div className="pointer-container">
+                  <div className={`memory-box stack ${step >= 2 ? 'active' : ''}`}>
+                    <div className="memory-label">📍 Stack Memory (栈内存)</div>
+                    {memoryData.stack.map((item, idx) => (
+                      <div key={item.name} className="memory-row">
+                        <span className="memory-addr">{item.addr}</span>
+                        <span style={{fontSize:11,color:'#831843',fontWeight:600}}>{item.name}</span>
+                        <span className="memory-value">{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="pointer-arrow">
+                  <div className="arrow-line"></div>
+                  <span className="arrow-head">➤</span>
+                </div>
+                <div style={{background:'#f0f9ff',borderRadius:12px,padding:16,border:2px dashed:'#3b82f6'}}>
+                  <div style={{fontSize:11,color:'#1e40af',fontWeight:700,marginBottom:8}}>间接寻址链</div>
+                  <div style={{fontSize:10,color:'#64748b',fontFamily:'Consolas',marginBottom:4}}>pp → p → x</div>
+                  <div style={{fontSize:10,color:'#64748b',fontFamily:'Consolas',marginBottom:4}}>**pp = *p = x = 42</div>
+                  <div style={{fontSize:10,color:'#64748b',fontFamily:'Consolas'}}>pp = &p, p = &x</div>
+                </div>
+                <div className="operation-list">
+                  <div className={`op-item ${step >= 2 ? 'active' : ''}`}>
+                    <div className="op-title">一级指针</div>
+                    <div className="op-example">int *p = &x; /* p 指向 x */</div>
+                  </div>
+                  <div className={`op-item ${step >= 3 ? 'active' : ''}`}>
+                    <div className="op-title">二级指针</div>
+                    <div className="op-example">int **pp = &p; /* pp 指向 p */</div>
+                  </div>
+                  <div className={`op-item ${step >= 4 ? 'active' : ''}`}>
+                    <div className="op-title">解引用</div>
+                    <div className="op-example">*p = 42, **pp = 42</div>
+                  </div>
+                  <div className={`op-item ${step >= 5 ? 'active' : ''}`}>
+                    <div className="op-title">多级链</div>
+                    <div className="op-example">pp → p → x</div>
+                  </div>
+                </div>
+              </div>
+              {step >= 4 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.pink}}>指针本质</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>存储内存地址的变量</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>一级指针</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>int *p 指向 int 变量</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>二级指针</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>int **pp 指向 int *指针</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>应用场景</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>动态二维数组、参数传递</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

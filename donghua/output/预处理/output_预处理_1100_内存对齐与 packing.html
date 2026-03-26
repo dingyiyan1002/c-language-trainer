@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>内存对齐与 packing - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#0891b2 0%,#0e7490 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#164e63;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#0891b2;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#cffafe,#a5f3fc);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#22d3ee;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#0891b2;box-shadow:0 0 20px rgba(8,145,178,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#164e63;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .align-container{display:flex;flex-direction:column;gap:12px;margin:16px 0}
+    .align-box{border-radius:12px;padding:16px;transition:all 0.4s ease;border:3px solid transparent}
+    .align-box.definition{background:linear-gradient(135deg:#cffafe,#a5f3fc);border-color:#0891b2}
+    .align-box.active{transform:scale(1.02);box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+    .member-row{display:flex;align-items:center;margin-bottom:8px;gap:8px}
+    .member-label{width:80px;font-size:11px;color:#0891b2;font-weight:600;font-family:'Consolas',monospace}
+    .align-box-inner{flex:1;background:white;border-radius:8px;padding:12px;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .align-box-inner.active{border-color:#0891b2;background:linear-gradient(135deg:#cffafe,#a5f3fc)}
+    .member-size{font-size:10px;color:#64748b}
+    .member-offset{font-size:12px;font-weight:700;color:#0891b2;font-family:'Consolas',monospace}
+    .memory-display{background:#1e293b;border-radius:12px;padding:16px;margin:16px 0}
+    .memory-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#0f172a;border-radius:8px;margin-bottom:8px;transition:all 0.4s ease}
+    .memory-row.pending{opacity:0.5}
+    .memory-row.active{background:linear-gradient(135deg,#0891b2,#0e7490);border:2px solid#22d3ee}
+    .memory-name{font-size:12px;color:#94a3b8;font-family:'Consolas',monospace}
+    .memory-value{font-size:14px;font-weight:700;color:#67e8f9;font-family:'Consolas',monospace}
+    .comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+    .compare-card{background:white;border-radius:8px;padding:12px;text-align:center;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .compare-card.active{border-color:#0891b2;background:linear-gradient(135deg:#cffafe,#a5f3fc)}
+    .compare-label{font-size:10px;color:#64748b;margin-bottom:4px}
+    .compare-code{font-size:11px;color:#0891b2;font-family:'Consolas',monospace}
+    .compare-desc{font-size:9px;color:#64748b;margin-top:4px}
+    .use-case-list{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+    .use-item{background:#cffafe;border-radius:8px;padding:12px;border-left:4px solid#0891b2;transition:all 0.3s ease}
+    .use-item.active{border-left-color:#22c55e;background:linear-gradient(135deg:#cffafe,#a5f3fc)}
+    .use-title{font-size:11px;color:#164e63;font-weight:700;margin-bottom:4px}
+    .use-example{font-size:10px;color:#0891b2;font-family:'Consolas',monospace}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#67e8f9;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#67e8f9;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',cyan:'#0891b2'};
+    const LINE_MAP = {
+      1:{step:1,text:'struct Unpacked { char a; int b; short c; };',color:'#0891b2'},
+      2:{step:2,text:'// size=12: a(1)+pad(3)+b(4)+c(2)+pad(2)',color:'#22d3ee'},
+      3:{step:3,text:'#pragma pack(1)',color:'#67e8f9'},
+      4:{step:4,text:'struct Packed { char a; int b; short c; };',color:'#a5f3fc'},
+      5:{step:5,text:'#pragma pack()',color:'#cffafe'},
+      6:{step:6,text:'// size=7: a(1)+b(4)+c(2) 无填充',color:'#3b82f6'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，结构体内存对齐，编译器按成员最大宽度对齐，提高访问效率',
+      2:'Unpacked 结构体：char a 占 1 字节 +3 填充，int b 占 4 字节，short c 占 2 字节 +2 填充，共 12 字节',
+      3:'#pragma pack(1) 设置对齐为 1 字节，禁止填充，用于网络协议和二进制格式',
+      4:'Packed 结构体：紧密排列无填充，char 1 字节 +int4 字节 +short2 字节=7 字节',
+      5:'#pragma pack() 恢复默认对齐，通常是 4 或 8 字节对齐',
+      6:'对比：Unpacked 12 字节访问快，Packed7 字节节省空间，网络传输用 packed'
+    };
+    const members = [
+      {name:'char a',size:'1 byte',offset:'0',align:'1 字节对齐'},
+      {name:'int b',size:'4 bytes',offset:'4(填充 3)',align:'4 字节对齐'},
+      {name:'short c',size:'2 bytes',offset:'8',align:'2 字节对齐'},
+      {name:'padding',size:'2 bytes',offset:'10',align:'结构体对齐'}
+    ];
+    const memoryOps = [
+      {op:'Unpacked',layout:'[a:1][pad:3][b:4][c:2][pad:2]',total:'12 字节'},
+      {op:'Packed(1)',layout:'[a:1][b:4][c:2]',total:'7 字节'},
+      {op:'节省',layout:'12-7=5 字节',total:'节省 42%'}
+    ];
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',align:'M4 6h16M4 12h16M4 18h16M12 6v12'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [activeMember,setActiveMember] = useState(-1);
+      const [memoryIdx,setMemoryIdx] = useState(-1);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 6; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setActiveMember(-1);
+          setMemoryIdx(-1);
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setActiveMember(0);
+          setMemoryIdx(0);
+        } else if(step === 3) {
+          setActiveMember(1);
+        } else if(step === 4) {
+          setMemoryIdx(1);
+          setActiveMember(2);
+        } else if(step === 5) {
+          setActiveMember(3);
+        } else if(step === 6) {
+          setMemoryIdx(2);
+          setTerminalLines(['sizeof(Unpacked)=12', 'sizeof(Packed)=7', '节省 5 字节 (42%)']);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setActiveMember(-1);
+        setMemoryIdx(-1);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>内存对齐与 packing - 结构体可视化</h1>
+            <p>内存对齐 | #pragma pack(1) | 填充字节 | 网络协议</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.cyan,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                alignment.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.align} size={22} />
+                内存对齐可视化
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">struct alignment</span>
+                  <span className="var-type">Memory Layout</span>
+                </div>
+                <div className="align-container">
+                  <div className={`align-box definition ${step >= 2 ? 'active' : ''}`}>
+                    <div style={{fontSize:13,fontWeight:700,color:'#164e63',marginBottom:12}}>结构体成员布局</div>
+                    {members.map((m, idx) => (
+                      <div key={m.name} className="member-row">
+                        <span className="member-label">{m.name}</span>
+                        <div className={`align-box-inner ${step >= 1 + idx && activeMember === idx ? 'active' : ''}`}>
+                          <div className="member-size">{m.size} - {m.align}</div>
+                          <div className="member-offset">offset={m.offset}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="memory-display">
+                  <div style={{color:'#94a3b8',fontSize:12,marginBottom:12}}>内存布局对比</div>
+                  {memoryOps.map((o, idx) => (
+                    <div key={idx} className={`memory-row ${step >= 2 + idx && memoryIdx >= idx ? 'active' : 'pending'}`}>
+                      <span className="memory-name">{o.op}</span>
+                      <span className="memory-value">{o.layout} = {o.total}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="comparison-grid">
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">Unpacked</div>
+                    <div className="compare-code">12 字节</div>
+                    <div className="compare-desc">有填充，访问快</div>
+                  </div>
+                  <div className={`compare-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="compare-label">Packed</div>
+                    <div className="compare-code">7 字节</div>
+                    <div className="compare-desc">无填充，省空间</div>
+                  </div>
+                  <div className={`compare-card ${step >= 3 ? 'active' : ''}`}>
+                    <div className="compare-label">优点</div>
+                    <div className="compare-code">CPU 对齐访问快</div>
+                    <div className="compare-desc">硬件友好</div>
+                  </div>
+                  <div className={`compare-card ${step >= 4 ? 'active' : ''}`}>
+                    <div className="compare-label">缺点</div>
+                    <div className="compare-code">浪费内存</div>
+                    <div className="compare-desc">填充字节</div>
+                  </div>
+                </div>
+                <div className="use-case-list">
+                  <div className={`use-item ${step >= 2 ? 'active' : ''}`}>
+                    <div className="use-title">网络协议</div>
+                    <div className="use-example">#pragma pack(1) // 精确控制字节布局</div>
+                  </div>
+                  <div className={`use-item ${step >= 3 ? 'active' : ''}`}>
+                    <div className="use-title">文件头</div>
+                    <div className="use-example">struct BMPHeader { ... } __attribute__((packed));</div>
+                  </div>
+                  <div className={`use-item ${step >= 4 ? 'active' : ''}`}>
+                    <div className="use-title">嵌入式</div>
+                    <div className="use-example">内存映射寄存器结构体，紧密排列</div>
+                  </div>
+                  <div className={`use-item ${step >= 5 ? 'active' : ''}`}>
+                    <div className="use-title">性能关键</div>
+                    <div className="use-example">默认对齐，CPU 访问效率最高</div>
+                  </div>
+                </div>
+              </div>
+              {step >= 6 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.cyan}}>内存对齐</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>提高访问速度，增加填充</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>Packed 模式</strong>
+                <p style={{marginTop:8,color:'#78350f'>节省空间，访问可能变慢</p>
+              </div>
+              <div className={`explanation-card ${step >= 4 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>应用场景</strong>
+                <p style={{marginTop:8,color:'#78350f'>网络协议、文件头、嵌入</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>最佳实践</strong>
+                <p style={{marginTop:8,color:'#78350f'>网络用 packed，计算用对齐</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

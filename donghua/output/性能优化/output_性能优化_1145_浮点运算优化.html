@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1145 - 浮点运算优化 | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .highlight { box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(59, 130, 246, 0.2); border-left: 3px solid #3b82f6; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#3b82f6', primaryLight: '#60a5fa',
+      secondary: '#2563eb', secondaryLight: '#60a5fa',
+      accent: '#14b8a6', accentLight: '#2dd4bf',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== 浮点运算优化 (Floating Point Optimization) =====
+// Cortex-M4/M7: FPU 硬件浮点 vs 软件模拟
+
+// 1. FPU 使能配置 (Cortex-M4/M7)
+void fpu_enable(void) {
+  // 使能 FPU (CP10, CP11 协处理器)
+  SCB->CPACR |= ((3UL << 10*2) |  // CP10 = 11 (Full access)
+                 (3UL << 11*2));  // CP11 = 11 (Full access)
+
+  // 确保 FPU 已就绪
+  __DSB();  // 数据同步屏障
+  __ISB();  // 指令同步屏障
+}
+
+// 2. 硬件浮点 vs 软件浮点性能对比
+void float_benchmark(void) {
+  float a = 3.14159f, b = 2.71828f;
+  float result;
+
+  // 硬件 FPU: ~1-3 周期
+  result = a * b;  // FPU 指令
+
+  // 软件模拟：~50-100 周期 (无 FPU 时)
+}
+
+// 3. 定点数优化 (无 FPU 的 MCU)
+#define FIXED_SHIFT 16
+#define FIXED_MUL(a, b)  (((a) * (b)) >> FIXED_SHIFT)
+
+int32_t fixed_sqrt(int32_t x) {
+  // 整数平方根 (Newton-Raphson)
+  int32_t guess = x >> 1;
+  for (int i = 0; i < 8; i++) {
+    guess = (guess + x / guess) >> 1;
+  }
+  return guess;
+}
+
+// 4. 使用查表法替代复杂运算
+const float sin_table[256] = {
+  0.0000f, 0.0245f, 0.0490f, // ... 预计算正弦值
+};
+
+float fast_sin(float angle) {
+  uint8_t idx = (uint8_t)(angle * 256.0f / 6.2832f);
+  return sin_table[idx];  // 查表：1 周期
+}
+
+// 5. 使用 CMSIS DSP 库 (ARM 优化)
+#include "arm_math.h"
+arm_status result = arm_mat_mult_f32(&A, &B, &C);`;
+
+    const VOICE_TEXT_MAP = {
+      1: "第一千一百四十五题，浮点运算优化。",
+      2: "Cortex-M4/M7 需要使能 FPU 协处理器 CP10 和 CP11 才能使用硬件浮点。",
+      3: "硬件 FPU 浮点运算只需 1 到 3 周期，软件模拟需要 50 到 100 周期。",
+      4: "无 FPU 的 MCU 使用定点数优化，位移代替除法，乘法更高效。",
+      5: "查表法用空间换时间，预计算复杂函数值，运行时直接查表。",
+      6: "整数平方根使用 Newton-Raphson 迭代法，无需浮点运算。",
+      7: "CMSIS DSP 库是 ARM 优化的数学库，性能优于标准库。",
+      8: "应用：电机控制、数字滤波、传感器校准、音频处理、图像处理。"
+    };
+
+    const MAX_STEPS = 8;
+
+    function App() {
+      const [step, setStep] = useState(1);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+      const [voiceRate, setVoiceRate] = useState(1);
+      const voiceEndTimerRef = useRef(null);
+
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if (voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if (!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        const voices = window.speechSynthesis.getVoices();
+        const xiaoxiaoVoice = voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('zh-CN'));
+        if (xiaoxiaoVoice) utterance.voice = xiaoxiaoVoice;
+        utterance.onend = () => {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate]);
+
+      useEffect(() => {
+        if (isPlaying && step <= MAX_STEPS) {
+          playVoice();
+        } else if (step > MAX_STEPS) {
+          setIsPlaying(false);
+          setIsVoicePlaying(false);
+        }
+        return () => {
+          if (voiceEndTimerRef.current) {
+            clearTimeout(voiceEndTimerRef.current);
+          }
+        };
+      }, [isPlaying, step, playVoice]);
+
+      useEffect(() => {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length === 0) {
+          window.speechSynthesis.onvoiceschanged = () => {
+            window.speechSynthesis.getVoices();
+          };
+        }
+      }, []);
+
+      const handlePlay = () => {
+        setIsPlaying(!isPlaying);
+        if (!isPlaying && step >= MAX_STEPS) {
+          setStep(1);
+        }
+      };
+
+      const handleReset = () => {
+        window.speechSynthesis.cancel();
+        setStep(1);
+        setIsPlaying(false);
+        setIsVoicePlaying(false);
+      };
+
+      const handleStepChange = (newStep) => {
+        window.speechSynthesis.cancel();
+        setStep(newStep);
+      };
+
+      const getActiveLine = (lineIndex) => {
+        const stepLines = {
+          1: [0],
+          2: [3, 4, 5, 6, 7, 8, 9, 10],
+          3: [12, 13, 14, 15, 16, 17, 18, 19, 20],
+          4: [22, 23, 24, 25, 26, 27, 28, 29, 30],
+          5: [32, 33, 34, 35, 36, 37, 38],
+          6: [25, 26, 27, 28, 29, 30],
+          7: [40, 41, 42],
+          8: [44]
+        };
+        return (stepLines[step] || []).includes(lineIndex) ? 'active' : '';
+      };
+
+      const renderVisualization = () => {
+        switch(step) {
+          case 1:
+            return (
+              <div className="text-center">
+                <div className="text-6xl mb-4">🔢</div>
+                <h3 className="text-2xl font-bold mb-2" style={{color: COLOR_MAP.primary}}>浮点运算优化</h3>
+                <p className="text-gray-300">Floating Point Optimization</p>
+              </div>
+            );
+          case 2:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.primary}}>FPU 使能配置</div>
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center">
+                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center mr-3 flex-shrink-0">1</div>
+                    <div>使能 CP10 协处理器 (FPU 单精度)</div>
+                  </div>
+                  <div className="flex items-center">
+                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center mr-3 flex-shrink-0">2</div>
+                    <div>使能 CP11 协处理器 (FPU 双精度)</div>
+                  </div>
+                  <div className="flex items-center">
+                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center mr-3 flex-shrink-0">3</div>
+                    <div>写入 SCB->CPACR 寄存器</div>
+                  </div>
+                  <div className="flex items-center">
+                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center mr-3 flex-shrink-0">4</div>
+                    <div>DSB/ISB 确保 FPU 就绪</div>
+                  </div>
+                  <div className="text-xs text-gray-400 bg-gray-900 p-2 rounded">
+                    <div>CPACR = 0xE000ED88</div>
+                    <div>Bits [23:20] = 0b1111 (CP10=11, CP11=11)</div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 3:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.success}}>性能对比</div>
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span>硬件 FPU (乘法)</span>
+                      <span>1-3 周期</span>
+                    </div>
+                    <div className="h-8 bg-gray-700 rounded">
+                      <div className="h-8 bg-green-600 rounded" style={{width: '5%'}}></div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span>硬件 FPU (除法)</span>
+                      <span>5-14 周期</span>
+                    </div>
+                    <div className="h-8 bg-gray-700 rounded">
+                      <div className="h-8 bg-green-500 rounded" style={{width: '15%'}}></div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span>硬件 FPU (sqrt)</span>
+                      <span>3-10 周期</span>
+                    </div>
+                    <div className="h-8 bg-gray-700 rounded">
+                      <div className="h-8 bg-blue-600 rounded" style={{width: '10%'}}></div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span>软件模拟 (乘法)</span>
+                      <span>50-100 周期</span>
+                    </div>
+                    <div className="h-8 bg-gray-700 rounded">
+                      <div className="h-8 bg-red-600 rounded" style={{width: '100%'}}></div>
+                    </div>
+                  </div>
+                  <div className="text-center text-green-400 font-bold text-sm mt-2">
+                    硬件 FPU 速度提升 20-50 倍
+                  </div>
+                </div>
+              </div>
+            );
+          case 4:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.warning}}>定点数运算</div>
+                <div className="space-y-3">
+                  <div className="text-xs text-gray-400">Q16.16 格式：16 位整数 + 16 位小数</div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="bg-gray-900 p-3 rounded">
+                      <div className="font-bold text-blue-400 mb-1">浮点数</div>
+                      <div className="text-xs font-mono">float a = 3.14f;</div>
+                      <div className="text-xs font-mono">float b = 2.5f;</div>
+                      <div className="text-xs font-mono text-yellow-400">a * b  // 慢</div>
+                    </div>
+                    <div className="bg-gray-900 p-3 rounded">
+                      <div className="font-bold text-green-400 mb-1">定点数</div>
+                      <div className="text-xs font-mono">int32_t a = 3.14 * 65536;</div>
+                      <div className="text-xs font-mono">int32_t b = 2.5 * 65536;</div>
+                      <div className="text-xs font-mono text-green-400">(a*b)>>16  // 快!</div>
+                    </div>
+                  </div>
+                  <div className="text-xs bg-green-900 p-2 rounded">
+                    <div className="text-green-300">
+                      <span className="font-bold">✓ 优势:</span> 无需 FPU，乘法 = 单次整数乘法 + 位移
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 5:
+            return (
+              <div className="space-y-4">
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <div className="text-center mb-3 font-bold" style={{color: COLOR_MAP.accent}}>查表法 (Look-Up Table)</div>
+                  <div className="text-xs text-gray-400 mb-3 text-center">用空间换时间</div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center text-xs">
+                      <span>sin(0°)</span>
+                      <span className="font-mono">0.0000</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span>sin(30°)</span>
+                      <span className="font-mono">0.5000</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span>sin(45°)</span>
+                      <span className="font-mono">0.7071</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span>sin(60°)</span>
+                      <span className="font-mono">0.8660</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span>sin(90°)</span>
+                      <span className="font-mono">1.0000</span>
+                    </div>
+                  </div>
+                  <div className="mt-4 text-xs bg-blue-900 p-2 rounded">
+                    <div className="text-blue-300">
+                      <span className="font-bold">⚡ 性能:</span> 查表 = 1 次内存访问 vs 计算 = 数十周期
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 6:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.primary}}>整数平方根</div>
+                <div className="space-y-3">
+                  <div className="text-xs font-mono bg-gray-900 p-3 rounded">
+                    <div className="text-gray-500">// Newton-Raphson 迭代法</div>
+                    <div>int32_t fixed_sqrt(int32_t x) {'{'}</div>
+                    <div className="pl-4">int32_t guess = x >> 1;</div>
+                    <div className="pl-4">for (int i = 0; i < 8; i++) {'{'}</div>
+                    <div className="pl-8">guess = (guess + x / guess) >> 1;</div>
+                    <div className="pl-4">{'}'}</div>
+                    <div className="pl-4">return guess;</div>
+                    <div>{'}'}</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="bg-red-900 p-2 rounded">
+                      <div className="font-bold text-red-300">浮点 sqrt</div>
+                      <div>~50-100 周期</div>
+                      <div>(软件模拟)</div>
+                    </div>
+                    <div className="bg-green-900 p-2 rounded">
+                      <div className="font-bold text-green-300">整数迭代</div>
+                      <div>~20-30 周期</div>
+                      <div>(仅整数运算)</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 7:
+            return (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-center mb-4 font-bold" style={{color: COLOR_MAP.success}}>CMSIS DSP 库</div>
+                <div className="space-y-3">
+                  <div className="text-xs text-gray-400 text-center">ARM 优化的 DSP 数学库</div>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between items-center p-2 rounded bg-gray-700">
+                      <span>矩阵运算</span>
+                      <span className="text-blue-400">arm_mat_mult_f32</span>
+                    </div>
+                    <div className="flex justify-between items-center p-2 rounded bg-gray-700">
+                      <span>FFT 变换</span>
+                      <span className="text-green-400">arm_rfft_fast_f32</span>
+                    </div>
+                    <div className="flex justify-between items-center p-2 rounded bg-gray-700">
+                      <span>滤波器</span>
+                      <span className="text-yellow-400">arm_fir_f32</span>
+                    </div>
+                    <div className="flex justify-between items-center p-2 rounded bg-gray-700">
+                      <span>向量运算</span>
+                      <span className="text-purple-400">arm_add_f32</span>
+                    </div>
+                    <div className="flex justify-between items-center p-2 rounded bg-gray-700">
+                      <span>三角函数</span>
+                      <span className="text-red-400">arm_sin_f32</span>
+                    </div>
+                  </div>
+                  <div className="text-xs bg-green-900 p-2 rounded">
+                    <div className="text-green-300">
+                      <span className="font-bold">✓ 优化:</span> 使用 SIMD 和 FPU 指令，性能提升 3-10 倍
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          case 8:
+            return (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">🌀</div>
+                  <div className="font-bold text-sm">电机控制</div>
+                </div>
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">📊</div>
+                  <div className="font-bold text-sm">数字滤波</div>
+                </div>
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">🔧</div>
+                  <div className="font-bold text-sm">传感器校准</div>
+                </div>
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">🎵</div>
+                  <div className="font-bold text-sm">音频处理</div>
+                </div>
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">🖼️</div>
+                  <div className="font-bold text-sm">图像处理</div>
+                </div>
+                <div className="bg-gray-800 rounded-lg p-3 text-center">
+                  <div className="text-3xl mb-2">📐</div>
+                  <div className="font-bold text-sm">坐标变换</div>
+                </div>
+              </div>
+            );
+          default:
+            return null;
+        }
+      };
+
+      const explanations = {
+        1: "浮点运算优化基础概念",
+        2: "FPU 使能配置步骤",
+        3: "硬件 FPU 与软件模拟性能对比",
+        4: "定点数运算优化技巧",
+        5: "查表法用空间换时间",
+        6: "整数平方根算法",
+        7: "CMSIS DSP 优化库",
+        8: "浮点运算优化应用场景"
+      };
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-6">
+            <h1 className="text-3xl font-bold mb-2">1145 - 浮点运算优化</h1>
+            <p className="text-gray-400">Floating Point Optimization</p>
+          </div>
+
+          {/* Controls */}
+          <div className="flex justify-center items-center space-x-4 mb-6">
+            <button
+              onClick={handleReset}
+              className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 transition"
+            >
+              🔄 重置
+            </button>
+            <button
+              onClick={handlePlay}
+              className={`px-6 py-2 rounded transition ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'}`}
+              style={{backgroundColor: isPlaying ? COLOR_MAP.warning : COLOR_MAP.success}}
+            >
+              {isPlaying ? '⏸️ 暂停' : '▶️ 播放'}
+            </button>
+            <div className="flex items-center space-x-2">
+              <span className="text-gray-400">语速:</span>
+              <input
+                type="range"
+                min="0.5"
+                max="1.5"
+                step="0.1"
+                value={voiceRate}
+                onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
+                className="w-24"
+              />
+              <span className="text-sm w-12">{voiceRate.toFixed(1)}x</span>
+            </div>
+          </div>
+
+          {/* Step Indicator */}
+          <div className="flex justify-center mb-6">
+            <div className="flex space-x-2">
+              {Array.from({length: MAX_STEPS}).map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleStepChange(i + 1)}
+                  className={`w-10 h-10 rounded-full transition ${step === i + 1 ? 'text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                  style={step === i + 1 ? {backgroundColor: COLOR_MAP.primary} : {}}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Main Content */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Code */}
+            <div className="bg-gray-800 rounded-lg p-4">
+              <div className="text-sm font-bold mb-3" style={{color: COLOR_MAP.primary}}>💻 代码示例</div>
+              <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+                {CODE.split('\n').map((line, i) => (
+                  <div key={i} className={`code-line ${getActiveLine(i)} py-1`}>{line}</div>
+                ))}
+              </pre>
+            </div>
+
+            {/* Visualization */}
+            <div className="bg-gray-800 rounded-lg p-4">
+              <div className="text-sm font-bold mb-3" style={{color: COLOR_MAP.accent}}>🎨 可视化</div>
+              {renderVisualization()}
+            </div>
+
+            {/* Explanations */}
+            <div className="bg-gray-800 rounded-lg p-4">
+              <div className="text-sm font-bold mb-3" style={{color: COLOR_MAP.secondary}}>📝 解释</div>
+              <div className="space-y-4">
+                {Array.from({length: MAX_STEPS}).map((_, i) => (
+                  <div key={i} className={`p-3 rounded transition ${step >= i + 1 ? 'opacity-100' : 'opacity-30'}`}>
+                    <div className="flex items-center mb-2">
+                      <div className={`w-6 h-6 rounded-full mr-2 flex items-center justify-center text-sm font-bold ${step >= i + 1 ? 'text-white' : 'bg-gray-700 text-gray-500'}`} style={step >= i + 1 ? {backgroundColor: COLOR_MAP.primary} : {}}>{i + 1}</div>
+                      <span className={step >= i + 1 ? 'text-white' : 'text-gray-500'}>{explanations[i + 1]}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Voice Status */}
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                <div className="text-sm text-gray-400 mb-2">🔊 语音讲解</div>
+                <div className={`text-sm ${isVoicePlaying ? 'text-green-400' : 'text-gray-500'}`}>
+                  {isVoicePlaying ? '正在播放...' : '已暂停'}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  当前：步骤 {step} / {MAX_STEPS}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

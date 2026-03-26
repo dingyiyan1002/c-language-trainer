@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1161 - UART 串行通信 - 嵌入式 C 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+    @keyframes bitShift { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+    .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+    .animate-blink { animation: blink 0.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out forwards; }
+    .animate-scaleIn { animation: scaleIn 0.5s ease-out forwards; }
+    .animate-flow { animation: flow 1.5s linear infinite; }
+    .animate-bitShift { animation: bitShift 2s linear infinite; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#ef4444',
+      secondary: '#f87171',
+      accent: '#fca5a5',
+      bg: '#7f1d1d',
+      text: '#fee2e2',
+      border: '#dc2626'
+    };
+
+    const STEPS = [
+      { title: 'UART 概述', voice: 'UART 是 Universal Asynchronous Receiver Transmitter 的缩写，中文名为通用异步收发传输器。它是异步串行通信协议，使用两根线实现全双工通信。' },
+      { title: 'UART 物理层', voice: 'UART 使用两根信号线：TX 发送线发送数据，RX 接收线接收数据。TX 连接对方 RX，RX 连接对方 TX，共地连接。无需时钟线，靠波特率同步。' },
+      { title: '数据帧格式', voice: 'UART 数据帧包含：1 位起始位 (低电平)，8 位数据位 (LSB 先行)，可选 1 位校验位，1 位或 2 位停止位 (高电平)。空闲时线路保持高电平。' },
+      { title: '波特率', voice: '波特率是每秒传输的符号数，单位 bps。常见波特率有 9600、19200、38400、57600、115200。通信双方必须使用相同波特率，误差需小于 3%。' },
+      { title: '发送流程', voice: '发送数据时，先将 TX 拉低一个位时间作为起始位，然后从 LSB 开始发送 8 位数据，最后将 TX 拉高作为停止位。每位持续时间为 1 除以波特率。' },
+      { title: '接收流程', voice: '接收方检测 RX 下降沿作为起始位，等待半个位时间后采样确认，然后每隔一个位时间采样数据位。收到停止位后数据接收完成。' },
+      { title: '校验方式', voice: 'UART 支持奇偶校验检测传输错误。奇校验：数据位加校验位 1 的个数为奇数。偶校验：数据位加校验位 1 的个数为偶数。也可不使用校验位。' },
+      { title: 'HAL 库使用', voice: 'STM32 HAL 库提供 HAL_UART_Transmit 发送、HAL_UART_Receive 接收、HAL_UART_Transmit_IT 中断发送、HAL_UART_Receive_IT 中断接收、HAL_UART_Transmit_DMA DMA 发送等函数。' }
+    ];
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [voiceStatus, setVoiceStatus] = useState('就绪');
+      const voiceEndTimerRef = useRef(null);
+
+      useEffect(() => {
+        if (!isPlaying) return;
+        const step = STEPS[currentStep];
+        setVoiceStatus('播放中...');
+
+        const utterance = new SpeechSynthesisUtterance(step.voice);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+
+        const voices = speechSynthesis.getVoices();
+        const xiaoxiao = voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('zh-CN'));
+        if (xiaoxiao) utterance.voice = xiaoxiao;
+
+        utterance.onend = () => {
+          setVoiceStatus('已完成');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            } else {
+              setIsPlaying(false);
+            }
+          }, 800);
+        };
+
+        utterance.onerror = () => {
+          setVoiceStatus('播放失败');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            }
+          }, 800);
+        };
+
+        speechSynthesis.speak(utterance);
+        return () => clearTimeout(voiceEndTimerRef.current);
+      }, [currentStep, isPlaying]);
+
+      const handlePlay = () => {
+        setCurrentStep(0);
+        setIsPlaying(true);
+        speechSynthesis.cancel();
+      };
+
+      const handlePause = () => {
+        setIsPlaying(false);
+        speechSynthesis.cancel();
+      };
+
+      const handleNext = () => {
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => prev + 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const handlePrev = () => {
+        if (currentStep > 0) {
+          setCurrentStep(prev => prev - 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const renderStepContent = () => {
+        switch(currentStep) {
+          case 0: return <Step0Overview />;
+          case 1: return <Step1PhysicalLayer />;
+          case 2: return <Step2FrameFormat />;
+          case 3: return <Step3BaudRate />;
+          case 4: return <Step4Transmit />;
+          case 5: return <Step5Receive />;
+          case 6: return <Step6Parity />;
+          case 7: return <Step7HALUsage />;
+          default: return <Step0Overview />;
+        }
+      };
+
+      return (
+        <div className="min-h-screen p-4" style={{ background: `linear-gradient(135deg, ${COLOR_MAP.bg} 0%, #0f172a 100%)` }}>
+          <div className="mb-4 flex items-center justify-between" style={{ backgroundColor: 'rgba(30, 41, 59, 0.8)', borderRadius: '12px', padding: '16px' }}>
+            <div>
+              <h1 className="text-2xl font-bold" style={{ color: COLOR_MAP.text }}>1161 - UART 串行通信</h1>
+              <p className="text-sm" style={{ color: COLOR_MAP.accent }}>Embedded C - UART Serial Communication</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-sm" style={{ color: COLOR_MAP.accent }}>
+                {voiceStatus} | 步骤 {currentStep + 1}/{STEPS.length}
+              </div>
+              <button onClick={handlePrev} disabled={currentStep === 0} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>上一个</button>
+              {!isPlaying ? (
+                <button onClick={handlePlay} className="px-4 py-2 rounded" style={{ backgroundColor: '#10b981', color: 'white' }}>播放</button>
+              ) : (
+                <button onClick={handlePause} className="px-4 py-2 rounded" style={{ backgroundColor: '#f59e0b', color: 'white' }}>暂停</button>
+              )}
+              <button onClick={handleNext} disabled={currentStep === STEPS.length - 1} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>下一个</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 h-[calc(100vh-150px)]">
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>代码示例</div>
+              <pre className="p-4 text-sm overflow-auto h-full text-gray-100 font-mono">
+                <code>{renderStepContent()}</code>
+              </pre>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>可视化动画</div>
+              <div className="p-4 h-full overflow-auto">
+                {renderVisualization()}
+              </div>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>解释说明</div>
+              <div className="p-4 space-y-3 h-full overflow-auto">
+                <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20` }}>
+                  <div className="font-bold mb-2" style={{ color: COLOR_MAP.text }}>{STEPS[currentStep].title}</div>
+                  <p style={{ color: COLOR_MAP.accent }}>{STEPS[currentStep].voice}</p>
+                </div>
+                {renderExplanation()}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function renderVisualization() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewViz />;
+        case 1: return <Step1PhysicalLayerViz />;
+        case 2: return <Step2FrameFormatViz />;
+        case 3: return <Step3BaudRateViz />;
+        case 4: return <Step4TransmitViz />;
+        case 5: return <Step5ReceiveViz />;
+        case 6: return <Step6ParityViz />;
+        case 7: return <Step7HALUsageViz />;
+        default: return <Step0OverviewViz />;
+      }
+    }
+
+    function renderExplanation() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewExp />;
+        case 1: return <Step1PhysicalLayerExp />;
+        case 2: return <Step2FrameFormatExp />;
+        case 3: return <Step3BaudRateExp />;
+        case 4: return <Step4TransmitExp />;
+        case 5: return <Step5ReceiveExp />;
+        case 6: return <Step6ParityExp />;
+        case 7: return <Step7HALUsageExp />;
+        default: return null;
+      }
+    }
+
+    function Step0Overview() {
+      return `/**
+ * UART 串行通信 - 概述
+ * Universal Asynchronous Receiver Transmitter
+ *
+ * 特点:
+ * - 异步通信 (无需时钟线)
+ * - 全双工 (同时收发)
+ * - 点对点通信
+ * - 简单易用
+ */
+
+// 常见应用
+#define GPS_MODULE      // GPS 模块 (NMEA 协议)
+#define BLUETOOTH       // 蓝牙模块 (HC-05/HC-08)
+#define WIFI_ESP8266    // ESP8266 WiFi 模块
+#define RS232           // PC 串口通信
+#define RS485           // 工业总线
+#define XBEE            // ZigBee 模块
+
+// 速度范围
+// 低速：9600, 19200 bps
+// 中速：38400, 57600 bps
+// 高速：115200, 921600 bps
+
+// UART 优势
+// 1. 简单 (只需 TX/RX 两根线)
+// 2. 普遍 (所有 MCU 都支持)
+// 3. 调试方便 (printf 输出)
+// 4. 协议简单`;
+    }
+
+    function Step0OverviewViz() {
+      return (
+        <div className="space-y-4">
+          <div className="text-center mb-4">
+            <div className="text-lg font-bold" style={{ color: COLOR_MAP.text }}>UART 点对点连接</div>
+          </div>
+          <div className="p-4 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="flex justify-between items-center">
+              <div className="p-3 rounded text-center" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                <div className="font-bold">设备 A (MCU)</div>
+                <div className="text-xs mt-2">TX ────→ RX</div>
+                <div className="text-xs">RX ←──── TX</div>
+                <div className="text-xs">GND ──── GND</div>
+              </div>
+              <div className="flex-1 mx-4">
+                <div className="flex flex-col gap-2 text-xs" style={{ color: COLOR_MAP.accent }}>
+                  <div className="flex items-center">
+                    <span className="w-16">TX</span>
+                    <div className="flex-1 h-0.5" style={{ backgroundColor: COLOR_MAP.secondary }}></div>
+                    <span className="w-16 text-right">RX</span>
+                  </div>
+                  <div className="flex items-center">
+                    <span className="w-16">RX</span>
+                    <div className="flex-1 h-0.5" style={{ backgroundColor: COLOR_MAP.secondary }}></div>
+                    <span className="w-16 text-right">TX</span>
+                  </div>
+                  <div className="flex items-center">
+                    <span className="w-16">GND</span>
+                    <div className="flex-1 h-0.5" style={{ backgroundColor: COLOR_MAP.accent }}></div>
+                    <span className="w-16 text-right">GND</span>
+                  </div>
+                </div>
+              </div>
+              <div className="p-3 rounded text-center" style={{ backgroundColor: COLOR_MAP.secondary, color: 'white' }}>
+                <div className="font-bold">设备 B (Module)</div>
+                <div className="text-xs mt-2">蓝牙/WiFi/GPS</div>
+              </div>
+            </div>
+            <div className="mt-4 text-center text-xs" style={{ color: COLOR_MAP.accent }}>
+              交叉连接：TX 接 RX，RX 接 TX，共地
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step0OverviewExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>UART 历史：</strong> UART 是最早的串行通信接口之一，从早期计算机串口到现代嵌入式系统广泛使用。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>应用场景：</strong> GPS 模块、蓝牙模块、ESP8266/ESP32 WiFi 模块、PC 串口调试、RS232/RS485 工业通信等。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>调试优势：</strong> UART 是最常用的调试输出方式，printf 重定向到串口可实时查看系统状态。</p>
+        </div>
+      );
+    }
+
+    function Step1PhysicalLayer() {
+      return `/**
+ * UART 物理层接口
+ */
+
+// 两线接口 (全双工)
+// ┌─────────────────┐     ┌─────────────────┐
+// │   设备 A (MCU)  │     │   设备 B        │
+// │                 │     │                 │
+// │  TX   ──────────────→ │ RX              │
+// │  RX   ←────────────── │ TX              │
+// │  GND  ──────────────→ │ GND             │
+// │                 │     │                 │
+// └─────────────────┘     └─────────────────┘
+
+// 信号说明
+// TX  (Transmit) : 数据发送端
+// RX  (Receive)  : 数据接收端
+// GND (Ground)   : 共地 (必须连接)
+
+// 连接规则
+// 1. TX 接 RX (交叉连接)
+// 2. RX 接 TX
+// 3. GND 必须共地
+// 4. 电平需匹配 (3.3V/5V)
+
+// 空闲状态
+// 无数据传输时，TX/RX 保持高电平
+// 起始位将线路拉低
+
+// 电平标准
+// TTL 电平：0V=0, 3.3V/5V=1
+// RS232: -12V=1, +12V=0 (负逻辑)
+// 需要 MAX232 等电平转换芯片`;
+    }
+
+    function Step1PhysicalLayerViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>UART 连接方式</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `2px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>正确连接</div>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>设备 A TX</span>
+                  <span style={{ color: '#22c55e' }}>────────→</span>
+                  <span>设备 B RX</span>
+                </div>
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>设备 A RX</span>
+                  <span style={{ color: '#22c55e' }}>←────────</span>
+                  <span>设备 B TX</span>
+                </div>
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>设备 A GND</span>
+                  <span style={{ color: COLOR_MAP.accent }}>────────</span>
+                  <span>设备 B GND</span>
+                </div>
+              </div>
+            </div>
+            <div className="p-3 rounded" style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)', border: `2px solid #ef4444` }}>
+              <div className="font-bold text-center mb-2" style={{ color: '#ef4444' }}>错误连接</div>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>TX ────→ TX</span>
+                  <span style={{ color: '#ef4444' }}>✗</span>
+                </div>
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>RX ←──── RX</span>
+                  <span style={{ color: '#ef4444' }}>✗</span>
+                </div>
+                <div className="text-center" style={{ color: '#ef4444' }}>无法通信!</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            记忆口诀：发对收，收对发，地线相连
+          </div>
+        </div>
+      );
+    }
+
+    function Step1PhysicalLayerExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>交叉连接：</strong> UART 必须交叉连接，即 TX 接 RX，RX 接 TX。直连会导致双方都在发送，无法接收。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>共地：</strong> GND 必须连接，否则两个设备没有共同的参考电位，无法正确识别高低电平。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>电平匹配：</strong> 确保两个设备电平一致。3.3V MCU 连接 5V 设备时需要电平转换器。</p>
+        </div>
+      );
+    }
+
+    function Step2FrameFormat() {
+      return `/**
+ * UART 数据帧格式
+ */
+
+// 完整数据帧 (10 位：8N1)
+// ┌─────┬───┬───┬───┬───┬───┬───┬───┬───┬─────┐
+// │START│ D0│ D1│ D2│ D3│ D4│ D5│ D6│ D7│STOP │
+// │  0  │LSB│   │   │   │   │   │MSB│   │  1  │
+// └─────┴───┴───┴───┴───┴───┴───┴───┴───┴─────┘
+//   │←──────── 8 位数据 ────────→│
+//
+// 空闲状态：高电平 (1)
+
+// 常见配置
+// 8N1 : 8 数据位，无校验，1 停止位 (最常用)
+// 8E1 : 8 数据位，偶校验，1 停止位
+// 8O1 : 8 数据位，奇校验，1 停止位
+// 7E1 : 7 数据位，偶校验，1 停止位
+// 8N2 : 8 数据位，无校验，2 停止位
+
+// 位顺序
+// LSB (最低位) 先行，MSB (最高位) 后行
+// 例如发送 0x41 ('A'):
+// 起始 0 → 1 → 0 → 0 → 0 → 0 → 1 → 0 → 停止 1`;
+    }
+
+    function Step2FrameFormatViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>UART 数据帧 (8N1)</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="flex items-end gap-1 h-32">
+              {/* Start bit */}
+              <div className="flex-1 flex flex-col items-center">
+                <div className="w-full h-0 bg-red-500" style={{ height: '20%' }}></div>
+                <div className="text-xs mt-1" style={{ color: COLOR_MAP.text }}>Start</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.accent }}>0</div>
+              </div>
+              {/* Data bits */}
+              {['D0','D1','D2','D3','D4','D5','D6','D7'].map((bit, i) => {
+                const data = [1,0,0,0,0,1,0,0]; // 0x41 = 'A' (LSB first)
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center">
+                    <div className="w-full transition-all" style={{ height: data[i] === 1 ? '80%' : '20%', backgroundColor: data[i] === 1 ? COLOR_MAP.secondary : COLOR_MAP.bg, border: `1px solid ${COLOR_MAP.border}` }}></div>
+                    <div className="text-xs mt-1" style={{ color: COLOR_MAP.text }}>{bit}</div>
+                    <div className="text-xs" style={{ color: COLOR_MAP.accent }}>{data[i]}</div>
+                  </div>
+                );
+              })}
+              {/* Stop bit */}
+              <div className="flex-1 flex flex-col items-center">
+                <div className="w-full" style={{ height: '80%', backgroundColor: COLOR_MAP.secondary }}></div>
+                <div className="text-xs mt-1" style={{ color: COLOR_MAP.text }}>Stop</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.accent }}>1</div>
+              </div>
+            </div>
+          </div>
+          <div className="text-center text-xs" style={{ color: COLOR_MAP.accent }}>
+            示例：字符 'A' (0x41 = 01000001) → LSB 先行
+          </div>
+        </div>
+      );
+    }
+
+    function Step2FrameFormatExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>起始位：</strong> 1 位低电平，标志一帧的开始。接收方检测下降沿 (高→低) 来启动接收。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>数据位：</strong> 通常 8 位，也支持 7 位或 9 位。LSB (D0) 先发，MSB (D7) 后发。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>停止位：</strong> 1 位或 2 位高电平，标志一帧结束。最常用 1 位停止位 (8N1 配置)。</p>
+        </div>
+      );
+    }
+
+    function Step3BaudRate() {
+      return `/**
+ * UART 波特率
+ */
+
+// 常见标准波特率
+#define BAUD_9600       9600      // 低速，长距离
+#define BAUD_19200      19200
+#define BAUD_38400      38400
+#define BAUD_57600      57600
+#define BAUD_115200     115200    // 最常用
+#define BAUD_230400     230400
+#define BAUD_460800     460800
+#define BAUD_921600     921600    // 高速
+
+// 位时间计算
+// 位时间 = 1 / 波特率
+// 9600 bps:  位时间 = 1/9600 ≈ 104.17 μs
+// 115200 bps: 位时间 = 1/115200 ≈ 8.68 μs
+
+// STM32 波特率配置
+// BRR = f_PCLK / (16 × 波特率)
+// 例如：PCLK=72MHz, 波特率=115200
+// BRR = 72000000 / (16 × 115200) = 39.0625
+
+// 误差要求
+// 双方波特率误差需 < 3%
+// 晶振精度影响通信质量`;
+    }
+
+    function Step3BaudRateViz() {
+      const baudRates = [
+        { rate: 9600, time: '104.17μs' },
+        { rate: 19200, time: '52.08μs' },
+        { rate: 57600, time: '17.36μs' },
+        { rate: 115200, time: '8.68μs' }
+      ];
+
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>常见波特率</div>
+          <div className="space-y-2">
+            {baudRates.map((item, i) => (
+              <div key={i} className="p-2 rounded flex items-center justify-between" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.border}` }}>
+                <div className="flex items-center gap-3">
+                  <div className="font-bold" style={{ color: COLOR_MAP.text }}>{item.rate} bps</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs" style={{ color: COLOR_MAP.accent }}>位时间:</div>
+                  <div className="font-mono text-sm" style={{ color: COLOR_MAP.text }}>{item.time}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="p-2 rounded text-center text-xs animate-pulse" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            波特率越高，传输越快，位时间越短，抗干扰能力越弱
+          </div>
+        </div>
+      );
+    }
+
+    function Step3BaudRateExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>波特率选择：</strong> 低速 (9600) 适合长距离或噪声环境。高速 (115200+) 适合短距离大数据量。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>位时间：</strong> 每位持续的时间。波特率 115200 时每位 8.68 微秒，接收方需在正确时刻采样。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>误差要求：</strong> 双方波特率误差需小于 3%，否则采样点漂移会导致误码。使用高精度晶振。</p>
+        </div>
+      );
+    }
+
+    function Step4Transmit() {
+      return `/**
+ * UART 发送流程
+ */
+
+// 发送字符 'A' (0x41) 的时序
+// 空闲 ─┐
+//       │┌───┐   ┌───┐       ┌───┐   ┌───── 空闲
+// TX    ││ D0│   │ D2│  ...  │ D6│   │
+// ──────┘│ 1 │   │ 0 │       │ 0 │   │
+//        └───┘   └───┘       └───┘   └───
+//        ↑       ↑                   ↑
+//      起始位   LSB                 MSB
+
+void UART_SendByte(uint8_t data) {
+    // 等待发送寄存器为空
+    while (!(USART1->SR & USART_SR_TXE));
+
+    // 写入数据寄存器
+    USART1->DR = (data & 0xFF);
+
+    // 等待发送完成
+    while (!(USART1->SR & USART_SR_TC));
+}
+
+// HAL 库发送
+HAL_UART_Transmit(&huart1, &data, 1, timeout);
+
+// 发送字符串
+void UART_SendString(const char *str) {
+    while (*str) {
+        UART_SendByte(*str++);
+    }
+}
+
+// printf 重定向 (重定向 fputc)
+int fputc(int ch, FILE *f) {
+    HAL_UART_Transmit(&huart1, (uint8_t*)&ch, 1, 0xFFFF);
+    return ch;
+}`;
+    }
+
+    function Step4TransmitViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>发送时序</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-16 text-xs font-bold" style={{ color: COLOR_MAP.text }}>空闲</div>
+                <div className="flex-1 h-2 rounded" style={{ backgroundColor: COLOR_MAP.secondary }}></div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 text-xs font-bold" style={{ color: COLOR_MAP.text }}>起始位</div>
+                <div className="flex-1 h-2 rounded animate-blink" style={{ backgroundColor: COLOR_MAP.bg }}></div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 text-xs font-bold" style={{ color: COLOR_MAP.text }}>D0-D7</div>
+                <div className="flex-1 flex gap-0.5">
+                  {[1,0,0,0,0,1,0,0].map((bit, i) => (
+                    <div key={i} className="flex-1 h-2 rounded" style={{ backgroundColor: bit === 1 ? COLOR_MAP.secondary : COLOR_MAP.bg, transition: 'all 0.3s' }}></div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 text-xs font-bold" style={{ color: COLOR_MAP.text }}>停止位</div>
+                <div className="flex-1 h-2 rounded" style={{ backgroundColor: COLOR_MAP.secondary }}></div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 text-xs font-bold" style={{ color: COLOR_MAP.text }}>空闲</div>
+                <div className="flex-1 h-2 rounded" style={{ backgroundColor: COLOR_MAP.secondary }}></div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}`, color: COLOR_MAP.accent }}>
+            每位时间 = 1/波特率，发送完一帧回到空闲状态
+          </div>
+        </div>
+      );
+    }
+
+    function Step4TransmitExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>发送步骤：</strong> 1) 等待 TXE (发送寄存器空) 标志；2) 写入 DR (数据寄存器)；3) 等待 TC (发送完成) 标志。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>硬件过程：</strong> 数据写入 DR 后，UART 自动添加起始位和停止位，通过移位寄存器串行输出到 TX 引脚。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>printf 重定向：</strong> 重写 fputc 函数可将 printf 输出重定向到 UART，是常用的调试手段。</p>
+        </div>
+      );
+    }
+
+    function Step5Receive() {
+      return `/**
+ * UART 接收流程
+ */
+
+// 接收时序 (检测下降沿启动)
+// 空闲 ────────┐
+//              │┌───┐   ┌───┐       ┌───┐   ┌─────
+// RX           ││ D0│   │ D2│  ...  │ D6│   │
+// ─────────────┘│ 1 │   │ 0 │       │ 0 │   │
+//               └───┘   └───┘       └───┘   └───
+//               ↑       ↑                   ↑
+//            检测下降沿 采样点              停止位
+//            (启动接收)  (半个位时间后)
+
+uint8_t UART_RecvByte(void) {
+    // 等待接收寄存器非空
+    while (!(USART1->SR & USART_SR_RXNE));
+
+    // 读取数据寄存器
+    return (uint8_t)(USART1->DR & 0xFF);
+}
+
+// HAL 库接收
+HAL_UART_Receive(&huart1, &data, 1, timeout);
+
+// 中断接收
+void USART1_IRQHandler(void) {
+    if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_RXNE)) {
+        uint8_t data = huart1.Instance->DR;
+        // 处理接收到的数据
+        UART_RxCallback(data);
+    }
+}`;
+    }
+
+    function Step5ReceiveViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>接收采样</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-3">
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>RX 信号波形:</div>
+              <div className="relative h-16">
+                <svg className="w-full h-full" viewBox="0 0 300 60">
+                  {/* Waveform */}
+                  <path d="M 0 30 L 30 30 L 30 45 L 50 45 L 50 15 L 70 15 L 70 45 L 90 45 L 90 15 L 110 15 L 110 15 L 130 15 L 130 45 L 150 45 L 150 15 L 170 15 L 170 15 L 190 15 L 190 45 L 210 45 L 210 15 L 230 15 L 230 30 L 300 30" stroke={COLOR_MAP.text} strokeWidth="2" fill="none" />
+                  {/* Labels */}
+                  <text x="15" y="25" fill={COLOR_MAP.accent} fontSize="10">空闲</text>
+                  <text x="40" y="55" fill={COLOR_MAP.primary} fontSize="10">Start</text>
+                  <text x="80" y="55" fill={COLOR_MAP.accent} fontSize="10">D0=1</text>
+                  <text x="120" y="55" fill={COLOR_MAP.accent} fontSize="10">D1-6</text>
+                  <text x="200" y="55" fill={COLOR_MAP.accent} fontSize="10">D7=0</text>
+                  <text x="240" y="25" fill={COLOR_MAP.secondary} fontSize="10">Stop</text>
+                  {/* Sample points */}
+                  <circle cx="60" cy="45" r="3" fill="#22c55e" />
+                  <circle cx="80" cy="15" r="3" fill="#22c55e" />
+                  <circle cx="100" cy="45" r="3" fill="#22c55e" />
+                </svg>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}`, color: COLOR_MAP.text }}>
+              检测下降沿启动接收
+            </div>
+            <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}`, color: COLOR_MAP.text }}>
+              每位中点采样
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step5ReceiveExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>启动接收：</strong> 接收方持续检测 RX 线，发现高→低跳变 (下降沿) 后启动接收流程。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>采样点：</strong> 检测到下降沿后等待半个位时间确认起始位，然后每隔一个位时间在数据位中点采样，确保准确性。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>接收完成：</strong> 收到停止位后，将移位寄存器中的 8 位数据并行载入 DR 寄存器，置位 RXNE 标志。</p>
+        </div>
+      );
+    }
+
+    function Step6Parity() {
+      return `/**
+ * UART 奇偶校验
+ */
+
+// 校验位位置 (在数据位后，停止位前)
+// ┌─────┬───┬───┬───┬───┬───┬───┬───┬───┬──────┬─────┐
+// │START│ D0│ D1│ D2│ D3│ D4│ D5│ D6│ D7│PARITY│STOP │
+// └─────┴───┴───┴───┴───┴───┴───┴───┴───┴──────┴─────┘
+
+// 偶校验 (Even Parity)
+// 数据位 + 校验位中 1 的个数为偶数
+// 数据 0x41 (01000001): 2 个 1 → 校验位 = 0
+// 数据 0x43 (01000011): 3 个 1 → 校验位 = 1
+
+// 奇校验 (Odd Parity)
+// 数据位 + 校验位中 1 的个数为奇数
+// 数据 0x41 (01000001): 2 个 1 → 校验位 = 1
+// 数据 0x43 (01000011): 3 个 1 → 校验位 = 0
+
+// 校验错误检测
+// 接收方计算收到数据的 1 的个数
+// 与校验位比较，不匹配则产生校验错误
+
+// 局限性
+// 只能检测奇数个位错误
+// 偶数个位错误无法检测
+// 不能纠错`;
+    }
+
+    function Step6ParityViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>奇偶校验</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-3">
+              <div className="text-xs font-bold" style={{ color: COLOR_MAP.text }}>偶校验示例 (数据 0x41 = 01000001)</div>
+              <div className="flex items-center gap-1 text-xs">
+                <span style={{ color: COLOR_MAP.accent }}>数据位:</span>
+                <div className="flex gap-1">
+                  {[1,0,0,0,0,1,0,0].map((bit, i) => (
+                    <div key={i} className="w-6 h-6 flex items-center justify-center rounded" style={{ backgroundColor: bit === 1 ? COLOR_MAP.secondary : COLOR_MAP.bg, color: bit === 1 ? 'white' : COLOR_MAP.accent }}>
+                      {bit}
+                    </div>
+                  ))}
+                </div>
+                <span style={{ color: COLOR_MAP.text }}>→ 2 个 1</span>
+              </div>
+              <div className="flex items-center gap-1 text-xs">
+                <span style={{ color: COLOR_MAP.accent }}>校验位:</span>
+                <div className="w-6 h-6 flex items-center justify-center rounded animate-pulse" style={{ backgroundColor: '#22c55e', color: 'white' }}>
+                  0
+                </div>
+                <span style={{ color: COLOR_MAP.text }}>→ 总共 2 个 1 (偶数)</span>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-xs text-center">
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div style={{ color: COLOR_MAP.text }}>无校验 (N)</div>
+              <div style={{ color: COLOR_MAP.accent }}>最常用</div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div style={{ color: COLOR_MAP.text }}>偶校验 (E)</div>
+              <div style={{ color: COLOR_MAP.accent }}>1 的个数为偶</div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.accent}30`, border: `1px solid ${COLOR_MAP.accent}` }}>
+              <div style={{ color: COLOR_MAP.text }}>奇校验 (O)</div>
+              <div style={{ color: COLOR_MAP.accent }}>1 的个数为奇</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step6ParityExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>偶校验：</strong> 发送方计算数据位中 1 的个数，若为奇数则校验位置 1，使总数为偶数。接收方验证。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>奇校验：</strong> 与偶校验相反，使数据位加校验位中 1 的总数为奇数。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>局限性：</strong> 只能检测奇数位错误 (1 位、3 位等)，2 位同时出错无法检测。噪声环境建议用更高层协议校验。</p>
+        </div>
+      );
+    }
+
+    function Step7HALUsage() {
+      return `/**
+ * STM32 HAL 库 UART 使用
+ */
+
+// 初始化 (由 CubeMX 生成)
+UART_HandleTypeDef huart1;
+
+void MX_USART1_Init(void) {
+    huart1.Instance = USART1;
+    huart1.Init.BaudRate = 115200;
+    huart1.Init.WordLength = UART_WORDLENGTH_8B;
+    huart1.Init.StopBits = UART_STOPBITS_1;
+    huart1.Init.Parity = UART_PARITY_NONE;
+    huart1.Init.Mode = UART_MODE_TX_RX;
+    huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+
+    if (HAL_UART_Init(&huart1) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+// 阻塞式发送/接收
+HAL_UART_Transmit(&huart1, txData, size, timeout);
+HAL_UART_Receive(&huart1, rxData, size, timeout);
+
+// 中断方式
+HAL_UART_Transmit_IT(&huart1, txData, size);
+HAL_UART_Receive_IT(&huart1, rxData, size);
+// 回调：HAL_UART_TxCpltCallback() / HAL_UART_RxCpltCallback()
+
+// DMA 方式 (推荐大数据量)
+HAL_UART_Transmit_DMA(&huart1, txData, size);
+HAL_UART_Receive_DMA(&huart1, rxData, size);
+
+// 环形缓冲 + DMA 连续接收 (IDLE 中断)
+// 可实现不定长数据接收`;
+    }
+
+    function Step7HALUsageViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>HAL UART API</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>阻塞式</div>
+              <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>Transmit</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>Receive</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>简单直接</div>
+              </div>
+            </div>
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>非阻塞式</div>
+              <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>_IT (中断)</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>_DMA (DMA)</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>高效</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}` }}>
+            <div className="font-bold text-sm" style={{ color: COLOR_MAP.text }}>配置参数</div>
+            <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>波特率/8N1/ 无校验/ 无流控</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step7HALUsageExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>初始化：</strong> 配置波特率、8N1、无校验、无硬件流控。HAL_UART_Init() 完成 GPIO 和 USART 外设配置。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>阻塞式：</strong> Transmit/Receive 函数等待操作完成，简单但占用 CPU。适合低频通信。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>DMA+IDLE：</strong> 使用 DMA 接收加空闲中断检测，可实现不定长数据高效接收，是常用的高级用法。</p>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

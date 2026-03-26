@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1174 - 函数指针完整指南</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(236, 72, 153, 0.2); } 50% { background-color: rgba(236, 72, 153, 0.5); } }
+        @keyframes callAnim { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .animate-blink { animation: blink 1s steps(2) infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+        .animate-call { animation: callAnim 0.5s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#ec4899',
+            secondary: '#db2777',
+            accent: '#f472b6',
+            highlight: '#f9a8d4',
+            bg: '#831843',
+            text: '#fce7f3'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const steps = [
+                { title: '函数指针基础概念', voice: '函数指针基础概念。函数指针是指向函数代码地址的指针变量。通过函数指针可以间接调用函数，实现运行时动态选择函数。函数指针是 C 语言实现回调、状态机、函数表等高级特性的基础。' },
+                { title: '函数指针声明语法', voice: '函数指针声明语法。函数指针声明格式：返回类型 (指针名)(参数类型列表)。括号必不可少，因为星号优先级低于函数调用运算符。函数指针类型必须与目标函数签名完全匹配，包括返回类型和参数类型。' },
+                { title: '函数指针赋值与调用', voice: '函数指针赋值与调用。函数名在表达式中自动转换为函数指针。可以通过函数指针调用函数，语法与普通函数调用相同。函数指针可以赋值为 NULL，表示不指向任何函数。' },
+                { title: '回调函数应用', voice: '回调函数应用。回调函数是最常见的函数指针应用场景。将函数指针作为参数传递给其他函数，在特定时机被调用。标准库 qsort 函数使用回调进行比较。事件驱动编程广泛使用回调机制。' },
+                { title: '函数指针数组', voice: '函数指针数组。函数指针数组是跳转表的数据结构基础。数组每个元素是指向函数的指针。通过索引选择并调用函数，实现高效的分支dispatch。状态机、命令解释器、协议解析器常用此模式。' },
+                { title: '函数指针与结构体', voice: '函数指针与结构体组合。结构体成员可以是函数指针，实现类似面向对象的方法表。这是 C 语言实现多态的基础机制。设备驱动、模块接口常用此模式定义操作集合。' },
+                { title: '复杂函数指针类型', voice: '复杂函数指针类型。指向返回函数指针的函数。指向函数指针数组的指针。使用 typedef 简化复杂函数指针声明。理解声明优先级和结合性是关键。' },
+                { title: '最佳实践与陷阱', voice: '最佳实践与常见陷阱。最佳实践：使用 typedef 简化声明，始终检查 NULL 再调用，保持函数签名一致。常见陷阱：优先级错误导致声明错误，类型不匹配导致未定义行为，忘记函数指针也可能为 NULL。' }
+            ];
+
+            useEffect(() => {
+                if (!isPlaying) return;
+                const speak = () => {
+                    if (isMuted || !steps[currentStep]) return;
+                    const utterance = new SpeechSynthesisUtterance(steps[currentStep].voice);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak();
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    window.speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, isMuted]);
+
+            const PointerSyntax = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>函数指针声明语法</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 函数指针声明格式
+// 返回类型 (*指针名)(参数类型列表)
+
+// 示例：指向 int 函数，无参数
+int (*funcPtr)(void);
+
+// 指向接受两个 int 参数，返回 int 的函数
+int (*binaryOp)(int, int);
+
+// 实际函数
+int add(int a, int b) { return a + b; }
+int sub(int a, int b) { return a - b; }
+
+// 赋值 (函数名自动转换为指针)
+binaryOp = add;      // 或 binaryOp = &add;
+binaryOp = sub;
+
+// 调用
+int result = binaryOp(5, 3);  // 调用 sub(5, 3) = 2`}
+                            </pre>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''} p-3 bg-red-900/30 rounded border border-red-600`}>
+                                    <div className="text-red-300 font-bold mb-1">❌ 错误声明</div>
+                                    <pre className="text-xs font-mono text-gray-300 mt-2">
+{`int *funcPtr();
+// 这是返回 int* 的函数
+// 不是函数指针!`}
+                                    </pre>
+                                </div>
+                                <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''} p-3 bg-emerald-900/30 rounded border border-emerald-600`}>
+                                    <div className="text-emerald-300 font-bold mb-1">✓ 正确声明</div>
+                                    <pre className="text-xs font-mono text-gray-300 mt-2">
+{`int (*funcPtr)();
+// 这是函数指针
+// 指向返回 int 的函数`}
+                                    </pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const CallbackExample = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>回调函数应用</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 标准库 qsort 使用回调进行比较
+void qsort(void *base, size_t nmemb, size_t size,
+           int (*compar)(const void *, const void *));
+
+// 比较函数
+int compareInt(const void *a, const void *b) {
+    return (*(int*)a - *(int*)b);
+}
+
+int compareDesc(const void *a, const void *b) {
+    return (*(int*)b - *(int*)a);  // 降序
+}
+
+// 使用
+int arr[] = {5, 2, 9, 1, 5, 6};
+qsort(arr, 6, sizeof(int), compareInt);    // 升序
+qsort(arr, 6, sizeof(int), compareDesc);   // 降序`}
+                            </pre>
+                            <div className={`${currentStep >= 3 ? 'animate-scaleIn' : ''} p-3 bg-purple-900/30 rounded border border-purple-600`}>
+                                <div className="text-purple-300 font-bold mb-2">通用排序框架</div>
+                                <pre className="text-xs font-mono text-gray-300">
+{`// 使用回调实现通用算法
+void genericSort(int *arr, int n,
+                 int (*cmp)(const void*, const void*)) {
+    for (int i = 0; i < n; i++) {
+        for (int j = i+1; j < n; j++) {
+            if (cmp(&arr[i], &arr[j]) > 0) {
+                int t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+            }
+        }
+    }
+}`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const FunctionPointerArray = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>函数指针数组 (跳转表)</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 计算器状态机 - 跳转表模式
+typedef int (*OpFunc)(int, int);
+
+int add(int a, int b) { return a + b; }
+int sub(int a, int b) { return a - b; }
+int mul(int a, int b) { return a * b; }
+int div(int a, int b) { return a / b; }
+
+// 函数指针数组 (操作码 → 函数)
+OpFunc operations[] = {
+    [0] = add,  // OP_ADD
+    [1] = sub,  // OP_SUB
+    [2] = mul,  // OP_MUL
+    [3] = div   // OP_DIV
+};
+
+// 通过索引调用
+int calculate(int op, int a, int b) {
+    if (op >= 0 && op < 4 && operations[op] != NULL) {
+        return operations[op](a, b);
+    }
+    return 0;  // 错误
+}`}
+                            </pre>
+                            <div className="grid grid-cols-4 gap-2 mt-4">
+                                {['add', 'sub', 'mul', 'div'].map((op, idx) => (
+                                    <div key={idx} className={`p-2 rounded text-center text-xs ${currentStep >= 4 ? 'animate-call' : ''} bg-pink-900/50 border border-pink-600`}>
+                                        <div className="text-pink-300 font-bold">operations[{idx}]</div>
+                                        <div className="text-gray-400 mt-1">{op}()</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const StructWithFuncPtr = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>结构体中的函数指针 (方法表)</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 设备驱动接口
+typedef struct {
+    int (*init)(void);
+    int (*read)(uint8_t *buf, int len);
+    int (*write)(const uint8_t *buf, int len);
+    void (*deinit)(void);
+} DeviceDriver;
+
+// UART 驱动实现
+int uart_init(void) { /* ... */ return 0; }
+int uart_read(uint8_t *buf, int len) { /* ... */ }
+int uart_write(const uint8_t *buf, int len) { /* ... */ }
+void uart_deinit(void) { /* ... */ }
+
+// 驱动实例
+DeviceDriver uartDriver = {
+    .init = uart_init,
+    .read = uart_read,
+    .write = uart_write,
+    .deinit = uart_deinit
+};
+
+// 使用
+uartDriver.init();
+uartDriver.write(data, len);`}
+                            </pre>
+                            <div className="p-3 bg-blue-900/30 rounded border border-blue-600">
+                                <div className="text-blue-300 text-sm">
+                                    💡 这种模式实现了类似 C++ 虚函数表的多态机制，是 C 语言面向对象编程的基础
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const TypedefSimplify = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>使用 typedef 简化函数指针</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 复杂函数指针原始声明
+int (*(*funcPtr)(int, int))(void);  // 难以阅读!
+
+// 使用 typedef 简化
+typedef int (*MathOp)(int, int);        // 二元运算
+typedef void (*CallbackFunc)(int);      // 回调函数
+typedef int (*CompareFunc)(const void*, const void*);  // 比较函数
+
+// 简化后使用
+MathOp addOp, subOp, mulOp;
+CallbackFunc onDataReceived;
+CompareFunc sortCompare;
+
+// 更复杂的例子
+typedef void (*EventHandler)(int eventId, void *data);
+typedef struct {
+    EventHandler onKeyDown;
+    EventHandler onKeyUp;
+    EventHandler onMouseClick;
+} EventHandlers;}
+                            </pre>
+                            <div className="p-3 bg-emerald-900/30 rounded border border-emerald-600">
+                                <div className="text-emerald-300 text-sm">
+                                    ✓ typedef 使代码更清晰，减少声明错误，推荐在所有函数指针代码中使用
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const CommonPatterns = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>常见应用模式</h4>
+                        <div className="space-y-3">
+                            <div className={`${currentStep >= 5 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-pink-400 font-bold mb-2">模式 1: 策略模式</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// 运行时选择算法
+void processData(int *data, int n,
+                 int (*transform)(int)) {
+    for (int i = 0; i < n; i++) {
+        data[i] = transform(data[i]);
+    }
+}
+
+int doubleVal(int x) { return x * 2; }
+int squareVal(int x) { return x * x; }
+
+// 使用时选择策略
+processData(arr, len, doubleVal);   // 加倍
+processData(arr, len, squareVal);   // 平方`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 5 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-cyan-400 font-bold mb-2">模式 2: 事件注册</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`typedef void (*EventHandler)(int);
+
+static EventHandler g_handlers[10] = {0};
+
+void registerHandler(int eventId, EventHandler handler) {
+    if (eventId >= 0 && eventId < 10) {
+        g_handlers[eventId] = handler;
+    }
+}
+
+void dispatchEvent(int eventId, int data) {
+    if (g_handlers[eventId] != NULL) {
+        g_handlers[eventId](data);
+    }
+}`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const Pitfalls = () => (
+                <div className="space-y-4">
+                    <div className="bg-gradient-to-r from-pink-900/50 to-rose-900/50 rounded-lg p-6">
+                        <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>常见陷阱与最佳实践</h3>
+                        <div className="space-y-4">
+                            <div className="bg-red-900/30 p-3 rounded border border-red-600">
+                                <div className="text-red-300 font-bold mb-1">陷阱 1: 声明优先级错误</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`int *fp();    // ✗ 返回 int* 的函数
+int (*fp)();    // ✓ 指向返回 int 的函数的指针`}
+                                </pre>
+                                <div className="text-emerald-300 text-xs mt-2">解决：始终使用括号明确优先级</div>
+                            </div>
+                            <div className="bg-red-900/30 p-3 rounded border border-red-600">
+                                <div className="text-red-300 font-bold mb-1">陷阱 2: 类型不匹配</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`int f(int);
+void (*fp)(int) = f;  // ✗ 返回类型不匹配!
+                      // 未定义行为`}
+                                </pre>
+                                <div className="text-emerald-300 text-xs mt-2">解决：确保返回类型和参数类型完全匹配</div>
+                            </div>
+                            <div className="bg-red-900/30 p-3 rounded border border-red-600">
+                                <div className="text-red-300 font-bold mb-1">陷阱 3: NULL 指针调用</div>
+                                <pre className="text-xs font-mono text-gray-300 mt-2 bg-gray-900 p-2 rounded">
+{`void (*fp)(int) = NULL;
+fp(5);  // ✗ 崩溃!`}
+                                </pre>
+                                <div className="text-emerald-300 text-xs mt-2">解决：调用前检查 fp != NULL</div>
+                            </div>
+                        </div>
+                        <div className="mt-6 bg-emerald-900/30 p-4 rounded border border-emerald-600">
+                            <div className="text-emerald-300 font-bold mb-2">最佳实践清单</div>
+                            <ul className="text-xs text-gray-300 space-y-1">
+                                <li>✓ 使用 typedef 简化函数指针声明</li>
+                                <li>✓ 调用前检查函数指针是否为 NULL</li>
+                                <li>✓ 使用 const 修饰不修改的函数指针</li>
+                                <li>✓ 初始化函数指针数组时显式设置 NULL 哨兵</li>
+                                <li>✓ 保持函数签名严格一致</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch(currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-6">
+                                <div className="bg-gradient-to-r from-pink-900/50 to-rose-900/50 rounded-lg p-6">
+                                    <h3 className="text-2xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>函数指针基础概念</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">▸</span>
+                                            <span>指向函数代码入口地址的指针</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">▸</span>
+                                            <span>允许运行时动态选择函数</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">▸</span>
+                                            <span>实现回调、状态机、函数表</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">▸</span>
+                                            <span>函数名自动转换为函数指针</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300">
+{`// 函数指针基础
+int add(int a, int b) { return a + b; }
+
+// 声明
+int (*fp)(int, int);
+
+// 赋值
+fp = add;  // 或 fp = &add;
+
+// 调用
+int result = fp(3, 5);  // result = 8`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return <PointerSyntax />;
+                    case 2:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>函数指针赋值与调用</h4>
+                                    <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`int add(int a, int b) { return a + b; }
+int sub(int a, int b) { return a - b; }
+
+int (*op)(int, int);  // 声明
+
+// 赋值 (两种方式等价)
+op = add;      // 函数名自动转换为指针
+op = &add;     // 显式取地址
+
+// 调用 (两种方式等价)
+int r1 = op(5, 3);    // 推荐
+int r2 = (*op)(5, 3); // 也可
+
+// 重新赋值
+op = sub;
+int r3 = op(5, 3);  // r3 = 2
+
+// NULL 指针
+op = NULL;
+if (op != NULL) {
+    op(1, 2);  // 安全检查
+}`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 3:
+                        return <CallbackExample />;
+                    case 4:
+                        return <FunctionPointerArray />;
+                    case 5:
+                        return <StructWithFuncPtr />;
+                    case 6:
+                        return <TypedefSimplify />;
+                    case 7:
+                        return <Pitfalls />;
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-6 flex items-center justify-between">
+                            <div>
+                                <h1 className="text-3xl font-bold" style={{ color: COLOR_MAP.primary }}>
+                                    1174 - 函数指针完整指南
+                                </h1>
+                                <p className="text-gray-400 mt-1">C 语言核心 · 步骤 {currentStep + 1} / {steps.length}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setIsMuted(!isMuted)}
+                                    className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-pink-600'} hover:opacity-80`}>
+                                    {isMuted ? '🔇 静音' : '🔊 语音'}
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className={`px-4 py-2 rounded ${isPlaying ? 'bg-pink-600' : 'bg-gray-600'} hover:opacity-80`}>
+                                    {isPlaying ? '⏸ 暂停' : '▶ 继续'}
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-3 gap-6">
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>代码示例</h3>
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`// 基础函数指针
+int (*fp)(int, int);
+fp = add;
+fp(3, 5);
+
+// typedef 简化
+typedef int (*Op)(int, int);
+Op addOp = add;
+
+// 函数指针数组
+Op ops[] = {add, sub, mul};
+ops[0](1, 2);
+
+// 回调
+void qsort(void*, size_t, size_t,
+           int(*cmp)(const void*,const void*));`}
+                                    </pre>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>关键点</h3>
+                                    <ul className="space-y-2 text-sm text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">•</span>
+                                            <span>声明需要括号 (*fp)(params)</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">•</span>
+                                            <span>函数名自动转换为指针</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">•</span>
+                                            <span>用于回调、跳转表、方法表</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-pink-400 mr-2">•</span>
+                                            <span>调用前检查 NULL</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div className="col-span-1">
+                                <div className="bg-gray-800 rounded-lg p-6 h-full">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>
+                                        {steps[currentStep].title}
+                                    </h3>
+                                    {renderContent()}
+                                </div>
+                            </div>
+
+                            <div className="col-span-1 space-y-4">
+                                <PointerSyntax />
+                                <CallbackExample />
+                            </div>
+                        </div>
+
+                        <footer className="mt-8 flex justify-center gap-2">
+                            {steps.map((_, idx) => (
+                                <button key={idx} onClick={() => setCurrentStep(idx)}
+                                    className={`w-3 h-3 rounded-full transition-all ${idx === currentStep ? 'w-8' : ''}`}
+                                    style={{ backgroundColor: idx <= currentStep ? COLOR_MAP.primary : '#374151' }} />
+                            ))}
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

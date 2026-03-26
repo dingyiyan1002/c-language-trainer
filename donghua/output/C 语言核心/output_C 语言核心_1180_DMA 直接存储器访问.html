@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1180 - DMA 直接存储器访问 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: transparent; } 50% { background-color: rgba(251,191,36,0.2); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes transferAnim { 0% { transform: translateX(0); opacity: 1; } 100% { transform: translateX(200px); opacity: 1; } }
+        @keyframes dmaAnim { 0%, 100% { background-color: rgba(139,92,246,0.3); } 50% { background-color: rgba(139,92,246,0.6); } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-transfer { animation: transferAnim 1s infinite; }
+        .animate-dma { animation: dmaAnim 2s infinite; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: 'from-purple-500 to-indigo-600',
+            light: 'from-purple-50 to-indigo-50',
+            text: 'text-purple-600',
+            bg: 'bg-purple-50',
+            border: 'border-purple-200',
+            hover: 'hover:bg-purple-100'
+        };
+
+        const CODE_EXAMPLES = [
+            {
+                title: "DMA 基础概念",
+                code: `// DMA (Direct Memory Access) 直接存储器访问
+// 作用：在外设和内存之间传输数据，无需 CPU 干预
+
+// 传统方式 (CPU 搬运):
+void USART_Send(uint8_t *data, int len) {
+    for (int i = 0; i < len; i++) {
+        USART->DR = data[i];      // CPU 等待
+        while (!(USART->SR & TXE)); // CPU 轮询
+    }
+}  // CPU 被占用，无法做其他事
+
+// DMA 方式 (硬件搬运):
+void DMA_USART_Send(uint8_t *data, int len) {
+    DMA1->Channel4.CMAR = (uint32_t)data;  // 源地址
+    DMA1->Channel4.CPAR = (uint32_t)&USART1->DR; // 目标地址
+    DMA1->Channel4.CNDTR = len;     // 传输数量
+    DMA1->Channel4.CCR |= DMA_CCR_EN; // 使能 DMA
+    // CPU 立即返回，可以做其他事!
+}
+
+// 传输完成后再通知 CPU (中断或标志)`,
+                highlight: "无需 CPU",
+                explanation: "DMA 允许外设和内存之间直接传输数据，无需 CPU 逐字节搬运。CPU 只需配置 DMA 参数，传输期间可以自由执行其他任务。"
+            },
+            {
+                title: "DMA 传输模式",
+                code: `// 1. 普通模式 (单次传输)
+DMA1->Channel4.CCR &= ~DMA_CCR_CIRC;
+// 传输完成后停止，产生 TC 中断
+
+// 2. 循环模式 (连续传输)
+DMA1->Channel4.CCR |= DMA_CCR_CIRC;
+// 传输完成后自动重装，无限循环
+// 适用于：ADC 连续采样、音频流
+
+// 3. 存储器到存储器
+DMA1->Channel4.CPAR = (uint32_t)src;
+DMA1->Channel4.CMAR = (uint32_t)dst;
+DMA1->Channel4.CCR |= DMA_CCR_MEM2MEM;
+
+// 4. 外设到存储器 (ADC → RAM)
+DMA1->Channel1.CPAR = (uint32_t)&ADC1->DR;
+DMA1->Channel1.CMAR = (uint32_t)adcBuffer;
+DMA1->Channel1.CNDTR = BUFFER_SIZE;
+
+// 5. 存储器到外设 (RAM → USART)
+DMA1->Channel4.CPAR = (uint32_t)&USART1->DR;
+DMA1->Channel4.CMAR = (uint32_t)txBuffer;
+DMA1->Channel4.CNDTR = txLen;`,
+                highlight: "循环模式",
+                explanation: "DMA 支持多种传输模式：普通模式用于单次传输，循环模式用于连续数据流，MEM2MEM 用于内存拷贝。外设模式用于 ADC/USART/SPI 等。"
+            },
+            {
+                title: "DMA 配置步骤",
+                code: `void DMA_Config(void) {
+    // 1. 使能 DMA 时钟
+    RCC->AHBENR |= RCC_AHBENR_DMA1EN;
+
+    // 2. 配置 DMA 通道
+    DMA1_Channel3->CPAR = (uint32_t)&SPI1->DR;
+    DMA1_Channel3->CMAR = (uint32_t)spiRxBuffer;
+    DMA1_Channel3->CNDTR = SPI_BUF_SIZE;
+
+    // 3. 配置传输参数
+    DMA1_Channel3->CCR =
+        DMA_CCR_MINC |      // 存储器地址自增
+        DMA_CCR_PL_0 |      // 中优先级
+        DMA_CCR_MSIZE_0 |   // 8 位存储器
+        DMA_CCR_PSIZE_0 |   // 8 位外设
+        DMA_CCR_DIR;        // 外设→存储器
+
+    // 4. 使能 DMA 通道
+    DMA1_Channel3->CCR |= DMA_CCR_EN;
+
+    // 5. 使能外设 DMA
+    SPI1->CR2 |= SPI_CR2_RXDMAEN;
+}`,
+                highlight: "MINC",
+                explanation: "DMA 配置步骤：使能时钟→配置地址→设置参数→使能通道→使能外设 DMA。MINC 位控制存储器地址是否自增，循环缓冲时不需要自增。"
+            },
+            {
+                title: "DMA 中断处理",
+                code: `// DMA 中断标志:
+// TCIF - 传输完成
+// HTIF - 半传输完成 (可用于双缓冲)
+// TEIF - 传输错误
+
+volatile bool g_dmaTransferComplete = false;
+volatile bool g_dmaHalfComplete = false;
+
+void DMA1_Channel3_IRQHandler(void) {
+    // 检查传输完成标志
+    if (DMA1->ISR & DMA_ISR_TCIF3) {
+        DMA1->IFCR = DMA_IFCR_CGIF3;  // 清除标志
+        g_dmaTransferComplete = true;
+    }
+
+    // 检查半传输标志 (双缓冲用)
+    if (DMA1->ISR & DMA_ISR_HTIF3) {
+        DMA1->IFCR = DMA_IFCR_CHIF3;
+        g_dmaHalfComplete = true;
+        // 可以处理前一半数据
+    }
+}
+
+// 主循环
+void main_loop(void) {
+    if (g_dmaTransferComplete) {
+        g_dmaTransferComplete = false;
+        processDmaData(spiRxBuffer);
+        // 重新配置 DMA 进行下一次传输
+        DMA1_Channel3->CNDTR = SPI_BUF_SIZE;
+    }
+}`,
+                highlight: "HTIF",
+                explanation: "DMA 中断包括传输完成 (TC)、半传输 (HT)、传输错误 (TE)。半传输中断用于双缓冲，可以在后一半传输时处理前一半数据，实现无缝流水线。"
+            },
+            {
+                title: "双缓冲技术",
+                code: `#define BUF_SIZE 256
+uint8_t buffer[2][BUF_SIZE];  // 双缓冲
+volatile uint8_t activeBuf = 0;
+
+void DMA_ADC_Config(void) {
+    // 循环模式，连续传输 2*BUF_SIZE
+    DMA1->Channel1.CPAR = (uint32_t)&ADC1->DR;
+    DMA1->Channel1.CMAR = (uint32_t)buffer[0];
+    DMA1->Channel1.CNDTR = BUF_SIZE * 2;  // 双倍大小
+    DMA1->Channel1.CCR =
+        DMA_CCR_CIRC |      // 循环模式
+        DMA_CCR_MINC |      // 存储器自增
+        DMA_CCR_HTIE |      // 半传输中断
+        DMA_CCR_TCIE |      // 全传输中断
+        DMA_CCR_EN;
+}
+
+void DMA1_Channel1_IRQHandler(void) {
+    if (DMA1->ISR & DMA_ISR_HTIF1) {
+        DMA1->IFCR = DMA_IFCR_CHIF1;
+        activeBuf = 0;  // 处理 buffer[0]
+    }
+    if (DMA1->ISR & DMA_ISR_TCIF1) {
+        DMA1->IFCR = DMA_IFCR_CGIF1;
+        activeBuf = 1;  // 处理 buffer[1]
+    }
+}
+
+// 主循环：DMA 填充 buffer[0] 时，CPU 处理 buffer[1]`,
+                highlight: "双缓冲",
+                explanation: "双缓冲技术将缓冲区分为两半，DMA 填充一半时 CPU 处理另一半。半传输中断通知 CPU切换缓冲区，实现无缝数据流，适用于高速 ADC 采样。"
+            },
+            {
+                title: "DMA 应用案例",
+                code: `// 1. ADC 多通道扫描 + DMA
+uint32_t adcValues[4];  // 4 个通道
+void ADC_DMA_Init(void) {
+    ADC1->CR2 |= ADC_CR2_DMA | ADC_CR2_CONT;  // DMA + 连续
+    ADC1->SQR1 = 3;  // 4 个转换
+    // 序列配置...
+    DMA1->Channel1.CNDTR = 4;
+    DMA1->Channel1.CCR |= DMA_CCR_CIRC;  // 循环
+}
+// adcValues 自动更新，无需 CPU 干预
+
+// 2. USART 接收 + DMA (空闲中断)
+void USART_DMA_Recv(void) {
+    DMA1->Channel5.CNDTR = RX_BUF_SIZE;
+    USART1->CR3 |= USART_CR3_DMAR;  // 使能 RX DMA
+    // 配合空闲中断检测帧结束
+}
+
+// 3. SPI 高速传输 + DMA
+void SPI_DMA_Transfer(uint8_t *tx, uint8_t *rx, int len) {
+    DMA2_Channel2.CNDTR = len;  // TX
+    DMA2_Channel3.CNDTR = len;  // RX
+    DMA2_Channel2.CCR |= DMA_CCR_EN;
+    DMA2_Channel3.CCR |= DMA_CCR_EN;
+    SPI1->CR1 |= SPI_CR1_CSTART;  // 启动
+}`,
+                highlight: "扫描",
+                explanation: "DMA 典型应用：ADC 多通道扫描自动填充数组，USART 接收配合空闲中断检测帧边界，SPI 全双工传输同时使用两个 DMA 通道。"
+            },
+            {
+                title: "DMA vs CPU 性能对比",
+                code: `// 传输 1KB 数据的时间对比:
+
+// CPU 方式 (轮询):
+void cpu_transfer() {
+    for (int i = 0; i < 1024; i++) {
+        dst[i] = src[i];  // ~4 周期/字节
+    }
+}  // 总计：~4096 周期，CPU 100% 占用
+
+// DMA 方式:
+void dma_transfer() {
+    DMA_Config(src, dst, 1024);
+    DMA1->Channel1.CCR |= DMA_CCR_EN;
+    // CPU 立即返回! ~10 周期配置
+    // DMA 硬件传输：~2048 周期 (后台)
+}  // CPU 占用：10 周期 (0.5%)
+
+// 功耗对比 (假设 CPU 100MHz):
+// CPU 方式：4096 周期 @ 100MHz = 41μs 全速运行
+// DMA 方式：10 周期 @ 100MHz = 0.1μs
+//           CPU 可进入休眠模式!
+
+// 效率提升: 400 倍 CPU 时间节省!`,
+                highlight: "400 倍",
+                explanation: "DMA 可以节省大量 CPU 时间。传输 1KB 数据，CPU 方式需要 4096 周期全速运行，DMA 方式只需 10 周期配置，CPU 可以进入低功耗模式。"
+            },
+            {
+                title: "DMA 最佳实践",
+                code: `// ✅ 应该做:
+// 1. 使用 DMA 进行大数据传输 (>16 字节)
+// 2. 配置正确的数据宽度 (8/16/32 位)
+// 3. 使用半传输中断实现双缓冲
+// 4. 传输完成后重新配置 NDT
+// 5. 检查传输错误标志 (TEIF)
+
+// ❌ 避免:
+// 1. 小数据量用 DMA (配置开销大于收益)
+// 2. 忘记使能 NVIC 中的 DMA 中断
+// 3. 缓冲区大小与 NDT 不匹配
+// 4. 忘记清除中断标志 (导致重复进入)
+// 5. 在中断中处理大量数据
+
+// 调试技巧:
+// 1. 使用逻辑分析仪观察 DMA 请求信号
+// 2. 检查 CNDTR 剩余计数确认传输进度
+// 3. 配置错误中断捕获异常
+// 4. 使用 DMA 调试寄存器 (某些 MCU)
+
+// 内存对齐优化
+// 32 位传输要求地址 4 字节对齐
+uint32_t buffer[256] __attribute__((aligned(4)));`,
+                highlight: "对齐",
+                explanation: "DMA 最佳实践：大数据量使用、正确配置数据宽度、双缓冲、检查错误。小数据量用 DMA 反而效率低。注意内存对齐要求，32 位传输需要 4 字节对齐。"
+            }
+        ];
+
+        function App() {
+            const [step, setStep] = React.useState(0);
+            const [voiceEndTimer, setVoiceEndTimer] = React.useState(null);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                speakCurrentStep();
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, []);
+
+            const speakCurrentStep = () => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                }
+
+                const currentExample = CODE_EXAMPLES[step];
+                const explanations = [
+                    "DMA 直接存储器访问允许外设和内存之间直接传输数据，无需 CPU 逐字节搬运。CPU 只需配置 DMA 参数，传输期间可以自由执行其他任务，大幅提高效率。",
+                    "DMA 支持多种传输模式：普通模式用于单次传输后停止，循环模式用于连续数据流如 ADC 采样，存储器到存储器用于内存拷贝，外设模式用于各种通信接口。",
+                    "DMA 配置步骤包括使能时钟、配置源和目标地址、设置传输参数如地址自增和数据宽度、使能通道、最后使能外设的 DMA 请求位。",
+                    "DMA 中断包括传输完成 TC、半传输 HT、传输错误 TE。半传输中断用于双缓冲应用，可以在后一半传输时处理前一半数据，实现无缝流水线处理。",
+                    "双缓冲技术将缓冲区分为两半，DMA 填充一半时 CPU 处理另一半。半传输中断通知 CPU 切换缓冲区，实现无缝数据流，适用于高速 ADC 采样或音频处理。",
+                    "DMA 典型应用包括 ADC 多通道扫描自动循环填充数组，USART 接收配合空闲中断检测帧边界，SPI 全双工传输同时使用发送和接收两个 DMA 通道。",
+                    "DMA 可以节省大量 CPU 时间。传输 1KB 数据，CPU 轮询方式需要 4096 周期，DMA 方式只需 10 周期配置，CPU 可以进入低功耗模式，效率提升 400 倍。",
+                    "DMA 最佳实践：大数据量使用、正确配置数据宽度、双缓冲流水线、检查传输错误。小数据量用 DMA 反而效率低。注意内存对齐要求以提高传输速度。"
+                ];
+
+                const text = `第${step + 1}步：${currentExample.title}。${explanations[step]}`;
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                const voices = speechSynthesis.getVoices();
+                const xiaoxiaoVoice = voices.find(voice =>
+                    voice.name.includes('Xiaoxiao') ||
+                    voice.name.includes('zh-CN')
+                );
+                if (xiaoxiaoVoice) {
+                    utterance.voice = xiaoxiaoVoice;
+                }
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            React.useEffect(() => {
+                speakCurrentStep();
+            }, [step]);
+
+            const renderDmaTransfer = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-purple-800 mb-4">DMA 传输示意</h4>
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-3 gap-4 items-center">
+                                <div className="p-4 bg-blue-100 rounded border-2 border-blue-300 text-center">
+                                    <div className="font-bold text-blue-800">外设</div>
+                                    <div className="text-xs text-blue-600">ADC/USART/SPI</div>
+                                </div>
+                                <div className="relative h-16">
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                        <div className="w-full h-2 bg-gradient-to-r from-blue-300 to-purple-300 rounded"></div>
+                                    </div>
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                        <div className="w-8 h-8 bg-purple-500 rounded-full animate-pulse flex items-center justify-center text-white text-xs font-bold">DMA</div>
+                                    </div>
+                                </div>
+                                <div className="p-4 bg-green-100 rounded border-2 border-green-300 text-center">
+                                    <div className="font-bold text-green-800">内存</div>
+                                    <div className="text-xs text-green-600">Buffer</div>
+                                </div>
+                            </div>
+                            <div className="p-3 bg-yellow-50 rounded border border-yellow-200">
+                                <p className="text-sm text-yellow-800">
+                                    <span className="font-bold">CPU:</span> 配置后返回，无需等待
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderDoubleBuffer = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-purple-800 mb-4">双缓冲工作流程</h4>
+                        <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="p-3 bg-purple-100 rounded">
+                                    <div className="font-bold text-purple-800 mb-2">Buffer A</div>
+                                    <div className="space-y-1">
+                                        <div className="h-8 bg-green-200 rounded flex items-center justify-center text-xs">DMA 填充中</div>
+                                        <div className="h-8 bg-gray-100 rounded flex items-center justify-center text-xs">空闲</div>
+                                    </div>
+                                </div>
+                                <div className="p-3 bg-indigo-100 rounded">
+                                    <div className="font-bold text-indigo-800 mb-2">Buffer B</div>
+                                    <div className="space-y-1">
+                                        <div className="h-8 bg-blue-200 rounded flex items-center justify-center text-xs">CPU 处理中</div>
+                                        <div className="h-8 bg-gray-100 rounded flex items-center justify-center text-xs">空闲</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="text-center text-sm text-gray-600">
+                                DMA 和 CPU 并行工作，无缝切换
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderPerformanceCompare = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-purple-800 mb-4">性能对比 (1KB 传输)</h4>
+                        <div className="space-y-4">
+                            <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-red-700">CPU 轮询</span>
+                                    <span className="text-red-600">4096 周期 (100%)</span>
+                                </div>
+                                <div className="h-8 bg-red-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-red-500" style={{width: '100%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-green-700">DMA 方式</span>
+                                    <span className="text-green-600">10 周期 (0.5%)</span>
+                                </div>
+                                <div className="h-8 bg-green-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-green-500" style={{width: '0.5%'}}></div>
+                                </div>
+                            </div>
+                            <div className="p-3 bg-purple-50 rounded border border-purple-200">
+                                <p className="text-sm text-purple-800">
+                                    <span className="font-bold">CPU 时间节省:</span> 400 倍
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-purple-50 via-indigo-50 to-blue-50 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="text-center mb-6">
+                            <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent mb-2">
+                                1180 - DMA 直接存储器访问
+                            </h1>
+                            <p className="text-lg text-gray-700">C 语言核心 - DMA 配置/双缓冲/性能优化</p>
+                            <div className="flex justify-center gap-2 mt-4">
+                                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">DMA 配置</span>
+                                <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm">双缓冲</span>
+                                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">性能优化</span>
+                                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">应用案例</span>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-purple-500">
+                                    <h3 className="text-xl font-bold text-purple-700 mb-3">代码示例</h3>
+                                    <div className="bg-gray-50 rounded p-3 font-mono text-sm overflow-x-auto">
+                                        <pre className="text-gray-800 whitespace-pre-wrap">
+                                            {CODE_EXAMPLES[step].code}
+                                        </pre>
+                                    </div>
+                                    <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                        <p className="text-sm text-yellow-800">
+                                            <span className="font-bold">亮点:</span> {CODE_EXAMPLES[step].highlight}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-indigo-500">
+                                    <h3 className="text-xl font-bold text-indigo-700 mb-3">可视化演示</h3>
+                                    {step === 0 && renderDmaTransfer()}
+                                    {step === 1 && (
+                                        <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-purple-800 mb-4">传输模式对比</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                                                    <div className="font-bold text-blue-700">普通模式</div>
+                                                    <div className="text-xs text-blue-600">单次传输 → 停止 → 中断</div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded border border-green-200 animate-pulse">
+                                                    <div className="font-bold text-green-700">循环模式</div>
+                                                    <div className="text-xs text-green-600">传输 → 重装 → 无限循环</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded border border-purple-200">
+                                                    <div className="font-bold text-purple-700">MEM2MEM</div>
+                                                    <div className="text-xs text-purple-600">内存 → 内存拷贝</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 2 && (
+                                        <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-purple-800 mb-4">配置流程</h4>
+                                            <div className="space-y-2">
+                                                {['1. 使能 DMA 时钟', '2. 配置 PAR (外设地址)', '3. 配置 MAR (内存地址)', '4. 设置 NDT (数量)', '5. 配置 CCR (参数)', '6. 使能通道', '7. 使能外设 DMA'].map((s, i) => (
+                                                    <div key={i} className="p-2 bg-white rounded border-l-4 border-purple-400 text-sm">
+                                                        {s}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 3 && (
+                                        <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-purple-800 mb-4">中断标志</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-green-100 rounded">
+                                                    <div className="font-bold text-green-800">TCIF (传输完成)</div>
+                                                    <div className="text-xs text-green-600">整个传输完成时触发</div>
+                                                </div>
+                                                <div className="p-3 bg-blue-100 rounded">
+                                                    <div className="font-bold text-blue-800">HTIF (半传输)</div>
+                                                    <div className="text-xs text-blue-600">传输 50% 时触发 (双缓冲)</div>
+                                                </div>
+                                                <div className="p-3 bg-red-100 rounded">
+                                                    <div className="font-bold text-red-800">TEIF (传输错误)</div>
+                                                    <div className="text-xs text-red-600">错误情况触发</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 4 && renderDoubleBuffer()}
+                                    {step === 5 && (
+                                        <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-purple-800 mb-4">应用案例</h4>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                                                    <div className="font-bold text-blue-700 text-center">ADC+DMA</div>
+                                                    <div className="text-xs text-blue-600 mt-1">多通道扫描<br/>循环填充数组</div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded border border-green-200">
+                                                    <div className="font-bold text-green-700 text-center">USART+DMA</div>
+                                                    <div className="text-xs text-green-600 mt-1">接收数据帧<br/>空闲中断检测</div>
+                                                </div>
+                                                <div className="p-3 bg-yellow-50 rounded border border-yellow-200">
+                                                    <div className="font-bold text-yellow-700 text-center">SPI+DMA</div>
+                                                    <div className="text-xs text-yellow-600 mt-1">全双工传输<br/>双 DMA 通道</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded border border-purple-200">
+                                                    <div className="font-bold text-purple-700 text-center">I2C+DMA</div>
+                                                    <div className="text-xs text-purple-600 mt-1">大数据读写<br/>减少 CPU 负载</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 6 && renderPerformanceCompare()}
+                                    {step === 7 && (
+                                        <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-purple-800 mb-4">最佳实践清单</h4>
+                                            <div className="space-y-2">
+                                                <div className="flex items-center gap-2 p-2 bg-green-50 rounded">
+                                                    <span className="text-green-500">✓</span>
+                                                    <span className="text-sm">大数据量 (>16 字节)</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-green-50 rounded">
+                                                    <span className="text-green-500">✓</span>
+                                                    <span className="text-sm">正确数据宽度</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-green-50 rounded">
+                                                    <span className="text-green-500">✓</span>
+                                                    <span className="text-sm">双缓冲流水线</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-green-50 rounded">
+                                                    <span className="text-green-500">✓</span>
+                                                    <span className="text-sm">内存 4 字节对齐</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-red-50 rounded">
+                                                    <span className="text-red-500">✗</span>
+                                                    <span className="text-sm">小数据量使用</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 p-2 bg-red-50 rounded">
+                                                    <span className="text-red-500">✗</span>
+                                                    <span className="text-sm">忘记清除标志</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-blue-500">
+                                    <h3 className="text-xl font-bold text-blue-700 mb-3">关键要点</h3>
+                                    <div className="space-y-3">
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 0 ? 'bg-purple-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-purple-600">DMA:</span> 无需 CPU 干预
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 1 ? 'bg-indigo-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-indigo-600">模式:</span> 普通/循环/MEM2MEM
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 2 ? 'bg-blue-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-blue-600">配置:</span> 7 步流程
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 3 ? 'bg-green-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-green-600">中断:</span> TC/HT/TE
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 4 ? 'bg-yellow-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-yellow-600">双缓冲:</span> DMA/CPU 并行
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 5 ? 'bg-purple-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-purple-600">应用:</span> ADC/USART/SPI
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 6 ? 'bg-pink-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-pink-600">性能:</span> 400 倍节省
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 7 ? 'bg-teal-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-teal-600">实践:</span> 6 项清单
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 p-3 bg-blue-50 rounded border border-blue-200">
+                                        <p className="text-sm text-blue-800">
+                                            {CODE_EXAMPLES[step].explanation}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-lg shadow-lg p-4 text-white">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm">进度</span>
+                                        <span className="text-sm font-bold">{step + 1} / {CODE_EXAMPLES.length}</span>
+                                    </div>
+                                    <div className="w-full bg-white bg-opacity-30 rounded-full h-2">
+                                        <div
+                                            className="bg-white rounded-full h-2 transition-all duration-500"
+                                            style={{ width: `${((step + 1) / CODE_EXAMPLES.length) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <footer className="text-center mt-8 text-gray-600">
+                            <p className="text-sm">C 语言核心 · DMA 直接存储器访问 · 嵌入式开发必备技能</p>
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

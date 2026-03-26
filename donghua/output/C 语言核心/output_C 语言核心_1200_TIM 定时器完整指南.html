@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TIM 定时器完整指南 - 嵌入式 C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes flow { 0% { stroke-dashoffset: 100; } 100% { stroke-dashoffset: 0; } }
+        @keyframes highlight { 0%, 100% { fill: #22c55e; } 50% { fill: #fbbf24; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countUp { 0% { transform: translateY(0); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes edge { 0% { stroke: #22c55e; } 50% { stroke: #fbbf24; } 100% { stroke: #22c55e; } }
+        @keyframes capture { 0%, 100% { r: 8; } 50% { r: 12; } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-flow { animation: flow 1.5s linear infinite; }
+        .animate-highlight { animation: highlight 1s infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-countUp { animation: countUp 0.5s ease-out; }
+        .animate-rotate { animation: rotate 2s linear infinite; }
+        .animate-edge { animation: edge 0.5s infinite; }
+        .animate-capture { animation: capture 1s infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#06b6d4',
+            secondary: '#8b5cf6',
+            accent: '#fbbf24',
+            success: '#22c55e',
+            danger: '#ef4444',
+            info: '#3b82f6'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [counterValue, setCounterValue] = React.useState(0);
+            const [pwmDuty, setPwmDuty] = React.useState(50);
+            const [captureEdge, setCaptureEdge] = React.useState('rising');
+            const [timerMode, setTimerMode] = React.useState('up');
+            const voiceEndTimerRef = React.useRef(null);
+
+            const STEPS = [
+                {
+                    title: "TIM 定时器基础架构",
+                    code: `// TIM 定时器核心组件
+// 16 位/32 位计数器 + 自动重装载寄存器
+// 预分频器 + 捕获/比较寄存器
+
+// 计数器时钟来源
+// 1. 内部时钟 (CK_INT) - 最常用
+// 2. 外部时钟模式 1 (TI1FP1)
+// 3. 外部时钟模式 2 (ETR)
+// 4. 内部触发 (ITR)
+
+// 基本定时器框图
+// CK_INT → PSC(预分频) → CNT(计数器)
+//                    ↓
+//              ARR(重装载) → 更新事件
+//                    ↓
+//              CCR(比较寄存器) → 比较事件`,
+                    explanation: "TIM 定时器是 MCU 中最强大的外设之一。核心包含：16 位/32 位递增/递减/递增递减计数器、预分频器 PSC、自动重装载寄存器 ARR、捕获/比较寄存器 CCR。计数器时钟经预分频后驱动 CNT 计数，当 CNT=ARR 时产生更新事件并重置。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 300" className="w-full h-full">
+                            <defs>
+                                <linearGradient id="timerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stopColor={COLOR_MAP.primary} />
+                                    <stop offset="100%" stopColor={COLOR_MAP.secondary} />
+                                </linearGradient>
+                            </defs>
+                            {/* 时钟输入 */}
+                            <text x="20" y="145" fill="#9ca3af" fontSize="12">CK_INT</text>
+                            <line x1="60" y1="140" x2="90" y2="140" stroke="#fbbf24" strokeWidth="2" className="animate-flow" strokeDasharray="5,5" />
+                            {/* 预分频器 PSC */}
+                            <rect x="90" y="100" width="70" height="80" fill="none" stroke={COLOR_MAP.info} strokeWidth="2" rx="5" />
+                            <text x="125" y="135" fill={COLOR_MAP.info} fontSize="12" textAnchor="middle">PSC</text>
+                            <text x="125" y="155" fill="#9ca3af" fontSize="10" textAnchor="middle">预分频器</text>
+                            <text x="125" y="170" fill="#fbbf24" fontSize="11" textAnchor="middle">÷4</text>
+                            {/* 计数器 CNT */}
+                            <line x1="160" y1="140" x2="190" y2="140" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            <rect x="190" y="80" width="80" height="120" fill="none" stroke="url(#timerGrad)" strokeWidth="2" rx="5" />
+                            <text x="230" y="125" fill="white" fontSize="14" textAnchor="middle" fontWeight="bold">CNT</text>
+                            <text x="230" y="145" fill="#fbbf24" fontSize="16" textAnchor="middle" fontWeight="bold">{counterValue}</text>
+                            <text x="230" y="165" fill="#9ca3af" fontSize="10" textAnchor="middle">0-{500-1}</text>
+                            {/* 自动重装载 ARR */}
+                            <line x1="270" y1="140" x2="300" y2="140" stroke={COLOR_MAP.accent} strokeWidth="2" />
+                            <rect x="300" y="100" width="80" height="80" fill="none" stroke={COLOR_MAP.accent} strokeWidth="2" rx="5" />
+                            <text x="340" y="135" fill={COLOR_MAP.accent} fontSize="12" textAnchor="middle">ARR</text>
+                            <text x="340" y="155" fill="#fbbf24" fontSize="11" textAnchor="middle">{500-1}</text>
+                            {/* 更新事件 */}
+                            <path d="M 340 180 L 340 210 L 60 210 L 60 160" fill="none" stroke={COLOR_MAP.danger} strokeWidth="2" strokeDasharray="5,5" className="animate-flow" />
+                            <circle cx="60" cy="160" r="5" fill={COLOR_MAP.danger} className="animate-pulse" />
+                            <text x="80" y="175" fill={COLOR_MAP.danger} fontSize="10">UEV</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "定时器计数模式",
+                    code: `// 三种计数模式配置
+// 1. 向上计数：0 → ARR，溢出回 0
+// 2. 向下计数：ARR → 0，下溢回 ARR
+// 3. 中央对齐：0→ARR→0(三角波)
+
+// 向上计数模式
+TIMx->CR1 &= ~TIM_CR1_DIR;  // 向上
+TIMx->CR1 |= TIM_CR1_CMS_0; // 中央对齐
+
+// 频率计算
+// Freq = CK_INT / ((PSC+1) × (ARR+1))
+// 例：72MHz / (72×1000) = 1kHz
+
+// 更新中断
+TIMx->DIER |= TIM_DIER_UIE;  // 使能更新中断
+TIMx->SR &= ~TIM_SR_UIF;     // 清除标志`,
+                    explanation: "三种计数模式：向上计数产生锯齿波，向下计数反向，中央对齐 (三角波) 用于对称 PWM。频率由预分频器 PSC 和重装载值 ARR 决定。中央对齐模式可减小 EMI 电磁干扰。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            {/* 向上计数波形 */}
+                            <text x="20" y="25" fill={COLOR_MAP.success} fontSize="12">向上计数 (锯齿波)</text>
+                            <path d="M 20 35 L 120 35 L 120 85 L 20 85 L 20 35" fill="none" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            <polyline points="25,80 45,80 45,40 65,40 65,80 85,80 85,40 105,40 105,80" fill="none" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            <text x="20" y="105" fill="#9ca3af" fontSize="10">0</text>
+                            <text x="110" y="105" fill="#9ca3af" fontSize="10">ARR</text>
+                            {/* 向下计数波形 */}
+                            <text x="140" y="25" fill={COLOR_MAP.info} fontSize="12">向下计数</text>
+                            <path d="M 140 35 L 240 35 L 240 85 L 140 85 L 140 35" fill="none" stroke={COLOR_MAP.info} strokeWidth="2" />
+                            <polyline points="145,40 165,40 165,80 185,80 185,40 205,40 205,80 225,80" fill="none" stroke={COLOR_MAP.info} strokeWidth="2" />
+                            {/* 中央对齐波形 */}
+                            <text x="260" y="25" fill={COLOR_MAP.accent} fontSize="12">中央对齐 (三角波)</text>
+                            <path d="M 260 35 L 360 35 L 360 85 L 260 85 L 260 35" fill="none" stroke={COLOR_MAP.accent} strokeWidth="2" />
+                            <polyline points="265,80 285,40 305,80 325,40 345,80 360,40" fill="none" stroke={COLOR_MAP.accent} strokeWidth="2" />
+                            {/* 模式选择器 */}
+                            <rect x="120" y="120" width="160" height="140" fill="#1f2937" stroke="#4b5563" rx="10" />
+                            <text x="200" y="145" fill="white" fontSize="12" textAnchor="middle">计数模式选择</text>
+                            {['up', 'down', 'center'].map((mode, i) => (
+                                <g key={mode} onClick={() => setTimerMode(mode)} style={{cursor: 'pointer'}}>
+                                    <rect x="140" y={165+i*30} width="20" height="20" fill={timerMode===mode ? COLOR_MAP.success : '#374151'} rx="3" />
+                                    <text x="170" y={180+i*30} fill="#9ca3af" fontSize="11">
+                                        {mode==='up'?'向上':mode==='down'?'向下':'中央对齐'}
+                                    </text>
+                                </g>
+                            ))}
+                        </svg>
+                    )
+                },
+                {
+                    title: "输入捕获 - 边沿检测",
+                    code: `// 输入捕获：检测外部信号边沿时刻
+// 应用：脉冲宽度测量、频率测量、编码器
+
+// 配置输入捕获通道 1 (TI1)
+TIMx->CCMR1 |= TIM_CCMR1_CC1S_0;  // IC1=TI1
+TIMx->CCER |= TIM_CCER_CC1E;      // 使能捕获
+TIMx->CCER |= TIM_CCER_CC1P;      // 下降沿 (0=上升沿)
+
+// 捕获中断
+TIMx->DIER |= TIM_DIER_CC1IE;
+// 中断服务函数
+void TIMx_IRQHandler(void) {
+    if (TIMx->SR & TIM_SR_CC1IF) {
+        uint16_t captured = TIMx->CCR1;  // 读取捕获值
+        TIMx->SR &= ~TIM_SR_CC1IF;
+    }
+}`,
+                    explanation: "输入捕获用于测量外部信号的时间参数。当检测到你配置的边沿 (上升沿/下降沿/双边沿) 时，当前 CNT 值被锁存到 CCR 寄存器。可用于测量脉冲宽度、信号频率、编码器位置等。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            {/* 输入信号波形 */}
+                            <text x="20" y="25" fill={COLOR_MAP.info} fontSize="12">输入信号 TI1</text>
+                            <line x1="20" y1="40" x2="380" y2="40" stroke="#374151" strokeWidth="1" />
+                            <line x1="20" y1="80" x2="380" y2="80" stroke="#374151" strokeWidth="1" />
+                            <polyline points="20,75 50,75 50,45 100,45 100,75 150,75 150,45 200,45 200,75 250,75 250,45 300,45 300,75 380,75"
+                                fill="none" stroke={COLOR_MAP.info} strokeWidth="2" />
+                            {/* 边沿标记 */}
+                            <circle cx="50" cy="60" r="6" fill={captureEdge==='rising' ? COLOR_MAP.success : '#374151'} className="animate-capture" />
+                            <circle cx="100" cy="60" r="6" fill={captureEdge==='falling' ? COLOR_MAP.danger : '#374151'} className="animate-capture" />
+                            <circle cx="150" cy="60" r="6" fill={COLOR_MAP.success} className="animate-capture" />
+                            {/* 捕获时刻 */}
+                            <line x1="50" y1="40" x2="50" y2="100" stroke={COLOR_MAP.success} strokeWidth="2" strokeDasharray="3,3" />
+                            <line x1="100" y1="40" x2="100" y2="100" stroke={COLOR_MAP.danger} strokeWidth="2" strokeDasharray="3,3" />
+                            {/* 捕获值显示 */}
+                            <rect x="280" y="110" width="100" height="80" fill="#1f2937" stroke={COLOR_MAP.accent} rx="5" />
+                            <text x="330" y="135" fill={COLOR_MAP.accent} fontSize="11" textAnchor="middle">CCR 捕获值</text>
+                            <text x="330" y="165" fill="#fbbf24" fontSize="20" textAnchor="middle" fontWeight="bold">{counterValue}</text>
+                            {/* 边沿选择 */}
+                            <g onClick={() => setCaptureEdge('rising')} style={{cursor:'pointer'}}>
+                                <rect x="20" y="200" width="80" height="25" fill={captureEdge==='rising' ? COLOR_MAP.success : '#374151'} rx="5" />
+                                <text x="60" y="217" fill="white" fontSize="10" textAnchor="middle">↑ 上升沿</text>
+                            </g>
+                            <g onClick={() => setCaptureEdge('falling')} style={{cursor:'pointer'}}>
+                                <rect x="110" y="200" width="80" height="25" fill={captureEdge==='falling' ? COLOR_MAP.danger : '#374151'} rx="5" />
+                                <text x="150" y="217" fill="white" fontSize="10" textAnchor="middle">↓ 下降沿</text>
+                            </g>
+                            <g onClick={() => setCaptureEdge('both')} style={{cursor:'pointer'}}>
+                                <rect x="200" y="200" width="80" height="25" fill={captureEdge==='both' ? COLOR_MAP.accent : '#374151'} rx="5" />
+                                <text x="240" y="217" fill="white" fontSize="10" textAnchor="middle">↕ 双边沿</text>
+                            </g>
+                        </svg>
+                    )
+                },
+                {
+                    title: "输出比较 - PWM 生成",
+                    code: `// 输出比较：CNT 与 CCR 比较产生输出
+// 应用：PWM 生成、定时输出、波形发生器
+
+// PWM 模式 1 配置 (最常用)
+// CNT < CCR : 有效电平
+// CNT >= CCR: 无效电平
+
+// 配置 PWM 通道 1
+TIMx->CCMR1 |= TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1; // PWM 模式 1
+TIMx->CCMR1 |= TIM_CCMR1_PRELOAD;  // 预装载使能
+TIMx->CCER |= TIM_CCER_CC1E;       // 使能输出
+TIMx->ARR = 999;  // 周期
+TIMx->CCR1 = 500; // 占空比 50%
+
+// 占空比 = CCR / (ARR + 1)`,
+                    explanation: "输出比较模式下，当 CNT 值与 CCR 值比较匹配时，输出电平翻转。PWM 模式 1：CNT<CCR 输出有效电平；PWM 模式 2：CNT<CCR 输出无效电平。占空比=CCR/(ARR+1)。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            {/* 计数器波形 */}
+                            <text x="20" y="25" fill={COLOR_MAP.success} fontSize="12">CNT 计数器 (锯齿波)</text>
+                            <polyline points="20,70 180,70 180,30 20,30 20,70" fill="none" stroke={COLOR_MAP.success} strokeWidth="1.5" />
+                            {/* CCR 比较值线 */}
+                            <line x1="20" y1={30 + (1-pwmDuty/100)*40} x2="180" y2={30 + (1-pwmDuty/100)*40}
+                                stroke={COLOR_MAP.accent} strokeWidth="2" strokeDasharray="5,3" />
+                            <text x="190" y={35 + (1-pwmDuty/100)*40} fill={COLOR_MAP.accent} fontSize="10">CCR={Math.round(pwmDuty*999/100)}</text>
+                            {/* PWM 输出波形 */}
+                            <text x="20" y="105" fill={COLOR_MAP.info} fontSize="12">PWM 输出</text>
+                            <line x1="20" y1="115" x2="180" y2="115" stroke="#374151" strokeWidth="1" />
+                            <line x1="20" y1="155" x2="180" y2="155" stroke="#374151" strokeWidth="1" />
+                            <polyline points={`20,150 ${180*pwmDuty/100},150 ${180*pwmDuty/100},120 180,120`}
+                                fill="none" stroke={COLOR_MAP.info} strokeWidth="2" />
+                            {/* 占空比滑块 */}
+                            <rect x="200" y="40" width="180" height="60" fill="#1f2937" stroke={COLOR_MAP.primary} rx="10" />
+                            <text x="290" y="65" fill="white" fontSize="12" textAnchor="middle">占空比调节</text>
+                            <input type="range" min="0" max="100" value={pwmDuty}
+                                onChange={(e) => setPwmDuty(Number(e.target.value))}
+                                className="w-40 mx-auto block mt-2" />
+                            <text x="290" y="90" fill={COLOR_MAP.accent} fontSize="16" textAnchor="middle" fontWeight="bold">{pwmDuty}%</text>
+                            {/* 频率信息 */}
+                            <rect x="200" y="120" width="180" height="60" fill="#1f2937" stroke={COLOR_MAP.success} rx="10" />
+                            <text x="290" y="145" fill="#9ca3af" fontSize="10" textAnchor="middle">输出频率</text>
+                            <text x="290" y="165" fill={COLOR_MAP.success} fontSize="14" textAnchor="middle">1 kHz</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "PWM 输入模式",
+                    code: `// PWM 输入：同时捕获周期和占空比
+// 配置：通道 1 捕获上升沿，通道 2 捕获下降沿
+
+// 通道 1：捕获上升沿 (周期)
+TIMx->CCMR1 |= (0x1 << 0);  // IC1=TI1
+TIMx->CCER |= TIM_CCER_CC1E; // 上升沿
+
+// 通道 2：捕获下降沿 (占空比)
+TIMx->CCMR1 |= (0x2 << 4);  // IC2=TI1
+TIMx->CCER |= TIM_CCER_CC2P; // 下降沿
+
+// 触发复位：上升沿重置计数器
+TIMx->SMCR |= 0x5;  // TS=TI1FP1, SMS=Reset
+
+// 结果：CCR1=周期，CCR2=高电平时间
+// 占空比 = CCR2 / CCR1 × 100%`,
+                    explanation: "PWM 输入模式使用两个捕获通道同时测量：通道 1 捕获上升沿得到周期，通道 2 捕获下降沿得到高电平时间。配合触发复位功能，可精确测量外部 PWM 信号的参数。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            {/* 输入 PWM 信号 */}
+                            <text x="20" y="25" fill={COLOR_MAP.info} fontSize="12">输入 PWM 信号</text>
+                            <polyline points="20,60 40,60 40,30 100,30 100,60 160,60 160,30 220,30 220,60 280,60 280,30 340,30 340,60 380,60"
+                                fill="none" stroke={COLOR_MAP.info} strokeWidth="2" />
+                            {/* 周期测量 */}
+                            <line x1="40" y1="30" x2="40" y2="90" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            <line x1="160" y1="30" x2="160" y2="90" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            <path d="M 40 80 L 160 80" stroke={COLOR_MAP.success} strokeWidth="2" markerEnd="url(#arrow)" markerStart="url(#arrowStart)" />
+                            <text x="100" y="100" fill={COLOR_MAP.success} fontSize="11" textAnchor="middle">周期 T</text>
+                            {/* 占空比测量 */}
+                            <line x1="40" y1="30" x2="40" y2="115" stroke={COLOR_MAP.accent} strokeWidth="2" strokeDasharray="3,3" />
+                            <line x1="100" y1="30" x2="100" y2="115" stroke={COLOR_MAP.accent} strokeWidth="2" strokeDasharray="3,3" />
+                            <path d="M 40 105 L 100 105" stroke={COLOR_MAP.accent} strokeWidth="2" />
+                            <text x="70" y="125" fill={COLOR_MAP.accent} fontSize="11" textAnchor="middle">高电平</text>
+                            {/* 测量结果显示 */}
+                            <rect x="250" y="80" width="120" height="100" fill="#1f2937" stroke={COLOR_MAP.primary} rx="10" />
+                            <text x="310" y="105" fill={COLOR_MAP.success} fontSize="11" textAnchor="middle">周期 (CCR1)</text>
+                            <text x="310" y="130" fill="#fbbf24" fontSize="16" textAnchor="middle" fontWeight="bold">{counterValue} μs</text>
+                            <text x="310" y="155" fill={COLOR_MAP.accent} fontSize="11" textAnchor="middle">占空比</text>
+                            <text x="310" y="175" fill="#fbbf24" fontSize="16" textAnchor="middle" fontWeight="bold">{pwmDuty}%</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "编码器接口模式",
+                    code: `// 编码器接口：AB 相正交解码
+// 应用：电机测速、位置检测、旋钮计数
+
+// 配置编码器模式 (通道 1+2)
+TIMx->CCMR1 |= (0x1 << 0);  // IC1=TI1
+TIMx->CCMR1 |= (0x1 << 4);  // IC2=TI2
+TIMx->SMCR |= 0x3;  // SMS=11(编码器模式 3)
+
+// 模式 1：计数 TI1 边沿
+// 模式 2：计数 TI2 边沿
+// 模式 3：计数双相边沿 (最精确)
+
+// 方向判断
+// A 相超前 B 相：正转
+// B 相超前 A 相：反转
+
+// 读取位置
+int32_t position = (int16_t)TIMx->CNT;`,
+                    explanation: "编码器接口模式对 AB 相正交信号解码。模式 3 在 A 相和 B 相的上升沿和下降沿都计数，每周期 4 个脉冲，分辨率最高。CNT 寄存器直接存储位置值，可正可负。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            {/* A 相波形 */}
+                            <text x="20" y="25" fill={COLOR_MAP.success} fontSize="12">A 相 (TI1)</text>
+                            <polyline points="20,45 30,45 30,25 70,25 70,45 110,45 110,25 150,25 150,45 190,45 190,25 230,25 230,45 270,45 270,25 310,25 310,45 380,45"
+                                fill="none" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            {/* B 相波形 */}
+                            <text x="20" y="70" fill={COLOR_MAP.info} fontSize="12">B 相 (TI2)</text>
+                            <polyline points="20,90 50,90 50,70 90,70 90,90 130,90 130,70 170,70 170,90 210,90 210,70 250,70 250,90 290,90 290,70 330,70 330,90 380,90"
+                                fill="none" stroke={COLOR_MAP.info} strokeWidth="2" />
+                            {/* 计数点标记 */}
+                            <circle cx="30" cy="35" r="4" fill={COLOR_MAP.accent} />
+                            <circle cx="50" cy="80" r="4" fill={COLOR_MAP.accent} />
+                            <circle cx="70" cy="35" r="4" fill={COLOR_MAP.accent} />
+                            <circle cx="90" cy="80" r="4" fill={COLOR_MAP.accent} />
+                            {/* 位置计数器 */}
+                            <rect x="250" y="20" width="120" height="80" fill="#1f2937" stroke={COLOR_MAP.accent} rx="10" />
+                            <text x="310" y="45" fill={COLOR_MAP.accent} fontSize="11" textAnchor="middle">编码器位置</text>
+                            <text x="310" y="75" fill="#fbbf24" fontSize="24" textAnchor="middle" fontWeight="bold">{counterValue}</text>
+                            {/* 方向指示 */}
+                            <rect x="250" y="120" width="120" height="60" fill="#1f2937" stroke={COLOR_MAP.success} rx="10" />
+                            <text x="310" y="145" fill="#9ca3af" fontSize="10" textAnchor="middle">当前方向</text>
+                            <text x="310" y="165" fill={COLOR_MAP.success} fontSize="14" textAnchor="middle" fontWeight="bold">→ 正转</text>
+                            {/* 解码说明 */}
+                            <rect x="20" y="160" width="200" height="100" fill="#1f2937" stroke="#4b5563" rx="10" />
+                            <text x="120" y="185" fill="white" fontSize="11" textAnchor="middle" fontWeight="bold">AB 相解码规则</text>
+                            <text x="35" y="205" fill="#9ca3af" fontSize="10">A↑B=0 → 正转 +1</text>
+                            <text x="35" y="220" fill="#9ca3af" fontSize="10">A↑B=1 → 反转 -1</text>
+                            <text x="35" y="235" fill="#9ca3af" fontSize="10">B↑A=0 → 反转 -1</text>
+                            <text x="35" y="250" fill="#9ca3af" fontSize="10">B↑A=1 → 正转 +1</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "死区插入与互补输出",
+                    code: `// 死区时间：防止 H 桥上下管直通
+// 应用：电机驱动、大功率开关电源
+
+// 配置死区时间
+TIMx->BDTR |= TIM_BDTR_MOE;  // 主输出使能
+TIMx->BDTR |= (50 << 0);     // DTG[7:0]=50
+
+// 死区计算 (72MHz 时钟)
+// DT = DTG × 12.5ns (DTG<128)
+// DT = 50 × 12.5ns = 625ns
+
+// 互补输出配置
+TIMx->CCER |= TIM_CCER_CC1NE;  // 互补输出使能
+TIMx->CCER |= TIM_CCER_CC1NP;  // 互补极性
+
+// 刹车功能 (故障保护)
+TIMx->BDTR |= TIM_BDTR_BKE;   // 刹车使能`,
+                    explanation: "死区插入用于 H 桥驱动，防止上下 MOSFET 同时导通造成短路。死区时间内两个输出均为无效电平。STM32 的 BDTR 寄存器提供硬件死区生成，精度高达 12.5ns。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            {/* CH1 输出 */}
+                            <text x="20" y="25" fill={COLOR_MAP.success} fontSize="12">CH1 (上管)</text>
+                            <polyline points="20,45 60,45 60,25 140,25 140,45 220,45 220,25 300,25 300,45 380,45"
+                                fill="none" stroke={COLOR_MAP.success} strokeWidth="2" />
+                            {/* CH1N 互补输出 */}
+                            <text x="20" y="70" fill={COLOR_MAP.danger} fontSize="12">CH1N (下管)</text>
+                            <polyline points="20,90 60,90 60,110 140,110 140,90 220,90 220,110 300,110 300,90 380,90"
+                                fill="none" stroke={COLOR_MAP.danger} strokeWidth="2" />
+                            {/* 死区时间标记 */}
+                            <path d="M 60 55 L 60 100" stroke={COLOR_MAP.accent} strokeWidth="2" />
+                            <path d="M 140 55 L 140 100" stroke={COLOR_MAP.accent} strokeWidth="2" />
+                            <path d="M 63 65 L 137 65" stroke={COLOR_MAP.accent} strokeWidth="2" strokeDasharray="5,3" />
+                            <text x="100" y="80" fill={COLOR_MAP.accent} fontSize="10" textAnchor="middle">死区时间</text>
+                            {/* H 桥示意 */}
+                            <rect x="250" y="130" width="130" height="130" fill="#1f2937" stroke={COLOR_MAP.primary} rx="10" />
+                            <text x="315" y="155" fill="white" fontSize="11" textAnchor="middle" fontWeight="bold">H 桥驱动</text>
+                            {/* 上管 */}
+                            <rect x="270" y="165" width="40" height="30" fill={counterValue%200<100 ? COLOR_MAP.success : '#374151'} rx="3" />
+                            <text x="290" y="183" fill="white" fontSize="9" textAnchor="middle">Q1</text>
+                            {/* 下管 */}
+                            <rect x="270" y="205" width="40" height="30" fill={counterValue%200>=100 ? COLOR_MAP.danger : '#374151'} rx="3" />
+                            <text x="290" y="223" fill="white" fontSize="9" textAnchor="middle">Q2</text>
+                            {/* 电机 */}
+                            <circle cx="350" cy="195" r="25" fill="none" stroke={COLOR_MAP.info} strokeWidth="2" />
+                            <text x="350" y="200" fill={COLOR_MAP.info} fontSize="10" textAnchor="middle">M</text>
+                        </svg>
+                    )
+                },
+                {
+                    title: "定时器应用实例",
+                    code: `// 实例 1：精密延时
+void TIM_Delay_ms(uint16_t ms) {
+    TIMx->ARR = 7200-1;  // 1ms@72MHz
+    TIMx->CNT = 0;
+    TIMx->CR1 |= TIM_CR1_CEN;
+    while (!(TIMx->SR & TIM_SR_UIF));
+    TIMx->CR1 &= ~TIM_CR1_CEN;
+    TIMx->SR &= ~TIM_SR_UIF;
+}
+
+// 实例 2：输入捕获测频
+float TIM_MeasureFrequency(void) {
+    static uint16_t last_capture = 0;
+    uint16_t current = TIMx->CCR1;
+    uint16_t period = current - last_capture;
+    last_capture = current;
+    return 72000000.0f / period;  // 72MHz/计数
+}
+
+// 实例 3：多通道 PWM
+void TIM_SetPWM(uint8_t ch, uint16_t duty) {
+    switch(ch) {
+        case 1: TIMx->CCR1 = duty; break;
+        case 2: TIMx->CCR2 = duty; break;
+        case 3: TIMx->CCR3 = duty; break;
+        case 4: TIMx->CCR4 = duty; break;
+    }
+}`,
+                    explanation: "定时器应用广泛：精密延时比软件循环更准确；输入捕获可测量外部信号频率和占空比；多通道 PWM 可同时控制多个电机或 LED。高级定时器如 TIM1/TIM8 还支持刹车、死区等高级功能。",
+                    renderVisual: () => (
+                        <svg viewBox="0 0 400 280" className="w-full h-full">
+                            {/* 应用场景选择 */}
+                            <rect x="10" y="10" width="120" height="110" fill="#1f2937" stroke={COLOR_MAP.success} rx="10" />
+                            <text x="70" y="35" fill="white" fontSize="11" textAnchor="middle" fontWeight="bold">精密延时</text>
+                            <text x="70" y="55" fill="#9ca3af" fontSize="10" textAnchor="middle">TIM_Delay_ms(10)</text>
+                            <rect x="30" y="65" width="80" height="40" fill="#374151" rx="5" />
+                            <text x="70" y="90" fill={COLOR_MAP.success} fontSize="10" textAnchor="middle">等待更新事件</text>
+
+                            <rect x="140" y="10" width="120" height="110" fill="#1f2937" stroke={COLOR_MAP.info} rx="10" />
+                            <text x="200" y="35" fill="white" fontSize="11" textAnchor="middle" fontWeight="bold">频率测量</text>
+                            <text x="200" y="55" fill="#9ca3af" fontSize="10" textAnchor="middle">TIM_MeasureFreq()</text>
+                            <text x="200" y="80" fill={COLOR_MAP.info} fontSize="14" textAnchor="middle" fontWeight="bold">{(72000000/counterValue).toFixed(0)} Hz</text>
+
+                            <rect x="270" y="10" width="120" height="110" fill="#1f2937" stroke={COLOR_MAP.accent} rx="10" />
+                            <text x="330" y="35" fill="white" fontSize="11" textAnchor="middle" fontWeight="bold">多路 PWM</text>
+                            <text x="330" y="55" fill="#9ca3af" fontSize="10" textAnchor="middle">TIM_SetPWM(ch,duty)</text>
+                            {[1,2,3,4].map(ch => (
+                                <rect key={ch} x={285+(ch-1)*24} y="65" width="20" height={30*pwmDuty/100} fill={COLOR_MAP.accent} />
+                            ))}
+
+                            {/* 定时器树状图 */}
+                            <rect x="50" y="140" width="300" height="120" fill="#1f2937" stroke="#4b5563" rx="10" />
+                            <text x="200" y="165" fill="white" fontSize="12" textAnchor="middle" fontWeight="bold">STM32 定时器家族</text>
+                            {/* 高级定时器 */}
+                            <rect x="60" y="175" width="80" height="30" fill={COLOR_MAP.danger} rx="5" />
+                            <text x="100" y="195" fill="white" fontSize="10" textAnchor="middle">高级 TIM1/TIM8</text>
+                            {/* 通用定时器 */}
+                            <rect x="160" y="175" width="80" height="30" fill={COLOR_MAP.success} rx="5" />
+                            <text x="200" y="195" fill="white" fontSize="10" textAnchor="middle">通用 TIM2-5</text>
+                            {/* 基本定时器 */}
+                            <rect x="260" y="175" width="80" height="30" fill={COLOR_MAP.info} rx="5" />
+                            <text x="300" y="195" fill="white" fontSize="10" textAnchor="middle">基本 TIM6/TIM7</text>
+                            {/* 功能对比 */}
+                            <text x="60" y="225" fill="#9ca3af" fontSize="9">PWM/捕获/编码/死区/刹车</text>
+                            <text x="160" y="225" fill="#9ca3af" fontSize="9">PWM/捕获/编码</text>
+                            <text x="260" y="225" fill="#9ca3af" fontSize="9">仅基本计数</text>
+                        </svg>
+                    )
+                }
+            ];
+
+            React.useEffect(() => {
+                const speak = (text) => {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v => v.lang.includes('zh-CN') && v.name.includes('Xiaoxiao'))
+                        || voices.find(v => v.lang.includes('zh-CN'))
+                        || voices[0];
+                    if (zhVoice) utterance.voice = zhVoice;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev + 1) % STEPS.length);
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev + 1) % STEPS.length);
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak(STEPS[currentStep].title);
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [currentStep]);
+
+            React.useEffect(() => {
+                const timer = setInterval(() => {
+                    setCounterValue(prev => (prev + 1) % 500);
+                }, 20);
+                return () => clearInterval(timer);
+            }, []);
+
+            return (
+                <div class="flex flex-col h-screen bg-gray-900 text-white">
+                    <div class="flex-1 flex overflow-hidden">
+                        {/* 左侧：代码区 */}
+                        <div class="w-1/3 border-r border-gray-700 flex flex-col bg-gray-800">
+                            <div class="p-3 border-b border-gray-700 bg-gray-900">
+                                <h2 class="text-lg font-bold text-cyan-400">💻 代码示例</h2>
+                            </div>
+                            <div class="flex-1 overflow-auto p-4">
+                                <pre class="text-sm text-green-400 font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        </div>
+
+                        {/* 中间：可视化区 */}
+                        <div class="w-1/3 border-r border-gray-700 flex flex-col">
+                            <div class="p-3 border-b border-gray-700 bg-gray-900">
+                                <h2 class="text-lg font-bold text-purple-400">🎬 可视化动画</h2>
+                            </div>
+                            <div class="flex-1 p-4 bg-gray-800">
+                                {STEPS[currentStep].renderVisual()}
+                            </div>
+                        </div>
+
+                        {/* 右侧：解释区 */}
+                        <div class="w-1/3 flex flex-col bg-gray-800">
+                            <div class="p-3 border-b border-gray-700 bg-gray-900">
+                                <h2 class="text-lg font-bold text-yellow-400">📖 原理解析</h2>
+                            </div>
+                            <div class="flex-1 overflow-auto p-4">
+                                <p class="text-base text-gray-300 leading-relaxed">
+                                    {STEPS[currentStep].explanation}
+                                </p>
+                                <div class="mt-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
+                                    <h3 class="text-sm font-bold text-cyan-400 mb-2">📌 关键要点</h3>
+                                    <ul class="text-sm text-gray-400 space-y-1 list-disc list-inside">
+                                        {currentStep === 0 && <li>预分频器 PSC 对输入时钟分频</li>}
+                                        {currentStep === 0 && <li>ARR 决定计数器溢出值</li>}
+                                        {currentStep === 0 && <li>更新事件 UEV 可触发中断/DMA</li>}
+                                        {currentStep === 1 && <li>向上计数：0→ARR 产生锯齿波</li>}
+                                        {currentStep === 1 && <li>中央对齐模式产生三角波，EMI 更小</li>}
+                                        {currentStep === 1 && <li>频率 = CK_INT / ((PSC+1)(ARR+1))</li>}
+                                        {currentStep === 2 && <li>捕获边沿时刻锁存 CNT 到 CCR</li>}
+                                        {currentStep === 2 && <li>可测量脉冲宽度和信号周期</li>}
+                                        {currentStep === 2 && <li>双边沿捕获提高分辨率</li>}
+                                        {currentStep === 3 && <li>PWM 占空比 = CCR / (ARR+1)</li>}
+                                        {currentStep === 3 && <li>PWM 模式 1：CNT<CCR 输出有效</li>}
+                                        {currentStep === 3 && <li>预装载寄存器确保同步更新</li>}
+                                        {currentStep === 4 && <li>双通道同时捕获周期和占空比</li>}
+                                        {currentStep === 4 && <li>触发复位模式确保精确测量</li>}
+                                        {currentStep === 5 && <li>模式 3 双相解码，每周期 4 计数</li>}
+                                        {currentStep === 5 && <li>CNT 直接存储位置值</li>}
+                                        {currentStep === 6 && <li>死区防止 H 桥上下管直通</li>}
+                                        {currentStep === 6 && <li>BDTR 寄存器硬件生成死区</li>}
+                                        {currentStep === 7 && <li>高级定时器支持刹车功能</li>}
+                                        {currentStep === 7 && <li>多通道独立 PWM 输出</li>}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部控制栏 */}
+                    <div class="border-t border-gray-700 bg-gray-800 p-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-4">
+                                <span class="text-sm text-gray-400">步骤 {currentStep + 1} / {STEPS.length}</span>
+                                <div class="flex space-x-2">
+                                    {STEPS.map((_, i) => (
+                                        <button key={i} onClick={() => setCurrentStep(i)}
+                                            className={`w-3 h-3 rounded-full transition-all ${i === currentStep ? 'bg-cyan-400 scale-125' : 'bg-gray-600'}`}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                            <div class="flex space-x-3">
+                                <button onClick={() => setCurrentStep((prev - 1 + STEPS.length) % STEPS.length)}
+                                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">
+                                    ⏮ 上一步
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-sm transition-colors">
+                                    {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                                </button>
+                                <button onClick={() => setCurrentStep((prev + 1) % STEPS.length)}
+                                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">
+                                    下一步 ⏭
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

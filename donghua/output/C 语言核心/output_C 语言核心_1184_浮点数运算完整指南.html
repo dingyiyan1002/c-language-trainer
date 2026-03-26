@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1184 - 浮点数运算完整指南 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: transparent; } 50% { background-color: rgba(251,191,36,0.2); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes floatAnim { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+        @keyframes precisionAnim { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-float { animation: floatAnim 3s infinite; }
+        .animate-precision { animation: precisionAnim 2s infinite; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: 'from-indigo-500 to-purple-600',
+            light: 'from-indigo-50 to-purple-50',
+            text: 'text-indigo-600',
+            bg: 'bg-indigo-50',
+            border: 'border-indigo-200',
+            hover: 'hover:bg-indigo-100'
+        };
+
+        const CODE_EXAMPLES = [
+            {
+                title: "浮点数基础",
+                code: `// IEEE 754 浮点数标准
+
+// float (单精度 32 位)
+// 符号 1 位 + 指数 8 位 + 尾数 23 位
+// 范围：±1.4×10^-45 ~ ±3.4×10^38
+// 精度：约 6-7 位有效数字
+float f = 3.14159f;
+
+// double (双精度 64 位)
+// 符号 1 位 + 指数 11 位 + 尾数 52 位
+// 范围：±4.9×10^-324 ~ ±1.8×10^308
+// 精度：约 15-16 位有效数字
+double d = 3.14159265358979;
+
+// long double (扩展精度)
+// 通常 80 位或 128 位
+long double ld = 3.141592653589793238L;
+
+// 特殊值
+float inf = INFINITY;       // 无穷大
+float nan = NAN;            // 非数字
+float zero = 0.0f / 0.0f;   // 产生 NAN
+
+// 浮点数字面量
+float f1 = 3.14f;           // f 后缀
+double d1 = 3.14;           // 默认 double
+long double ld1 = 3.14L;    // L 后缀`,
+                highlight: "IEEE 754",
+                explanation: "IEEE 754 标准定义浮点数格式。float 32 位约 6-7 位精度，double 64 位约 15-16 位精度。特殊值包括无穷大 INFINITY 和非数字 NAN。字面量默认是 double。"
+            },
+            {
+                title: "浮点数精度陷阱",
+                code: `// ⚠️ 经典精度问题
+
+// 1. 0.1 + 0.2 != 0.3
+float a = 0.1f + 0.2f;
+printf("%f\\n", a);  // 输出 0.300000
+printf("%d\\n", a == 0.3f);  // 输出 0 (false!)
+
+// 原因：0.1 在二进制中是无限循环小数
+// 0.1 (十进制) = 0.000110011001100... (二进制)
+
+// 2. 正确比较方法
+#define EPSILON 1e-6f
+bool floatEqual(float x, float y) {
+    return fabsf(x - y) < EPSILON;
+}
+
+// 3. 累积误差
+float sum = 0.0f;
+for (int i = 0; i < 1000000; i++) {
+    sum += 0.1f;  // 误差累积
+}
+// sum 可能不是 100000.0
+
+// 4. 大数吃小数
+float big = 1.0e20f;
+float small = 1.0f;
+float result = big + small - big;
+printf("%f\\n", result);  // 输出 0.0!
+// small 被 big"吃掉"了`,
+                highlight: "0.1+0.2",
+                explanation: "浮点数精度陷阱：0.1 在二进制中是无限循环小数导致 0.1+0.2 不等于 0.3。应该用误差范围比较而非直接相等。大量累加会产生累积误差。大数加小数可能丢失精度。"
+            },
+            {
+                title: "浮点数运算优化",
+                code: `// ✅ 性能优化技巧
+
+// 1. 避免除法 (慢)
+// ❌ 慢
+float result = a / b;
+
+// ✅ 快 (乘法比除法快 5-10 倍)
+float invB = 1.0f / b;  // 一次除法
+float result = a * invB;  // 多次使用
+
+// 2. 使用 FMA (Fused Multiply-Add)
+// a * b + c 一次舍入
+#include <math.h>
+float result = fmaf(a, b, c);  // C99
+
+// 3. 查表法 (三角函数)
+const float sinTable[360] = {
+    0.0f, 0.0175f, 0.0349f, ...
+};
+float fastSin(float angle) {
+    int idx = (int)angle % 360;
+    return sinTable[idx];
+}
+
+// 4. 使用 SIMD (如果支持)
+#include <arm_neon.h>
+float32x4_t v = vmulq_f32(a, b);  // 4 路并行
+
+// 5. 定点数替代 (资源受限)
+// 用 int32_t 表示小数，小数点固定在中间
+typedef int32_t Fixed16;  // 16 位整数 +16 位小数
+#define TO_FIXED(f) ((Fixed16)((f) * 65536))
+#define FROM_FIXED(f) ((float)(f) / 65536)`,
+                highlight: "查表法",
+                explanation: "浮点数运算优化：避免除法用乘法倒数替代，使用 FMA 融合乘加指令减少舍入，三角函数用查表法，SIMD 并行计算，资源受限时用定点数替代浮点数。"
+            },
+            {
+                title: "数学库函数",
+                code: `#include <math.h>
+
+// 基本运算
+float abs = fabsf(x);       // 绝对值
+float sqrt = sqrtf(x);      // 平方根
+float cbrt = cbrtf(x);      // 立方根
+
+// 幂函数
+float pow = powf(x, y);     // x^y
+float exp = expf(x);        // e^x
+float log = logf(x);        // 自然对数
+float log10 = log10f(x);    // 常用对数
+
+// 三角函数
+float sin = sinf(x);        // 正弦 (弧度)
+float cos = cosf(x);        // 余弦
+float tan = tanf(x);        // 正切
+float asin = asinf(x);      // 反正弦
+float atan = atanf(x);      // 反正切
+float atan2 = atan2f(y, x); // 四象限反正切
+
+// 取整函数
+float floor = floorf(x);    // 向下取整
+float ceil = ceilf(x);      // 向上取整
+float round = roundf(x);    // 四舍五入
+float trunc = truncf(x);    // 截断取整
+
+// 分类函数
+int fpclass = fpclassify(x);  // FP_NORMAL/FP_ZERO/FP_INFINITE/FP_NAN
+int isinf_val = isinf(x);     // 检查无穷大
+int isnan_val = isnan(x);     // 检查 NAN`,
+                highlight: "math.h",
+                explanation: "数学库提供丰富函数：基本运算 fabs/sqrt，幂函数 pow/exp/log，三角函数 sin/cos/tan 及反函数，取整函数 floor/ceil/round，分类函数 fpclassify 检查浮点数类型。"
+            },
+            {
+                title: "嵌入式浮点数注意事项",
+                code: `// ⚠️ 嵌入式系统特别注意
+
+// 1. 无 FPU 的 MCU 浮点运算极慢
+// Cortex-M0/M3: 浮点 = 软件模拟
+// Cortex-M4/M7: 有 FPU (单精度快)
+// 查询：__VFP_FP__ 宏
+
+// 2.  printf 支持浮点
+// STM32: 需要链接 nano-specs
+// GCC: -u _printf_float
+
+// 3. 内存占用
+float f = 3.14f;      // 4 字节
+double d = 3.14;      // 8 字节
+// 大量数据时差异显著
+
+// 4. 推荐做法
+// ✅ 优先使用 float (如果精度足够)
+// ✅ 无 FPU 时用定点数
+// ✅ 避免在 ISR 中浮点运算
+// ✅ 查表代替复杂计算
+
+// 5. 定点数示例
+typedef int32_t Q16_16;  // 16 位整数 +16 位小数
+#define Q_MULT(a, b) (((int64_t)(a) * (b)) >> 16)
+#define Q_DIV(a, b)   ((((int64_t)(a) << 16)) / (b))
+#define F2Q(f)       ((Q16_16)((f) * 65536))
+#define Q2F(q)       ((float)(q) / 65536)`,
+                highlight: "FPU",
+                explanation: "嵌入式浮点数注意：无 FPU 的 MCU 浮点运算是软件模拟非常慢，printf 支持浮点需要额外配置，float 比 double 省一半内存，无 FPU 时优先用定点数。"
+            },
+            {
+                title: "浮点数应用案例",
+                code: `// 案例 1: 传感器数据处理
+typedef struct {
+    float temperature;
+    float humidity;
+    float pressure;
+} SensorData;
+
+// 滑动平均滤波
+#define WINDOW_SIZE 10
+float slidingAverage(float *buffer, int size) {
+    float sum = 0.0f;
+    for (int i = 0; i < size; i++) {
+        sum += buffer[i];
+    }
+    return sum / size;
+}
+
+// 案例 2: PID 控制器
+typedef struct {
+    float kp, ki, kd;
+    float integral;
+    float prevError;
+} PID;
+
+float pidCompute(PID *pid, float error, float dt) {
+    pid->integral += error * dt;
+    float derivative = (error - pid->prevError) / dt;
+    pid->prevError = error;
+    return pid->kp * error +
+           pid->ki * pid->integral +
+           pid->kd * derivative;
+}
+
+// 案例 3: 坐标变换
+typedef struct { float x, y; } Point2D;
+
+Point2D rotate(Point2D p, float angle) {
+    float c = cosf(angle);
+    float s = sinf(angle);
+    return (Point2D){
+        p.x * c - p.y * s,
+        p.x * s + p.y * c
+    };
+}`,
+                highlight: "PID",
+                explanation: "浮点数应用案例：传感器数据滑动平均滤波消除噪声，PID 控制器需要浮点运算保证控制精度，2D 坐标旋转变换使用三角函数。这些场景浮点数必不可少。"
+            },
+            {
+                title: "浮点数 vs 定点数",
+                code: `// 浮点数 vs 定点数对比
+
+// 浮点数 (float)
+// ✅ 优点:
+// - 动态范围大 (10^38)
+// - 精度高 (6-7 位)
+// - 编程简单
+// ❌ 缺点:
+// - 无 FPU 时极慢
+// - 占用 4 字节
+// - 有精度陷阱
+
+// 定点数 (Q16_16)
+// ✅ 优点:
+// - 无 FPU 也快
+// - 确定性行为
+// - 无精度累积误差
+// ❌ 缺点:
+// - 范围有限
+// - 需要手动缩放
+// - 容易溢出
+
+// 选择指南:
+// 有 FPU → float
+// 无 FPU，简单计算 → 定点数
+// 无 FPU，复杂计算 → 考虑升级 MCU
+// 高精度要求 → double 或定点数
+
+// 性能对比 (Cortex-M3 @ 72MHz):
+// float 加法：~50 周期 (软件模拟)
+// int32 加法：1 周期
+// 浮点有 FPU: 3-4 周期`,
+                highlight: "定点数",
+                explanation: "浮点数动态范围大精度高但无 FPU 时慢，定点数无 FPU 也快且确定性但范围有限。有 FPU 用 float，无 FPU 简单计算用定点数，复杂计算考虑升级有 FPU 的 MCU。"
+            },
+            {
+                title: "最佳实践总结",
+                code: `// ✅ 浮点数最佳实践
+
+// 1. 比较用误差范围
+#define EPSILON 1e-6f
+bool equal(float a, float b) {
+    return fabsf(a - b) < EPSILON;
+}
+
+// 2. 避免累积误差
+// 从小到大累加 (减少大数吃小数)
+float sum = 0.0f;
+for (int i = n-1; i >= 0; i--) {
+    sum += arr[i];  // 先加小数
+}
+
+// 3. 检查特殊值
+if (isnan(x)) { /* 处理错误 */ }
+if (isinf(x)) { /* 处理溢出 */ }
+
+// 4. 使用合适精度
+// 电池电压：float 足够 (3 位精度)
+// 精密测量：可能需要 double
+
+// 5. 避免除以零
+if (fabsf(divisor) < EPSILON) {
+    return 0.0f;  // 或错误
+}
+
+// 6. 常量加 f 后缀
+float half = 0.5f;  // ✓
+float pi = 3.14f;   // ✓
+
+// 7. 使用 math.h 函数
+// 不要手写 sqrt/pow 等
+
+// 8. 文档说明精度要求
+// @param tolerance 容差，默认 1e-6`,
+                highlight: "误差范围",
+                explanation: "浮点数最佳实践：比较用误差范围而非直接相等，累加从小到大减少误差累积，检查 isnan/isinf 特殊值，选择合适精度，避免除零，常量加 f 后缀，使用标准库函数。"
+            }
+        ];
+
+        function App() {
+            const [step, setStep] = React.useState(0);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                speakCurrentStep();
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, []);
+
+            const speakCurrentStep = () => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                }
+
+                const currentExample = CODE_EXAMPLES[step];
+                const explanations = [
+                    "IEEE 754 标准定义浮点数格式。float 32 位约 6 到 7 位有效数字精度，double 64 位约 15 到 16 位精度。特殊值包括无穷大 INFINITY 和非数字 NAN。字面量默认是 double 类型。",
+                    "浮点数精度陷阱：0.1 在二进制中是无限循环小数导致 0.1 加 0.2 不等于 0.3。应该用误差范围比较而非直接相等。大量累加会产生累积误差。大数加小数可能丢失精度。",
+                    "浮点数运算优化：避免除法用乘法倒数替代可提速 5 到 10 倍，使用 FMA 融合乘加指令减少舍入次数，三角函数用查表法，SIMD 并行计算，资源受限用定点数替代。",
+                    "数学库提供丰富函数：基本运算 fabs 绝对值和 sqrt 平方根，幂函数 pow 指数 exp 对数 log，三角函数 sin cos tan 及反函数，取整函数 floor ceil round，分类函数 fpclassify 检查类型。",
+                    "嵌入式浮点数注意：没有 FPU 的微控制器浮点运算是软件模拟非常慢，printf 支持浮点需要额外配置，float 比 double 节省一半内存，无 FPU 时优先使用定点数。",
+                    "浮点数应用案例：传感器数据滑动平均滤波消除噪声，PID 控制器需要浮点运算保证控制精度，二维坐标旋转变换使用三角函数。这些场景浮点数必不可少。",
+                    "浮点数动态范围大精度高但没有 FPU 时运算慢，定点数没有 FPU 也快且行为确定但范围有限。有 FPU 用 float，无 FPU 简单计算用定点数，复杂计算考虑升级有 FPU 的微控制器。",
+                    "浮点数最佳实践：比较用误差范围而非直接相等，累加从小到大减少误差累积，检查 isnan 和 isinf 特殊值，选择合适精度，避免除以零，常量加 f 后缀，使用标准库函数。"
+                ];
+
+                const text = `第${step + 1}步：${currentExample.title}。${explanations[step]}`;
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                const voices = speechSynthesis.getVoices();
+                const xiaoxiaoVoice = voices.find(voice =>
+                    voice.name.includes('Xiaoxiao') ||
+                    voice.name.includes('zh-CN')
+                );
+                if (xiaoxiaoVoice) {
+                    utterance.voice = xiaoxiaoVoice;
+                }
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            React.useEffect(() => {
+                speakCurrentStep();
+            }, [step]);
+
+            const renderFloatFormat = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-indigo-800 mb-4">IEEE 754 格式</h4>
+                        <div className="space-y-4">
+                            <div>
+                                <div className="font-bold text-indigo-700 mb-2">float (32 位)</div>
+                                <div className="grid grid-cols-32 gap-px">
+                                    <div className="col-span-1 bg-red-200 p-1 text-center text-xs">S</div>
+                                    <div className="col-span-8 bg-yellow-200 p-1 text-center text-xs">指数 (8)</div>
+                                    <div className="col-span-23 bg-blue-200 p-1 text-center text-xs">尾数 (23)</div>
+                                </div>
+                                <div className="text-xs text-gray-600 mt-1">1 + 8 + 23 = 32 位</div>
+                            </div>
+                            <div>
+                                <div className="font-bold text-purple-700 mb-2">double (64 位)</div>
+                                <div className="grid grid-cols-64 gap-px">
+                                    <div className="col-span-1 bg-red-200 p-1 text-center text-xs">S</div>
+                                    <div className="col-span-11 bg-yellow-200 p-1 text-center text-xs">指数 (11)</div>
+                                    <div className="col-span-52 bg-blue-200 p-1 text-center text-xs">尾数 (52)</div>
+                                </div>
+                                <div className="text-xs text-gray-600 mt-1">1 + 11 + 52 = 64 位</div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderPrecisionError = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-indigo-800 mb-4">0.1 的二进制表示</h4>
+                        <div className="space-y-3">
+                            <div className="p-3 bg-blue-50 rounded">
+                                <div className="font-bold text-blue-700">十进制 0.1</div>
+                                <div className="text-sm text-blue-600">精确值</div>
+                            </div>
+                            <div className="text-center text-gray-400">↓ 转换</div>
+                            <div className="p-3 bg-yellow-50 rounded">
+                                <div className="font-bold text-yellow-700">二进制</div>
+                                <div className="text-xs font-mono text-yellow-600">0.0001100110011001100...</div>
+                                <div className="text-xs text-yellow-600">无限循环!</div>
+                            </div>
+                            <div className="text-center text-gray-400">↓ 截断</div>
+                            <div className="p-3 bg-red-50 rounded">
+                                <div className="font-bold text-red-700">float 存储</div>
+                                <div className="text-xs text-red-600">0.100000001490116...</div>
+                                <div className="text-xs text-red-600">有误差!</div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderPerformanceCompare = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-indigo-800 mb-4">性能对比 (Cortex-M3 @ 72MHz)</h4>
+                        <div className="space-y-4">
+                            <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-red-700">float 加法 (无 FPU)</span>
+                                    <span className="text-red-600">~50 周期</span>
+                                </div>
+                                <div className="h-8 bg-red-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-red-500" style={{width: '100%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-green-700">int32 加法</span>
+                                    <span className="text-green-600">1 周期</span>
+                                </div>
+                                <div className="h-8 bg-green-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-green-500" style={{width: '2%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-blue-700">float 加法 (有 FPU)</span>
+                                    <span className="text-blue-600">3-4 周期</span>
+                                </div>
+                                <div className="h-8 bg-blue-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-blue-500" style={{width: '8%'}}></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="text-center mb-6">
+                            <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-2">
+                                1184 - 浮点数运算完整指南
+                            </h1>
+                            <p className="text-lg text-gray-700">C 语言核心 - IEEE 754/ 精度陷阱/ 运算优化/ 定点数</p>
+                            <div className="flex justify-center gap-2 mt-4">
+                                <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm">IEEE 754</span>
+                                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">精度陷阱</span>
+                                <span className="px-3 py-1 bg-pink-100 text-pink-700 rounded-full text-sm">运算优化</span>
+                                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">定点数</span>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-indigo-500">
+                                    <h3 className="text-xl font-bold text-indigo-700 mb-3">代码示例</h3>
+                                    <div className="bg-gray-50 rounded p-3 font-mono text-sm overflow-x-auto">
+                                        <pre className="text-gray-800 whitespace-pre-wrap">
+                                            {CODE_EXAMPLES[step].code}
+                                        </pre>
+                                    </div>
+                                    <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                        <p className="text-sm text-yellow-800">
+                                            <span className="font-bold">亮点:</span> {CODE_EXAMPLES[step].highlight}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-purple-500">
+                                    <h3 className="text-xl font-bold text-purple-700 mb-3">可视化演示</h3>
+                                    {step === 0 && renderFloatFormat()}
+                                    {step === 1 && renderPrecisionError()}
+                                    {step === 2 && (
+                                        <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-indigo-800 mb-4">优化技巧</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-green-50 rounded">
+                                                    <div className="font-bold text-green-700">乘法替代除法</div>
+                                                    <div className="text-xs text-green-600">快 5-10 倍</div>
+                                                </div>
+                                                <div className="p-3 bg-blue-50 rounded">
+                                                    <div className="font-bold text-blue-700">FMA 指令</div>
+                                                    <div className="text-xs text-blue-600">一次舍入</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded">
+                                                    <div className="font-bold text-purple-700">查表法</div>
+                                                    <div className="text-xs text-purple-600">三角函数</div>
+                                                </div>
+                                                <div className="p-3 bg-yellow-50 rounded">
+                                                    <div className="font-bold text-yellow-700">SIMD</div>
+                                                    <div className="text-xs text-yellow-600">4 路并行</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 3 && (
+                                        <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-indigo-800 mb-4">数学库函数分类</h4>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="p-2 bg-blue-50 rounded">
+                                                    <div className="font-bold text-blue-700 text-sm">基本运算</div>
+                                                    <div className="text-xs text-blue-600">fabs/sqrt</div>
+                                                </div>
+                                                <div className="p-2 bg-green-50 rounded">
+                                                    <div className="font-bold text-green-700 text-sm">幂函数</div>
+                                                    <div className="text-xs text-green-600">pow/exp/log</div>
+                                                </div>
+                                                <div className="p-2 bg-yellow-50 rounded">
+                                                    <div className="font-bold text-yellow-700 text-sm">三角函数</div>
+                                                    <div className="text-xs text-yellow-600">sin/cos/tan</div>
+                                                </div>
+                                                <div className="p-2 bg-purple-50 rounded">
+                                                    <div className="font-bold text-purple-700 text-sm">取整函数</div>
+                                                    <div className="text-xs text-purple-600">floor/ceil</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 4 && renderPerformanceCompare()}
+                                    {step === 5 && (
+                                        <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-indigo-800 mb-4">应用场景</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-blue-50 rounded border-l-4 border-blue-500">
+                                                    <div className="font-bold text-blue-700">传感器滤波</div>
+                                                    <div className="text-xs text-blue-600">滑动平均/卡尔曼</div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded border-l-4 border-green-500">
+                                                    <div className="font-bold text-green-700">PID 控制</div>
+                                                    <div className="text-xs text-green-600">比例积分微分</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded border-l-4 border-purple-500">
+                                                    <div className="font-bold text-purple-700">坐标变换</div>
+                                                    <div className="text-xs text-purple-600">旋转/平移</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 6 && (
+                                        <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-indigo-800 mb-4">浮点 vs 定点</h4>
+                                            <table className="w-full text-sm">
+                                                <thead>
+                                                    <tr className="border-b">
+                                                        <th className="p-2">特性</th>
+                                                        <th className="p-2">浮点</th>
+                                                        <th className="p-2">定点</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr>
+                                                        <td className="p-2">速度 (无 FPU)</td>
+                                                        <td className="p-2 text-red-600">慢</td>
+                                                        <td className="p-2 text-green-600">快</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td className="p-2">范围</td>
+                                                        <td className="p-2 text-green-600">大</td>
+                                                        <td className="p-2 text-yellow-600">有限</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td className="p-2">精度</td>
+                                                        <td className="p-2 text-green-600">高</td>
+                                                        <td className="p-2 text-yellow-600">固定</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                    {step === 7 && (
+                                        <div className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-indigo-800 mb-4">最佳实践清单</h4>
+                                            <div className="space-y-2">
+                                                {['误差范围比较', '从小到大累加', '检查 isnan/isinf', '选择合适精度', '避免除零', '常量 f 后缀', '使用 math.h'].map((item, i) => (
+                                                    <div key={i} className="flex items-center gap-2 p-2 bg-white rounded border-l-4 border-indigo-400">
+                                                        <span className="text-indigo-500">✓</span>
+                                                        <span className="text-sm">{item}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-pink-500">
+                                    <h3 className="text-xl font-bold text-pink-700 mb-3">关键要点</h3>
+                                    <div className="space-y-3">
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 0 ? 'bg-indigo-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-indigo-600">格式:</span> IEEE 754
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 1 ? 'bg-purple-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-purple-600">陷阱:</span> 0.1+0.2≠0.3
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 2 ? 'bg-pink-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-pink-600">优化:</span> 查表/FMA
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 3 ? 'bg-blue-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-blue-600">库函数:</span> math.h
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 4 ? 'bg-green-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-green-600">嵌入:</span> 有 FPU 快
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 5 ? 'bg-yellow-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-yellow-600">应用:</span> PID/ 滤波
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 6 ? 'bg-teal-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-teal-600">对比:</span> 浮点 vs 定点
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 7 ? 'bg-red-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-red-600">实践:</span> 7 项清单
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 p-3 bg-pink-50 rounded border border-pink-200">
+                                        <p className="text-sm text-pink-800">
+                                            {CODE_EXAMPLES[step].explanation}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-lg shadow-lg p-4 text-white">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm">进度</span>
+                                        <span className="text-sm font-bold">{step + 1} / {CODE_EXAMPLES.length}</span>
+                                    </div>
+                                    <div className="w-full bg-white bg-opacity-30 rounded-full h-2">
+                                        <div
+                                            className="bg-white rounded-full h-2 transition-all duration-500"
+                                            style={{ width: `${((step + 1) / CODE_EXAMPLES.length) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <footer className="text-center mt-8 text-gray-600">
+                            <p className="text-sm">C 语言核心 · 浮点数运算完整指南 · 嵌入式数值计算基础</p>
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

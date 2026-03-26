@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1113 - 联合体 (union) | Embedded C Visualization</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-blink { animation: blink 1.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out; }
+    .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+    .highlight { box-shadow: 0 0 20px rgba(168, 85, 247, 0.5); }
+    .code-line { transition: all 0.3s ease; }
+    .code-line.active { background: rgba(168, 85, 247, 0.2); border-left: 3px solid #a855f7; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#a855f7', primaryLight: '#c084fc',
+      secondary: '#9333ea', secondaryLight: '#c084fc',
+      accent: '#14b8a6', accentLight: '#2dd4bf',
+      success: '#22c55e', warning: '#f59e0b', error: '#ef4444'
+    };
+
+    const CODE = `// ===== 联合体 (union) =====
+union Data {
+  int i;           // 4 字节
+  float f;         // 4 字节
+  char str[4];     // 4 字节
+};                 // 总共 4 字节 (共享内存)
+
+union Data data;
+data.i = 0x41424344;  // ABCD
+
+// 访问不同成员 (同一段内存)
+printf("%d\\n", data.i);    // 0x41424344
+printf("%f\\n", data.f);    // 解释为 float
+printf("%s\\n", data.str);  // "DCBA" (小端)
+
+// ===== vs 结构体 =====
+struct Struct { int i; float f; char s[4]; };  // 12 字节
+union Union { int i; float f; char s[4]; };    // 4 字节`;
+
+    const VOICE_TEXT_MAP = {
+      1: "第一千一百一十三题，联合体 union。",
+      2: "联合体所有成员共享同一段内存，大小等于最大成员的大小。",
+      3: "union Data 占用 4 字节，所有成员 i、f、str 共享这 4 字节。",
+      4: "写入 data.i 后，通过 data.f 或 data.str 访问会看到不同的解释。",
+      5: "这就是类型双关 (type punning)，同一段内存用不同类型解释。",
+      6: "对比结构体：struct 每个成员独立占用内存，union 共享内存。",
+      7: "联合体典型应用：变体类型、协议解析、硬件寄存器映射。",
+      8: "联合体节省内存，但要注意：任一时刻只能有一个成员有效。"
+    };
+
+    const MAX_STEPS = 8;
+
+    function App() {
+      const [step, setStep] = useState(1);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+      const [voiceRate, setVoiceRate] = useState(1);
+      const voiceEndTimerRef = useRef(null);
+
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if (voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if (!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if (voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate]);
+
+      useEffect(() => {
+        if (isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+
+      const handleStepChange = (newStep) => {
+        if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+        setIsVoicePlaying(false);
+        setStep(newStep);
+      };
+
+      const togglePlay = () => {
+        if (step >= MAX_STEPS) {
+          handleStepChange(1);
+          setTimeout(() => setIsPlaying(true), 100);
+        } else {
+          setIsPlaying(!isPlaying);
+        }
+      };
+
+      return (
+        <div className="p-4 max-w-7xl mx-auto">
+          <div className="bg-gradient-to-r from-purple-900/50 via-fuchsia-900/50 to-pink-900/50 rounded-xl p-6 mb-4 border border-purple-700/50">
+            <h1 className="text-3xl font-bold text-purple-400 mb-2">1113 - 联合体 (union)</h1>
+            <p className="text-purple-300 text-sm">共享内存 / 类型双关 / 节省空间</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-purple-700/30">
+              <h2 className="text-lg font-semibold text-purple-400 mb-3">代码展示</h2>
+              <pre className="text-xs text-gray-300 overflow-x-auto bg-gray-900/50 p-3 rounded-lg font-mono leading-relaxed">
+                {CODE.split('\n').map((line, i) => (
+                  <div key={i} className={`code-line ${
+                    (step === 2 && i >= 2 && i <= 5) ||
+                    (step === 3 && i >= 7 && i <= 7) ||
+                    (step === 4 && i >= 9 && i <= 12) ||
+                    (step === 5 && i >= 9 && i <= 12) ||
+                    (step === 6 && i >= 15 && i <= 16) ||
+                    (step === 7 && i >= 15 && i <= 16)
+                    ? 'active' : ''
+                  }`}>{line || '\u00A0'}</div>
+                ))}
+              </pre>
+            </div>
+
+            <div className="bg-gray-800/80 rounded-xl p-4 border border-purple-700/30">
+              <h2 className="text-lg font-semibold text-purple-400 mb-3">可视化演示</h2>
+              <div className="space-y-4">
+                {step === 1 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-purple-600/20 to-fuchsia-600/20 rounded-lg border border-purple-500/30">
+                    <p className="text-purple-300 text-sm font-medium mb-2">💡 联合体 union</p>
+                    <p className="text-xs text-gray-400">联合体所有成员共享同一段内存，大小等于最大成员的大小，用于节省内存或类型双关。</p>
+                  </div>
+                )}
+                {step === 2 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-purple-600/20 to-fuchsia-600/20 rounded-lg border border-purple-500/30">
+                    <p className="text-purple-300 text-sm font-medium mb-2">共享内存布局</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded font-mono">
+                        <div>union Data {'{'}</div>
+                        <div>&nbsp;&nbsp;int i;       // 4 字节</div>
+                        <div>&nbsp;&nbsp;float f;    // 4 字节</div>
+                        <div>&nbsp;&nbsp;char str[4];// 4 字节</div>
+                        <div>{'}'};  // 总共 4 字节!</div>
+                      </div>
+                      <div className="text-green-400 text-center">所有成员共享同一块 4 字节内存</div>
+                    </div>
+                  </div>
+                )}
+                {step === 3 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-purple-600/20 to-fuchsia-600/20 rounded-lg border border-purple-500/30">
+                    <p className="text-purple-300 text-sm font-medium mb-2">内存可视化</p>
+                    <div className="text-xs text-gray-400">
+                      <div className="flex mb-2">
+                        <div className="w-24 text-right mr-2">内存地址:</div>
+                        <div className="flex">
+                          <div className="w-16 h-8 bg-purple-600/50 border border-purple-400 flex items-center justify-center text-xs">0x00</div>
+                          <div className="w-16 h-8 bg-purple-600/50 border border-purple-400 flex items-center justify-center text-xs">0x01</div>
+                          <div className="w-16 h-8 bg-purple-600/50 border border-purple-400 flex items-center justify-center text-xs">0x02</div>
+                          <div className="w-16 h-8 bg-purple-600/50 border border-purple-400 flex items-center justify-center text-xs">0x03</div>
+                        </div>
+                      </div>
+                      <div className="flex mb-2">
+                        <div className="w-24 text-right mr-2">作为 int:</div>
+                        <div className="flex">
+                          <div className="w-64 h-8 bg-purple-600/30 border border-purple-400 flex items-center justify-center text-xs">0x41424344</div>
+                        </div>
+                      </div>
+                      <div className="flex mb-2">
+                        <div className="w-24 text-right mr-2">作为 char[]:</div>
+                        <div className="flex">
+                          <div className="w-16 h-8 bg-fuchsia-600/30 border border-fuchsia-400 flex items-center justify-center text-xs">'D'</div>
+                          <div className="w-16 h-8 bg-fuchsia-600/30 border border-fuchsia-400 flex items-center justify-center text-xs">'C'</div>
+                          <div className="w-16 h-8 bg-fuchsia-600/30 border border-fuchsia-400 flex items-center justify-center text-xs">'B'</div>
+                          <div className="w-16 h-8 bg-fuchsia-600/30 border border-fuchsia-400 flex items-center justify-center text-xs">'A'</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 4 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-purple-600/20 to-fuchsia-600/20 rounded-lg border border-purple-500/30">
+                    <p className="text-purple-300 text-sm font-medium mb-2">写入与读取</p>
+                    <div className="text-xs text-gray-400 font-mono space-y-2">
+                      <div className="p-2 bg-gray-900/50 rounded">
+                        <div className="text-purple-400">data.i = 0x41424344;</div>
+                        <div className="text-gray-500 mt-1">// 内存：44 43 42 41 (小端)</div>
+                      </div>
+                      <div className="p-2 bg-gray-900/50 rounded">
+                        <div>printf("%d", data.i);    // 1094861636</div>
+                        <div>printf("%f", data.f);    // 未定义，按 float 解释</div>
+                        <div>printf("%s", data.str);  // "DCBA"</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 5 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-blue-600/20 to-cyan-600/20 rounded-lg border border-blue-500/30">
+                    <p className="text-blue-300 text-sm font-medium mb-2">类型双关 (Type Punning)</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <p>同一段内存用不同类型解释：</p>
+                      <div className="p-2 bg-gray-900/50 rounded">
+                        <div className="text-blue-400">// 写入 int</div>
+                        <div>data.i = 0x40490FDB;</div>
+                        <div className="text-cyan-400">// 读为 float</div>
+                        <div>float pi = data.f;  // ≈ 3.14159!</div>
+                      </div>
+                      <div className="text-orange-400 text-center">⚠️ 结果依赖字节序 (endianness)</div>
+                    </div>
+                  </div>
+                )}
+                {step === 6 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-purple-600/20 to-fuchsia-600/20 rounded-lg border border-purple-500/30">
+                    <p className="text-purple-300 text-sm font-medium mb-2">union vs struct</p>
+                    <div className="text-xs text-gray-400 space-y-2">
+                      <div className="p-2 bg-purple-900/20 rounded border border-purple-500/30">
+                        <div className="text-purple-400 font-medium">struct (独立内存)</div>
+                        <div>struct {'{'} int i; float f; char s[4]; {'}'};</div>
+                        <div className="text-green-400">// 12 字节 (4+4+4)</div>
+                      </div>
+                      <div className="p-2 bg-fuchsia-900/20 rounded border border-fuchsia-500/30">
+                        <div className="text-fuchsia-400 font-medium">union (共享内存)</div>
+                        <div>union {'{'} int i; float f; char s[4]; {'}'};</div>
+                        <div className="text-green-400">// 4 字节 (max(4,4,4))</div>
+                      </div>
+                      <div className="text-green-400 text-center">union 节省 66% 内存!</div>
+                    </div>
+                  </div>
+                )}
+                {step === 7 && (
+                  <div className="animate-scaleIn p-4 bg-gradient-to-r from-purple-600/20 to-fuchsia-600/20 rounded-lg border border-purple-500/30">
+                    <p className="text-purple-300 text-sm font-medium mb-2">🔧 典型应用</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
+                      <div className="p-2 bg-gray-900/50 rounded">
+                        <p className="text-purple-400 font-medium">变体类型</p>
+                        <p>JSON 值：int/float/string/bool</p>
+                      </div>
+                      <div className="p-2 bg-gray-900/50 rounded">
+                        <p className="text-purple-400 font-medium">协议解析</p>
+                        <p>网络包：header/payload</p>
+                      </div>
+                      <div className="p-2 bg-gray-900/50 rounded">
+                        <p className="text-purple-400 font-medium">硬件寄存器</p>
+                        <p>32 位寄存器：整体/位域访问</p>
+                      </div>
+                      <div className="p-2 bg-gray-900/50 rounded">
+                        <p className="text-purple-400 font-medium">序列化</p>
+                        <p>float ↔ int 字节转换</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {step === 8 && (
+                  <div className="animate-scaleIn space-y-3">
+                    <div className="p-3 bg-purple-900/20 rounded-lg border border-purple-500/30">
+                      <p className="text-purple-300 text-xs font-medium mb-2">⚠️ 注意事项</p>
+                      <ul className="text-xs text-gray-400 space-y-1">
+                        <li>• 任一时刻只有一个成员有效</li>
+                        <li>• 写入一个成员后，其他成员的值未定义</li>
+                        <li>• 需要额外标记 (tag) 跟踪当前有效成员</li>
+                        <li>• 字节序影响结果 (小端 vs 大端)</li>
+                      </ul>
+                    </div>
+                    <div className="text-xs text-gray-500 text-center">
+                      联合体 = 节省内存 + 类型双关，但要谨慎使用
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-purple-700/30">
+                <h2 className="text-lg font-semibold text-purple-400 mb-3">关键点说明</h2>
+                <div className="space-y-2 text-sm">
+                  <div className={`p-2 rounded transition-colors ${step >= 2 ? 'bg-purple-900/30 text-purple-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">①</span> 所有成员共享内存，大小=max(成员大小)
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 5 ? 'bg-purple-900/30 text-purple-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">②</span> 类型双关：同一段内存不同解释
+                  </div>
+                  <div className={`p-2 rounded transition-colors ${step >= 6 ? 'bg-purple-900/30 text-purple-300' : 'text-gray-500'}`}>
+                    <span className="font-medium">③</span> 比 struct 节省内存，但一次仅一个有效
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800/80 rounded-xl p-4 border border-purple-700/30">
+                <h2 className="text-lg font-semibold text-purple-400 mb-3">带标签的联合体</h2>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2 bg-purple-900/20 rounded border border-purple-500/30">
+                    <p className="text-purple-300 font-medium">Tagged Union</p>
+                    <pre className="text-gray-400 font-mono text-xs mt-1">
+{`struct Value {
+  enum { INT, FLOAT, STR } tag;
+  union {
+    int i; float f; char *s;
+  } data;
+};`}
+                    </pre>
+                  </div>
+                  <p className="text-gray-400 text-xs">用 tag 字段跟踪当前哪个成员有效</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-gray-800/80 rounded-xl p-4 border border-purple-700/30">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <button onClick={togglePlay} className={`px-4 py-2 rounded-lg font-medium transition-colors ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-purple-600 hover:bg-purple-700'} text-white`}>
+                  {step >= MAX_STEPS ? '🔄 重新播放' : isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                </button>
+                <button onClick={() => handleStepChange(Math.max(1, step - 1))} disabled={step <= 1} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  ◀ 上一步
+                </button>
+                <span className="text-purple-400 font-medium px-3">步骤 {step} / {MAX_STEPS}</span>
+                <button onClick={() => handleStepChange(Math.min(MAX_STEPS, step + 1))} disabled={step >= MAX_STEPS} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 rounded-lg text-sm font-medium transition-colors">
+                  下一步 ▶
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-purple-300">
+                  语速：
+                  <input type="range" min="0.5" max="1.5" step="0.1" value={voiceRate} onChange={(e) => setVoiceRate(parseFloat(e.target.value))} className="ml-2 w-24" />
+                  <span className="ml-2 text-purple-400">{voiceRate.toFixed(1)}x</span>
+                </label>
+                {isVoicePlaying && <span className="text-purple-400 animate-pulse">🔊 语音播放中...</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

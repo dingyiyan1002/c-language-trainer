@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1212 - FreeRTOS 信号量与互斥量完整指南 - 嵌入式 C 语言可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(168, 85, 247, 0.2); } 50% { background-color: rgba(168, 85, 247, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes danger { 0%, 100% { background-color: rgba(239, 68, 68, 0.3); } 50% { background-color: rgba(239, 68, 68, 0.6); } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes acquire { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        @keyframes release { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+        @keyframes count { 0% { transform: translateY(0); } 100% { transform: translateY(-5px); } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .flow { animation: flow 2s infinite; }
+        .highlight { animation: highlight 2s infinite; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .countdown { animation: countdown 0.3s ease-out; }
+        .danger { animation: danger 1s infinite; }
+        .reset { animation: reset 1s linear; }
+        .acquire { animation: acquire 0.5s infinite; }
+        .release { animation: release 2s infinite; }
+        .count { animation: count 1s infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#a855f7',
+            secondary: '#7e22ce',
+            accent: '#c084fc',
+            highlight: '#e9d5ff',
+            danger: '#ef4444',
+            success: '#10b981'
+        };
+
+        const STEPS = [
+            {
+                title: "信号量基础概念",
+                code: `// FreeRTOS 信号量概述
+// 信号量用于任务间同步和资源管理
+
+// 信号量类型:
+// 1. 二进制信号量 (Binary Semaphore)
+//    - 值：0 或 1
+//    - 用途：同步、资源独占
+
+// 2. 计数信号量 (Counting Semaphore)
+//    - 值：0 到 maxCount
+//    - 用途：资源计数、流量控制
+
+// 3. 互斥信号量 (Mutex)
+//    - 特殊的二进制信号量
+//    - 具有优先级继承机制
+//    - 用途：临界区保护
+
+// 信号量操作:
+// xSemaphoreTake()    - 获取信号量 (可能阻塞)
+// xSemaphoreGive()    - 释放信号量
+// xSemaphoreTakeFromISR()  - 中断中获取
+// xSemaphoreGiveFromISR()  - 中断中释放`,
+                description: "信号量是 RTOS 最重要的同步原语。二进制信号量值为 0 或 1，用于同步或独占资源。计数信号量有最大值，用于控制可用资源数量。互斥信号量是特殊的二进制信号量，具有优先级继承机制，专门用于保护共享资源防止优先级反转。",
+                highlight: "互斥量有优先级继承，信号量没有，保护共享资源必须用互斥量"
+            },
+            {
+                title: "二进制信号量创建与使用",
+                code: `// 创建二进制信号量
+SemaphoreHandle_t xBinarySemaphore;
+
+void vTaskCreateSemaphores(void) {
+    // 创建时初始值为 1 (可用)
+    xBinarySemaphore = xSemaphoreCreateBinary();
+
+    if(xBinarySemaphore != NULL) {
+        // 初始化时获取信号量 (设为不可用)
+        xSemaphoreTake(xBinarySemaphore, 0);
+    }
+}
+
+// 任务 A: 等待事件后释放信号量
+void vTaskA(void *pvParameters) {
+    for(;;) {
+        // 等待某个事件 (如按键)
+        if(Event_Occurs()) {
+            xSemaphoreGive(xBinarySemaphore);  // 释放信号量
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+// 任务 B: 等待信号量
+void vTaskB(void *pvParameters) {
+    for(;;) {
+        // 阻塞等待信号量
+        if(xSemaphoreTake(xBinarySemaphore, portMAX_DELAY)) {
+            // 信号量获取成功，处理事件
+            Process_Event();
+        }
+    }
+}`,
+                description: "二进制信号量创建后初始值为 1，通常立即获取一次使其变为 0 (不可用状态)。任务 A 在事件发生时释放信号量 (值变为 1)，任务 B 等待信号量 (阻塞直到值为 1)。这种模式用于任务间同步：一个任务等待另一个任务完成某事。",
+                highlight: "二进制信号量用于同步：一个任务释放，另一个任务获取"
+            },
+            {
+                title: "计数信号量应用",
+                code: `// 创建计数信号量
+// 最大值 10，初始值 0
+SemaphoreHandle_t xCountingSemaphore;
+xCountingSemaphore = xSemaphoreCreateCounting(10, 0);
+
+// 应用场景：中断数据采集
+
+// 中断服务程序 (采集数据)
+void ADC_IRQHandler(void) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    uint16_t adc_value = ADC1->DR;
+
+    // 存储数据到缓冲区
+    buffer[write_index++] = adc_value;
+
+    // 释放信号量 (计数 +1)
+    xSemaphoreGiveFromISR(xCountingSemaphore, &xHigherPriorityTaskWoken);
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+// 数据处理任务
+void vTaskProcess(void *pvParameters) {
+    for(;;) {
+        // 等待数据 (至少 1 个)
+        xSemaphoreTake(xCountingSemaphore, portMAX_DELAY);
+
+        // 可能有多个数据，批量处理
+        while(uxSemaphoreGetCount(xCountingSemaphore) > 0) {
+            Process_Data(buffer[read_index++]);
+            xSemaphoreTake(xCountingSemaphore, 0);  // 非阻塞获取
+        }
+    }
+}`,
+                description: "计数信号量用于统计事件发生次数。中断每次采集数据后释放信号量，处理任务等待信号量并批量处理数据。计数信号量的值表示可用资源数量。uxSemaphoreGetCount 可查询当前计数值。这种模式适合高频中断 + 批量处理的场景。",
+                highlight: "计数信号量的值=可用资源数，适合中断数据采集场景"
+            },
+            {
+                title: "互斥量保护共享资源",
+                code: `// 创建互斥量
+SemaphoreHandle_t xMutex;
+xMutex = xSemaphoreCreateMutex();
+
+// 共享资源 (如全局变量、外设)
+int32_t shared_counter = 0;
+
+// 任务 A: 访问共享资源
+void vTaskA(void *pvParameters) {
+    for(;;) {
+        // 获取互斥量 (等待 100ms)
+        if(xSemaphoreTake(xMutex, pdMS_TO_TICKS(100))) {
+            // 临界区：安全访问共享资源
+            shared_counter++;
+            printf("TaskA: %d\\n", shared_counter);
+
+            // 释放互斥量
+            xSemaphoreGive(xMutex);
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+// 任务 B: 同样访问共享资源
+void vTaskB(void *pvParameters) {
+    for(;;) {
+        if(xSemaphoreTake(xMutex, pdMS_TO_TICKS(100))) {
+            shared_counter--;
+            printf("TaskB: %d\\n", shared_counter);
+            xSemaphoreGive(xMutex);
+        }
+        vTaskDelay(pdMS_TO_TICKS(75));
+    }
+}
+
+// 注意：必须在持有互斥量时释放，不能跨任务释放`,
+                description: "互斥量用于保护共享资源，防止竞态条件。任务访问共享资源前必须先获取互斥量，访问完成后立即释放。如果在超时时间内无法获取互斥量，xSemaphoreTake 返回 pdFALSE。互斥量必须在同一个任务中获取和释放，不能跨任务操作。",
+                highlight: "互斥量必须谁获取谁释放，不能跨任务；信号量可以跨任务"
+            },
+            {
+                title: "优先级继承机制",
+                code: `// 优先级反转问题:
+// 任务 C(低) 持有互斥量
+// 任务 A(高) 等待互斥量
+// 任务 B(中) 抢占任务 C，但不需要互斥量
+// 结果：任务 A 被任务 B 阻塞 (优先级反转)
+
+// 解决方案：优先级继承
+// 当任务 A 等待互斥量时，任务 C 临时继承任务 A 的优先级
+// 任务 B 无法抢占任务 C
+// 任务 C 释放互斥量后恢复原优先级
+
+// 互斥量自动处理优先级继承，无需手动配置
+
+// 重要：保护共享资源必须用互斥量，不能用信号量
+// 信号量没有优先级继承，会导致优先级反转
+
+// 对比:
+xSemaphoreCreateMutex()     // ✓ 有优先级继承
+xSemaphoreCreateBinary()    // ✗ 无优先级继承`,
+                description: "优先级反转是实时系统的经典问题：低优先级任务持有共享资源，高优先级任务等待，中优先级任务抢占低优先级任务但不需要使用该资源，导致高优先级任务被中优先级任务阻塞。互斥量的优先级继承机制临时提升持有者的优先级到中优先级之上，解决此问题。",
+                highlight: "优先级反转可导致硬实时失效，保护共享资源必须用互斥量"
+            },
+            {
+                title: "信号量超时处理",
+                code: `// 超时处理 - 避免永久阻塞
+
+// 永久阻塞 (谨慎使用)
+xSemaphoreTake(xSemaphore, portMAX_DELAY);  // 可能永远等不到
+
+// 带超时 (推荐)
+if(xSemaphoreTake(xSemaphore, pdMS_TO_TICKS(100))) {
+    // 成功获取
+    Process_Resource();
+    xSemaphoreGive(xSemaphore);
+} else {
+    // 超时处理
+    Log_Error("Semaphore timeout");
+    // 降级处理或重试
+}
+
+// 重试机制
+#define MAX_RETRIES 3
+uint8_t retry_count = 0;
+
+while(retry_count < MAX_RETRIES) {
+    if(xSemaphoreTake(xMutex, pdMS_TO_TICKS(50))) {
+        Process_Resource();
+        xSemaphoreGive(xMutex);
+        break;  // 成功则退出
+    }
+    retry_count++;
+    vTaskDelay(pdMS_TO_TICKS(10));  // 短暂延时后重试
+}
+
+if(retry_count >= MAX_RETRIES) {
+    // 多次重试失败，错误处理
+    Handle_Error();
+}`,
+                description: "永久阻塞 (portMAX_DELAY) 可能导致任务永远无法执行，应谨慎使用。带超时的获取操作在超时后返回 pdFALSE，允许任务进行错误处理或降级操作。重试机制可提高系统鲁棒性，但需要限制最大重试次数防止死循环。",
+                highlight: "生产环境避免 portMAX_DELAY，必须处理超时情况"
+            },
+            {
+                title: "中断中使用信号量",
+                code: `// 中断中使用信号量
+
+// 从中断释放信号量 (通知任务)
+void EXTI0_IRQHandler(void) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    // 清除中断标志
+    EXTI->PR = EXTI_PR_PR0;
+
+    // 释放信号量
+    xSemaphoreGiveFromISR(xBinarySemaphore, &xHigherPriorityTaskWoken);
+
+    // 如果被通知的任务优先级更高，立即切换
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+// 二值信号量用于中断同步的完整模式
+SemaphoreHandle_t xISR_Semaphore;
+
+// 初始化
+xISR_Semaphore = xSemaphoreCreateBinary();
+xSemaphoreTake(xISR_Semaphore, 0);  // 初始不可用
+
+// 中断
+void Timer_IRQHandler(void) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xSemaphoreGiveFromISR(xISR_Semaphore, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+// 任务
+void vTaskWaitForISR(void *pvParameters) {
+    for(;;) {
+        xSemaphoreTake(xISR_Semaphore, portMAX_DELAY);  // 等待中断
+        // 中断已发生，处理...
+    }
+}`,
+                description: "中断中必须使用 FromISR 结尾的 API。xSemaphoreGiveFromISR 从中断释放信号量通知任务。xHigherPriorityTaskWoken 参数用于判断是否需要立即切换到被通知的高优先级任务。portYIELD_FROM_ISR 根据该标志决定是否立即上下文切换。",
+                highlight: "中断释放信号量后，portYIELD_FROM_ISR 可立即切换到高优先级任务"
+            },
+            {
+                title: "信号量应用总结",
+                code: `// 信号量选择指南
+
+// 场景 1: 任务间同步 (事件通知)
+// → 二进制信号量
+SemaphoreHandle_t xEventSem = xSemaphoreCreateBinary();
+
+// 场景 2: 资源计数 (多实例资源)
+// → 计数信号量
+SemaphoreHandle_t xResourceSem = xSemaphoreCreateCounting(10, 10);
+
+// 场景 3: 共享资源保护 (临界区)
+// → 互斥量 (必须!)
+SemaphoreHandle_t xResourceMutex = xSemaphoreCreateMutex();
+
+// 场景 4: 中断通知任务
+// → 二进制信号量 + xSemaphoreGiveFromISR
+
+// 最佳实践:
+// 1. 互斥量仅用于保护共享资源
+// 2. 信号量用于同步和计数
+// 3. 始终处理超时情况
+// 4. 临界区代码尽量短
+// 5. 避免嵌套锁定 (死锁风险)
+
+// 死锁示例 (避免!)
+// 任务 A: 锁定 M1 → 等待 M2
+// 任务 B: 锁定 M2 → 等待 M1
+// 结果：互相等待，永久阻塞`,
+                description: "信号量选择：二进制信号量用于同步，计数信号量用于资源计数，互斥量用于共享资源保护。最佳实践包括：始终处理超时、临界区代码简短、避免嵌套锁定防止死锁。死锁是两个任务互相等待对方持有的锁，导致永久阻塞。",
+                highlight: "死锁预防：固定锁定顺序、避免嵌套锁定、使用超时"
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [showCode, setShowCode] = useState(true);
+            const [semaphoreCount, setSemaphoreCount] = useState(0);
+            const voiceEndTimerRef = useRef(null);
+
+            // 模拟信号量计数
+            useEffect(() => {
+                if (!isPlaying) return;
+                const interval = setInterval(() => {
+                    setSemaphoreCount(prev => {
+                        if (currentStep === 2) {
+                            // 计数信号量模式
+                            return prev >= 5 ? 0 : prev + 1;
+                        }
+                        return prev;
+                    });
+                }, 1000);
+                return () => clearInterval(interval);
+            }, [isPlaying, currentStep]);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v =>
+                        v.lang === 'zh-CN' ||
+                        v.lang === 'zh-CN-XiaoxiaoNeural' ||
+                        v.lang.includes('Chinese')
+                    );
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.description + "。" + step.highlight);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep]);
+
+            // 信号量类型对比
+            const SemaphoreTypes = () => {
+                const types = [
+                    { name: '二进制', value: '0/1', use: '同步', color: 'bg-blue-500' },
+                    { name: '计数', value: '0-N', use: '资源计数', color: 'bg-green-500' },
+                    { name: '互斥', value: '0/1', use: '临界区', color: 'bg-purple-500' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-3">信号量类型</h3>
+                        <div className="space-y-2">
+                            {types.map((t, i) => (
+                                <div key={i} className={`p-2 rounded ${t.color}`}>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="font-bold">{t.name}</span>
+                                        <span>值：{t.value}</span>
+                                    </div>
+                                    <div className="text-xs opacity-75">用途：{t.use}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 信号量计数可视化
+            const CountingVisual = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-3">计数信号量</h3>
+                        <div className="flex justify-center gap-2 mb-3">
+                            {[0, 1, 2, 3, 4].map((i) => (
+                                <div key={i} className={`w-10 h-10 rounded flex items-center justify-center transition-all ${
+                                    i < semaphoreCount ? 'bg-green-500 acquire' : 'bg-gray-600'
+                                }`}>
+                                    {i < semaphoreCount ? '✓' : '×'}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="text-center text-sm">
+                            当前计数：<span className="text-green-400 font-bold">{semaphoreCount}/5</span>
+                        </div>
+                    </div>
+                );
+            };
+
+            // 互斥量保护可视化
+            const MutexProtect = () => {
+                const tasks = [
+                    { name: '任务 A', state: '等待', color: 'bg-yellow-500' },
+                    { name: '任务 B', state: '持有', color: 'bg-green-500' },
+                    { name: '任务 C', state: '等待', color: 'bg-yellow-500' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-blue-400 mb-3">互斥量保护</h3>
+                        <div className="space-y-2">
+                            {tasks.map((t, i) => (
+                                <div key={i} className={`p-2 rounded flex justify-between items-center ${
+                                    t.state === '持有' ? t.color : 'bg-gray-700'
+                                }`}>
+                                    <span className="text-xs">{t.name}</span>
+                                    <span className="text-xs">
+                                        {t.state === '持有' ? '🔒 临界区' : '⏳ 等待'}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-3 text-xs text-center text-gray-400">
+                            共享资源：shared_counter
+                        </div>
+                    </div>
+                );
+            };
+
+            // 优先级继承可视化
+            const PriorityInheritance = () => {
+                const tasks = [
+                    { name: '任务 A', priority: '高 (3)', base: 3, current: 3, state: '等待' },
+                    { name: '任务 B', priority: '中 (2)', base: 2, current: 2, state: '就绪' },
+                    { name: '任务 C', priority: '低 (1)', base: 1, current: 3, state: '运行 (继承)' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-orange-400 mb-3">优先级继承</h3>
+                        <div className="space-y-2">
+                            {tasks.map((t, i) => (
+                                <div key={i} className={`p-2 rounded ${
+                                    t.state === '运行' ? 'bg-green-500' :
+                                    t.state === '等待' ? 'bg-red-500' : 'bg-gray-700'
+                                }`}>
+                                    <div className="flex justify-between text-xs">
+                                        <span>{t.name}</span>
+                                        <span>{t.state}</span>
+                                    </div>
+                                    <div className="text-xs opacity-75">
+                                        基础：{t.base} → 当前：{t.current}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-2 text-xs text-yellow-300">
+                            ⚠️ 任务 C 继承任务 A 优先级，防止任务 B 抢占
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    {/* 头部 */}
+                    <div className="max-w-7xl mx-auto mb-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-purple-400">
+                                1212 - FreeRTOS 信号量与互斥量完整指南
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">
+                                    {isPlaying ? '暂停' : '播放'}
+                                </button>
+                                <button onClick={() => setShowCode(!showCode)} className="px-3 py-1 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                    {showCode ? '隐藏代码' : '显示代码'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div className="flex gap-1 mb-4">
+                            {STEPS.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentStep(i)}
+                                    className={`flex-1 h-2 rounded transition-all ${
+                                        i === currentStep ? 'bg-purple-500 scale-110' :
+                                        i < currentStep ? 'bg-purple-700' : 'bg-gray-600'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 主内容区 - 三列布局 */}
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* 左列：代码 */}
+                        {showCode && (
+                            <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                                <h2 className="text-sm font-bold text-purple-400 mb-2">
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap bg-gray-900 p-3 rounded">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        )}
+
+                        {/* 中列：可视化动画 */}
+                        <div className={`${showCode ? 'col-span-1' : 'col-span-2'} space-y-4`}>
+                            <SemaphoreTypes />
+                            <div className="grid grid-cols-2 gap-4">
+                                {currentStep >= 2 ? <CountingVisual /> : <MutexProtect />}
+                                {currentStep >= 4 ? <PriorityInheritance /> : <div className="bg-gray-800 rounded-lg p-4"><h3 className="text-sm font-bold text-gray-400 mb-2">等待下一步...</h3></div>}
+                            </div>
+                        </div>
+
+                        {/* 右列：说明 */}
+                        <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                            <h3 className="text-sm font-bold text-blue-400 mb-2">说明</h3>
+                            <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                                {STEPS[currentStep].description}
+                            </p>
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2">
+                                <p className="text-xs text-yellow-300">
+                                    <span className="font-bold">💡 重点:</span> {STEPS[currentStep].highlight}
+                                </p>
+                            </div>
+
+                            {/* 导航按钮 */}
+                            <div className="flex gap-2 mt-4">
+                                <button
+                                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                                    disabled={currentStep === 0}
+                                    className="flex-1 py-2 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 text-xs"
+                                >
+                                    ← 上一步
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+                                    disabled={currentStep === STEPS.length - 1}
+                                    className="flex-1 py-2 bg-purple-600 rounded hover:bg-purple-500 disabled:opacity-50 text-xs"
+                                >
+                                    下一步 →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部摘要 */}
+                    <div className="max-w-7xl mx-auto mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-2">信号量与互斥量核心要点</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-purple-400 font-bold">三种类型</span>
+                                <p className="text-gray-400 mt-1">二进制/计数/互斥</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-green-400 font-bold">同步机制</span>
+                                <p className="text-gray-400 mt-1">任务间事件通知</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-blue-400 font-bold">互斥保护</span>
+                                <p className="text-gray-400 mt-1">临界区防竞态</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-orange-400 font-bold">优先级继承</span>
+                                <p className="text-gray-400 mt-1">防止优先级反转</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

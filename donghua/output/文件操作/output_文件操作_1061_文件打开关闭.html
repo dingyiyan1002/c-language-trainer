@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>文件操作基础 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#06b6d4 0%,#0891b2 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#164e63;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#0e7490;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#ecfeff,#cffafe);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#67e8f9;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#22d3ee;box-shadow:0 0 20px rgba(34,211,238,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#164e63;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .file-container{display:flex;flex-direction:column;gap:16px;margin:16px 0}
+    .file-box{border-radius:12px;padding:16px;transition:all 0.4s ease;border:3px solid transparent}
+    .file-box.closed{background:linear-gradient(135deg:#f0f9ff,#e0f2fe);border-color:#7dd3fc;opacity:0.7}
+    .file-box.open{background:linear-gradient(135deg:#67e8f9,#22d3ee);border-color:#06b6d4;color:white;transform:scale(1.02)}
+    .file-icon{font-size:32px;text-align:center;margin-bottom:8px}
+    .file-label{font-size:11px;text-align:center;font-family:'Consolas',monospace}
+    .file-status{font-size:10px;text-align:center;opacity:0.8}
+    .operation-flow{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+    .op-step{display:flex;align-items:center;gap:12px;padding:12px;background:white;border-radius:8px;border:2px solid#e5e7eb;transition:all 0.4s ease}
+    .op-step.pending{opacity:0.5}
+    .op-step.active{background:linear-gradient(135deg,#06b6d4,#0891b2);border-color:#0e7490;color:white}
+    .op-icon{width:32px;height:32px;border-radius:50%;background:#e0f2fe;display:flex;align-items:center;justify-content:center;font-size:16px}
+    .op-step.active .op-icon{background:rgba(255,255,255,0.3)}
+    .op-text{flex:1;font-size:12px;font-weight:600}
+    .op-status{font-size:10px;font-family:'Consolas',monospace}
+    .buffer-display{background:#1e293b;border-radius:12px;padding:16px;margin:16px 0;min-height:100px}
+    .buffer-row{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+    .buffer-cell{width:32px;height:32px;border-radius:4px;background:#0f172a;border:1px solid#475569;display:flex;align-items:center;justify-content:center;font-size:10px;color:#94a3b8;font-family:'Consolas',monospace;transition:all 0.3s ease}
+    .buffer-cell.filled{background:#06b6d4;border-color:#22d3ee;color:white}
+    .buffer-cell.active{background:#f59e0b;border-color:#fbbf24;color:white;transform:scale(1.1)}
+    .mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+    .mode-card{background:white;border-radius:8px;padding:12px;text-align:center;border:2px solid#e5e7eb;transition:all 0.3s ease}
+    .mode-card.active{border-color:#06b6d4;background:linear-gradient(135deg:#ecfeff,#cffafe)}
+    .mode-name{font-size:11px;color:#164e63;font-weight:700;margin-bottom:4px;font-family:'Consolas',monospace}
+    .mode-desc{font-size:9px;color:#64748b}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#22d3ee;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',cyan:'#06b6d4'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'',color:'#94a3b8'},
+      3:{step:2,text:'FILE *fp = fopen("data.txt", "r");',color:'#06b6d4'},
+      4:{step:3,text:'if (fp == NULL) {',color:'#ef4444'},
+      5:{step:3,text:'    printf("Failed to open\\n");',color:'#eab308'},
+      6:{step:3,text:'    return 1;',color:'#ef4444'},
+      7:{step:4,text:'}',color:'#06b6d4'},
+      8:{step:5,text:'char buffer[100];',color:'#3b82f6'},
+      9:{step:5,text:'fgets(buffer, 100, fp);',color:'#22c55e'},
+      10:{step:6,text:'fclose(fp);',color:'#f59e0b'},
+      11:{step:6,text:'return 0;',color:'#3b82f6'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，文件操作是 C 语言处理外部数据的基础',
+      2:'使用 fopen 打开文件，r 模式表示只读，返回 FILE 指针',
+      3:'检查文件是否成功打开，NULL 表示打开失败需要错误处理',
+      4:'文件指针有效，可以继续操作',
+      5:'使用 fgets 从文件读取一行到缓冲区，最多 100 字符',
+      6:'使用 fclose 关闭文件，释放资源，防止内存泄漏'
+    };
+    const operations = [
+      {name:'fopen',desc:'打开文件',icon:'📂'},
+      {name:'fopen check',desc:'检查 NULL',icon:'✅'},
+      {name:'fgets',desc:'读取数据',icon:'📥'},
+      {name:'fclose',desc:'关闭文件',icon:'📁'}
+    ];
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',file:'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [fileOpen,setFileOpen] = useState(false);
+      const [fileError,setFileError] = useState(false);
+      const [bufferData,setBufferData] = useState([]);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 11; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setFileOpen(false);
+          setFileError(false);
+          setBufferData([]);
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setFileOpen(true);
+          setFileError(false);
+        } else if(step === 3) {
+          setFileOpen(true);
+          setFileError(false);
+        } else if(step === 4) {
+          setFileOpen(true);
+        } else if(step === 5) {
+          setBufferData(['H','e','l','l','o','\\0']);
+        } else if(step === 6) {
+          setFileOpen(false);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setFileOpen(false);
+        setFileError(false);
+        setBufferData([]);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>文件操作基础 - C 语言可视化</h1>
+            <p>fopen | fgets | fclose | 文件指针</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.cyan,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                file_io.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8,9,10,11].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.file} size={22} />
+                文件操作可视化
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">FILE *fp</span>
+                  <span className="var-type">File Pointer</span>
+                </div>
+                <div className="file-container">
+                  <div className={`file-box ${fileOpen ? 'open' : 'closed'}`}>
+                    <div className="file-icon">📁</div>
+                    <div className="file-label">data.txt</div>
+                    <div className="file-status">{fileOpen ? 'OPEN (r 模式)' : fileError ? 'ERROR (NULL)' : 'CLOSED'}</div>
+                  </div>
+                </div>
+                <div className="operation-flow">
+                  {operations.map((op, idx) => (
+                    <div key={op.name} className={`op-step ${step >= idx + 2 ? 'active' : 'pending'}`}>
+                      <div className="op-icon">{op.icon}</div>
+                      <div className="op-text">{op.name} - {op.desc}</div>
+                      <div className="op-status">{step >= idx + 2 ? '✓' : '○'}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="buffer-display">
+                  <div style={{color:'#94a3b8',fontSize:12,marginBottom:12}}>读取缓冲区 (buffer[100])</div>
+                  <div className="buffer-row">
+                    {bufferData.map((ch, idx) => (
+                      <div key={idx} className={`buffer-cell ${ch ? 'filled' : ''}`}>{ch}</div>
+                    ))}
+                    {bufferData.length === 0 && <div style={{color:'#64748b',fontSize:11}}>空缓冲区</div>}
+                  </div>
+                </div>
+                <div className="mode-grid">
+                  <div className={`mode-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="mode-name">"r"</div>
+                    <div className="mode-desc">只读</div>
+                  </div>
+                  <div className={`mode-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="mode-name">"w"</div>
+                    <div className="mode-desc">只写 (清空)</div>
+                  </div>
+                  <div className={`mode-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="mode-name">"a"</div>
+                    <div className="mode-desc">追加</div>
+                  </div>
+                  <div className={`mode-card ${step >= 2 ? 'active' : ''}`}>
+                    <div className="mode-name">"r+"</div>
+                    <div className="mode-desc">读写</div>
+                  </div>
+                </div>
+              </div>
+              {step >= 5 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    {bufferData.length > 0 && <div className="terminal-line">Read: {bufferData.filter(c => c !== '\\0').join('')}</div>}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.cyan}}>文件指针</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>FILE * 指向文件结构体</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>打开模式</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>r 只读 w 写 a 追加</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>错误处理</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>检查 NULL 防止崩溃</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>资源释放</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>fclose 关闭文件释放资源</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

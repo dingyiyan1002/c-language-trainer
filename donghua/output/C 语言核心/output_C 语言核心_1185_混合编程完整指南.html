@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1185 - 混合编程完整指南 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: transparent; } 50% { background-color: rgba(251,191,36,0.2); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes linkAnim { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(10px); } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-link { animation: linkAnim 2s infinite; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: 'from-amber-500 to-orange-600',
+            light: 'from-amber-50 to-orange-50',
+            text: 'text-amber-600',
+            bg: 'bg-amber-50',
+            border: 'border-amber-200',
+            hover: 'hover:bg-amber-100'
+        };
+
+        const CODE_EXAMPLES = [
+            {
+                title: "C 与内联汇编",
+                code: `// GCC 内联汇编 (ARM Cortex-M)
+
+// 基本语法
+asm volatile (
+    "指令 1\\n"
+    "指令 2\\n"
+    : 输出操作数
+    : 输入操作数
+    : 破坏寄存器
+);
+
+// 示例 1: NOP 空操作
+#define NOP() asm volatile ("nop")
+
+// 示例 2: 读写寄存器
+uint32_t get_MSP(void) {
+    uint32_t result;
+    asm volatile ("MRS %0, MSP" : "=r" (result));
+    return result;
+}
+
+// 示例 3: 带输入输出
+uint32_t add(uint32_t a, uint32_t b) {
+    uint32_t result;
+    asm volatile (
+        "ADD %0, %1, %2"
+        : "=r" (result)
+        : "r" (a), "r" (b)
+    );
+    return result;
+}
+
+// 示例 4: 内存屏障
+#define MEMORY_BARRIER() \\
+    asm volatile ("DSB" ::: "memory")
+
+// 约束符:
+// =r: 输出到寄存器
+// r:  从寄存器读取
+// =m: 输出到内存
+// m:  从内存读取`,
+                highlight: "asm volatile",
+                explanation: "GCC 内联汇编语法：asm volatile 防止优化，输出操作数在前输入在后，约束符指定寄存器或内存，破坏寄存器列表告诉编译器哪些寄存器被修改。"
+            },
+            {
+                title: "C 与 C++ 混合编程",
+                code: `// C++ 调用 C 代码
+
+// C 头文件 (sensor.h)
+#ifndef SENSOR_H
+#define SENSOR_H
+
+#ifdef __cplusplus
+extern "C" {  // C++ 编译器使用 C 链接
+#endif
+
+int Sensor_Init(void);
+int Sensor_Read(float *data);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+
+// C++ 代码 (main.cpp)
+#include "sensor.h"  // 可以调用 C 函数
+
+class SensorDriver {
+public:
+    bool init() {
+        return Sensor_Init() == 0;  // 调用 C
+    }
+
+    float read() {
+        float data;
+        Sensor_Read(&data);  // 调用 C
+        return data;
+    }
+};
+
+// C 调用 C++ 代码
+// CppWrapper.cpp
+extern "C" void CppFunction(int x);  // C 链接
+
+void CppFunction(int x) {  // C++ 实现
+    // 可以用 C++ 特性
+}
+
+// main.c
+extern void CppFunction(int x);  // C 声明
+CppFunction(42);  // 调用 C++`,
+                highlight: "extern \"C\"",
+                explanation: "C 与 C++ 混合使用 extern C 声明。C 头文件用 extern C 包裹声明，C++ 代码可以调用 C 函数。C++ 函数加 extern C 声明后可被 C 代码调用。"
+            },
+            {
+                title: "Python ctypes 调用 C",
+                code: `# C 库 (libmath.so / math.dll)
+// math_lib.c
+#include <stdlib.h>
+
+double add(double a, double b) {
+    return a + b;
+}
+
+int* create_array(int size) {
+    return (int*)malloc(size * sizeof(int));
+}
+
+void free_array(int *arr) {
+    free(arr);
+}
+
+# Python 调用
+import ctypes
+from ctypes import c_double, c_int, POINTER
+
+# 加载库
+lib = ctypes.CDLL('./libmath.so')  # Linux
+# lib = ctypes.CDLL('./math.dll')  # Windows
+
+# 调用简单函数
+lib.add.argtypes = [c_double, c_double]
+lib.add.restype = c_double
+result = lib.add(3.0, 4.0)  # 返回 7.0
+
+# 调用返回指针的函数
+lib.create_array.argtypes = [c_int]
+lib.create_array.restype = POINTER(c_int)
+arr = lib.create_array(10)
+
+# 访问数组元素
+print(arr[0])  # 第一个元素
+
+# 释放内存
+lib.free_array(arr)`,
+                highlight: "ctypes",
+                explanation: "Python ctypes 调用 C：加载共享库，设置 argtypes 参数类型和 restype 返回类型，调用 C 函数，处理指针和数组，记得释放 C 分配的内存。"
+            },
+            {
+                title: "Python C API 扩展",
+                code: `// C 扩展模块 (mymodule.c)
+#include <Python.h>
+
+// C 函数：计算阶乘
+static long factorial(long n) {
+    return n <= 1 ? 1 : n * factorial(n - 1);
+}
+
+// Python 可调用的包装函数
+static PyObject* my_factorial(PyObject *self, PyObject *args) {
+    long n;
+    // 解析 Python 参数
+    if (!PyArg_ParseTuple(args, "l", &n)) {
+        return NULL;  // 参数错误
+    }
+
+    long result = factorial(n);
+
+    // 返回 Python 对象
+    return PyLong_FromLong(result);
+}
+
+// 方法表
+static PyMethodDef Methods[] = {
+    {"factorial", my_factorial, METH_VARARGS, "计算阶乘"},
+    {NULL, NULL, 0, NULL}  // 结束标记
+};
+
+// 模块定义
+static struct PyModuleDef moduledef = {
+    PyModuleDef_HEAD_INIT,
+    "mymodule",
+    "我的 C 扩展模块",
+    -1,
+    Methods
+};
+
+// 模块初始化
+PyMODINIT_FUNC PyInit_mymodule(void) {
+    return PyModule_Create(&moduledef);
+}
+
+// 编译: gcc -shared -fPIC -o mymodule.so mymodule.c \\
+//       $(python3-config --includes)`,
+                highlight: "PyArg_ParseTuple",
+                explanation: "Python C API 扩展：包含 Python.h，编写 C 函数，用 PyArg_ParseTuple 解析 Python 参数，PyLong_FromLong 等返回 Python 对象，定义方法表和模块初始化函数。"
+            },
+            {
+                title: "C 与汇编文件链接",
+                code: `// C 代码 (main.c)
+extern void asm_delay_ms(int ms);  // 声明汇编函数
+extern int asm_add(int a, int b);   // 声明汇编函数
+
+int main(void) {
+    asm_delay_ms(100);  // 调用汇编
+    int sum = asm_add(3, 5);  // 调用汇编
+    return 0;
+}
+
+// ARM 汇编 (delay.s)
+    .section .text
+    .global asm_delay_ms
+    .type asm_delay_ms, %function
+
+asm_delay_ms:
+    PUSH {LR}           @ 保存返回地址
+delay_loop:
+    MOV r1, #1000000    @ 循环次数
+inner_loop:
+    SUBS r1, r1, #1
+    BNE inner_loop
+    SUBS r0, r0, #1
+    BNE delay_loop
+    POP {PC}            @ 返回
+
+// 汇编函数遵循 AAPCS 调用约定:
+// - 参数：r0-r3
+// - 返回值：r0
+// - 临时寄存器：r0-r3, r12
+// - 保存寄存器：r4-r11, LR
+
+// 编译链接: gcc main.c delay.s -o program`,
+                highlight: "AAPCS",
+                explanation: "C 与汇编文件链接：C 代码用 extern 声明汇编函数，汇编函数遵循 AAPCS 调用约定 (参数 r0-r3，返回值 r0)，使用 global 导出符号，最后一起编译链接。"
+            },
+            {
+                title: "混合编程应用案例",
+                code: `// 案例 1: 性能关键代码用汇编
+// C 调用汇编优化的 DSP 函数
+extern void fft_asm(float *real, float *imag, int n);
+void processSignal(float *data, int n) {
+    float *imag = calloc(n, sizeof(float));
+    fft_asm(data, imag, n);  // 汇编加速
+    free(imag);
+}
+
+// 案例 2: Python+C 原型开发
+// 算法用 C 实现，Python 做上层逻辑
+# Python 代码
+import c_algorithm
+result = c_algorithm.sort(data)  # C 实现快速排序
+
+// 案例 3: C++ 类包装 C 库
+// C 库：libusb
+// C++ 包装：
+class USBDevice {
+    libusb_device_handle *handle;
+public:
+    USBDevice() {
+        libusb_init(NULL);  // C 库
+    }
+    ~USBDevice() {
+        libusb_close(handle);  // C 库
+    }
+};
+
+// 案例 4: 嵌入式 Python
+// C 固件 + Python 脚本配置
+// MicroPython: C 内核，Python 用户脚本`,
+                highlight: "性能优化",
+                explanation: "混合编程应用：性能关键代码用汇编优化如 DSP 函数，Python 调用 C 算法库加速，C++ 类包装 C 库便于使用，嵌入式系统 C 固件加 Python 脚本配置。"
+            },
+            {
+                title: "调用约定与 ABI",
+                code: `// 调用约定 (Calling Convention)
+
+// x86-64 System V ABI (Linux):
+// 参数：RDI, RSI, RDX, RCX, R8, R9 (前 6 个)
+// 返回值：RAX
+// 临时寄存器：RAX, RCX, RDX, RSI, RDI, R8-R11
+// 保存寄存器：RBX, RBP, R12-R15
+
+// ARM AAPCS (32 位):
+// 参数：R0-R3 (前 4 个)
+// 返回值：R0
+// 临时寄存器：R0-R3, R12
+// 保存寄存器：R4-R11, LR
+
+// ARM AAPCS64 (64 位):
+// 参数：X0-X7 (前 8 个)
+// 返回值：X0
+// 临时寄存器：X0-X18
+// 保存寄存器：X19-X29, LR
+
+// 重要原则:
+// 1. caller-saved: 调用者保存 (临时寄存器)
+// 2. callee-saved: 被调者保存 (保存寄存器)
+// 3. 栈对齐：16 字节边界 (x86-64)
+// 4. 浮点参数：XMM0-XMM7 (x86-64), S0-S7 (ARM)
+
+// 违反调用约定 = 未定义行为!`,
+                highlight: "ABI",
+                explanation: "调用约定和 ABI 定义参数传递和寄存器使用规则。x86-64 Linux 用 RDI-R9 传参，ARM 32 位用 R0-R3。caller-saved 临时寄存器由调用者保存，callee-saved 由被调者保存。"
+            },
+            {
+                title: "混合编程最佳实践",
+                code: `// ✅ 混合编程最佳实践
+
+// 1. 清晰的接口边界
+// C 头文件明确声明所有外部函数
+// 不要依赖隐式声明
+
+// 2. 使用 extern "C" 防护
+#ifdef __cplusplus
+extern "C" {
+#endif
+// C 函数声明
+#ifdef __cplusplus
+}
+#endif
+
+// 3. 遵循调用约定
+// 不要混用不同调用约定的代码
+// 如__cdecl vs __stdcall
+
+// 4. 内存管理一致
+// C 分配的内存用 C 释放
+// C++ new 用 delete 释放
+// 不要跨语言释放内存
+
+// 5. 错误处理统一
+// 定义统一的错误码
+// 不要用 C++ 异常跨越 C 边界
+
+// 6. 数据类型匹配
+// C: int32_t, uint8_t (stdint.h)
+// Python: c_int, c_double (ctypes)
+// 避免平台相关类型
+
+// 7. 文档说明边界
+// 明确标注跨语言函数
+// 说明调用约定和内存责任
+
+// 8. 测试边界条件
+// 专门测试跨语言调用
+// 检查参数传递和返回值`,
+                highlight: "接口边界",
+                explanation: "混合编程最佳实践：清晰接口边界明确声明，使用 extern C 防护，遵循调用约定，内存管理一致不跨语言释放，错误处理统一，数据类型匹配，文档说明边界，专门测试边界条件。"
+            }
+        ];
+
+        function App() {
+            const [step, setStep] = React.useState(0);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                speakCurrentStep();
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, []);
+
+            const speakCurrentStep = () => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                }
+
+                const currentExample = CODE_EXAMPLES[step];
+                const explanations = [
+                    "GCC 内联汇编语法使用 asm volatile 防止优化，输出操作数在前输入操作数在后，约束符指定使用寄存器还是内存，破坏寄存器列表告诉编译器哪些寄存器被修改需要保存。",
+                    "C 与 C++ 混合编程使用 extern C 声明。C 头文件用 extern C 包裹声明防止名称修饰，C++ 代码可以调用 C 函数。C++ 函数加 extern C 声明后可被 C 代码调用。",
+                    "Python ctypes 调用 C 语言库：加载共享库或 DLL，设置 argtypes 参数类型和 restype 返回类型，调用 C 函数，处理指针和数组，记得释放 C 语言分配的内存防止泄漏。",
+                    "Python C API 扩展：包含 Python.h 头文件，编写 C 语言函数实现功能，用 PyArg_ParseTuple 解析 Python 参数，用 PyLong_FromLong 等返回 Python 对象，定义方法表和模块初始化函数。",
+                    "C 与汇编文件链接：C 代码用 extern 声明汇编函数，汇编函数遵循 AAPCS 调用约定传递参数和返回值，使用 global 伪指令导出符号，最后一起编译链接成可执行文件。",
+                    "混合编程应用案例：性能关键代码用汇编优化如 DSP 函数，Python 调用 C 算法库加速计算，C++ 类包装 C 库便于使用，嵌入式系统 C 固件加 Python 脚本配置。",
+                    "调用约定和 ABI 定义参数如何传递和寄存器使用规则。x86-64 Linux 使用 RDI 到 R9 寄存器传参，ARM 32 位使用 R0 到 R3。caller-saved 临时寄存器由调用者保存，callee-saved 由被调者保存。",
+                    "混合编程最佳实践：清晰接口边界明确声明所有外部函数，使用 extern C 防护，遵循调用约定，内存管理一致不跨语言释放内存，错误处理统一，数据类型匹配，文档说明边界，专门测试边界条件。"
+                ];
+
+                const text = `第${step + 1}步：${currentExample.title}。${explanations[step]}`;
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                const voices = speechSynthesis.getVoices();
+                const xiaoxiaoVoice = voices.find(voice =>
+                    voice.name.includes('Xiaoxiao') ||
+                    voice.name.includes('zh-CN')
+                );
+                if (xiaoxiaoVoice) {
+                    utterance.voice = xiaoxiaoVoice;
+                }
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setStep(prev => (prev + 1) % CODE_EXAMPLES.length);
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            React.useEffect(() => {
+                speakCurrentStep();
+            }, [step]);
+
+            const renderAsmSyntax = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-amber-800 mb-4">内联汇编语法结构</h4>
+                        <div className="space-y-3">
+                            <div className="p-3 bg-white rounded border-l-4 border-amber-500">
+                                <div className="font-bold text-amber-700">asm volatile</div>
+                                <div className="text-xs text-amber-600">防止编译器优化删除</div>
+                            </div>
+                            <div className="p-3 bg-white rounded border-l-4 border-blue-500">
+                                <div className="font-bold text-blue-700">输出操作数</div>
+                                <div className="text-xs text-blue-600">"=r" (result) - 写入寄存器</div>
+                            </div>
+                            <div className="p-3 bg-white rounded border-l-4 border-green-500">
+                                <div className="font-bold text-green-700">输入操作数</div>
+                                <div className="text-xs text-green-600">"r" (a) - 从寄存器读取</div>
+                            </div>
+                            <div className="p-3 bg-white rounded border-l-4 border-red-500">
+                                <div className="font-bold text-red-700">破坏寄存器</div>
+                                <div className="text-xs text-red-600">"memory" - 内存被修改</div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderLanguageBridge = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-amber-800 mb-4">语言桥接机制</h4>
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-3 gap-2">
+                                <div className="p-3 bg-blue-100 rounded text-center">
+                                    <div className="font-bold text-blue-700">C</div>
+                                </div>
+                                <div className="flex items-center justify-center">
+                                    <div className="text-orange-500 animate-link">⇄</div>
+                                </div>
+                                <div className="p-3 bg-green-100 rounded text-center">
+                                    <div className="font-bold text-green-700">C++</div>
+                                </div>
+                            </div>
+                            <div className="text-center text-gray-500">↕ extern "C" ↕</div>
+                            <div className="grid grid-cols-3 gap-2">
+                                <div className="p-3 bg-yellow-100 rounded text-center">
+                                    <div className="font-bold text-yellow-700">C</div>
+                                </div>
+                                <div className="flex items-center justify-center">
+                                    <div className="text-orange-500 animate-link">⇄</div>
+                                </div>
+                                <div className="p-3 bg-purple-100 rounded text-center">
+                                    <div className="font-bold text-purple-700">Python</div>
+                                </div>
+                            </div>
+                            <div className="text-center text-gray-500">↕ ctypes / C API ↕</div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderCallingConv = () => {
+                return (
+                    <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg">
+                        <h4 className="text-lg font-bold text-amber-800 mb-4">ARM AAPCS 调用约定</h4>
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                                <div className="w-20 text-sm font-bold">参数 (4 个)</div>
+                                <div className="flex-1 grid grid-cols-4 gap-1">
+                                    <div className="bg-blue-100 p-2 rounded text-center text-sm">R0</div>
+                                    <div className="bg-blue-100 p-2 rounded text-center text-sm">R1</div>
+                                    <div className="bg-blue-100 p-2 rounded text-center text-sm">R2</div>
+                                    <div className="bg-blue-100 p-2 rounded text-center text-sm">R3</div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-20 text-sm font-bold">返回值</div>
+                                <div className="flex-1">
+                                    <div className="bg-green-100 p-2 rounded text-center text-sm inline-block w-24">R0</div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-20 text-sm font-bold">临时</div>
+                                <div className="flex-1 grid grid-cols-5 gap-1">
+                                    <div className="bg-yellow-100 p-2 rounded text-center text-xs">R0-R3</div>
+                                    <div className="bg-yellow-100 p-2 rounded text-center text-xs">R12</div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-20 text-sm font-bold">保存</div>
+                                <div className="flex-1 grid grid-cols-4 gap-1">
+                                    <div className="bg-purple-100 p-2 rounded text-center text-xs">R4-R8</div>
+                                    <div className="bg-purple-100 p-2 rounded text-center text-xs">R9-R11</div>
+                                    <div className="bg-purple-100 p-2 rounded text-center text-xs">LR</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="text-center mb-6">
+                            <h1 className="text-4xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent mb-2">
+                                1185 - 混合编程完整指南
+                            </h1>
+                            <p className="text-lg text-gray-700">C 语言核心 - 汇编/C++/Python/ 调用约定/ABI</p>
+                            <div className="flex justify-center gap-2 mt-4">
+                                <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-sm">内联汇编</span>
+                                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">C++ 互操作</span>
+                                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">Python 扩展</span>
+                                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">调用约定</span>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-amber-500">
+                                    <h3 className="text-xl font-bold text-amber-700 mb-3">代码示例</h3>
+                                    <div className="bg-gray-50 rounded p-3 font-mono text-sm overflow-x-auto">
+                                        <pre className="text-gray-800 whitespace-pre-wrap">
+                                            {CODE_EXAMPLES[step].code}
+                                        </pre>
+                                    </div>
+                                    <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                        <p className="text-sm text-yellow-800">
+                                            <span className="font-bold">亮点:</span> {CODE_EXAMPLES[step].highlight}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-orange-500">
+                                    <h3 className="text-xl font-bold text-orange-700 mb-3">可视化演示</h3>
+                                    {step === 0 && renderAsmSyntax()}
+                                    {step === 1 && renderLanguageBridge()}
+                                    {step === 2 && (
+                                        <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-amber-800 mb-4">ctypes 调用流程</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-blue-50 rounded">
+                                                    <div className="font-bold text-blue-700">1. 加载库</div>
+                                                    <pre className="text-xs bg-white p-2 rounded mt-1">CDLL('./lib.so')</pre>
+                                                </div>
+                                                <div className="text-center text-gray-400">↓</div>
+                                                <div className="p-3 bg-green-50 rounded">
+                                                    <div className="font-bold text-green-700">2. 设置类型</div>
+                                                    <pre className="text-xs bg-white p-2 rounded mt-1">argtypes/restype</pre>
+                                                </div>
+                                                <div className="text-center text-gray-400">↓</div>
+                                                <div className="p-3 bg-purple-50 rounded">
+                                                    <div className="font-bold text-purple-700">3. 调用函数</div>
+                                                    <pre className="text-xs bg-white p-2 rounded mt-1">lib.func(args)</pre>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 3 && (
+                                        <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-amber-800 mb-4">C 扩展模块结构</h4>
+                                            <div className="space-y-3">
+                                                <div className="p-3 bg-blue-50 rounded">
+                                                    <div className="font-bold text-blue-700">包含 Python.h</div>
+                                                    <div className="text-xs text-blue-600">提供 C API</div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded">
+                                                    <div className="font-bold text-green-700">包装函数</div>
+                                                    <div className="text-xs text-green-600">PyArg_ParseTuple</div>
+                                                </div>
+                                                <div className="p-3 bg-yellow-50 rounded">
+                                                    <div className="font-bold text-yellow-700">方法表</div>
+                                                    <div className="text-xs text-yellow-600">PyMethodDef 数组</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded">
+                                                    <div className="font-bold text-purple-700">初始化函数</div>
+                                                    <div className="text-xs text-purple-600">PyInit_module</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 4 && (
+                                        <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-amber-800 mb-4">C-汇编链接流程</h4>
+                                            <div className="space-y-3">
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div className="p-3 bg-blue-50 rounded">
+                                                        <div className="font-bold text-blue-700">main.c</div>
+                                                        <pre className="text-xs bg-white p-2 rounded mt-1">extern void asm_func();</pre>
+                                                    </div>
+                                                    <div className="p-3 bg-green-50 rounded">
+                                                        <div className="font-bold text-green-700">code.s</div>
+                                                        <pre className="text-xs bg-white p-2 rounded mt-1">.global asm_func</pre>
+                                                    </div>
+                                                </div>
+                                                <div className="text-center text-gray-400">↓ 编译</div>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div className="p-3 bg-yellow-50 rounded">
+                                                        <div className="font-bold text-yellow-700">main.o</div>
+                                                    </div>
+                                                    <div className="p-3 bg-purple-50 rounded">
+                                                        <div className="font-bold text-purple-700">code.o</div>
+                                                    </div>
+                                                </div>
+                                                <div className="text-center text-gray-400">↓ 链接</div>
+                                                <div className="p-3 bg-orange-50 rounded">
+                                                    <div className="font-bold text-orange-700">program</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 5 && (
+                                        <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-amber-800 mb-4">应用场景</h4>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="p-3 bg-blue-50 rounded">
+                                                    <div className="font-bold text-blue-700">汇编优化</div>
+                                                    <div className="text-xs text-blue-600">DSP/ 编解码</div>
+                                                </div>
+                                                <div className="p-3 bg-green-50 rounded">
+                                                    <div className="font-bold text-green-700">Python 原型</div>
+                                                    <div className="text-xs text-green-600">快速开发</div>
+                                                </div>
+                                                <div className="p-3 bg-yellow-50 rounded">
+                                                    <div className="font-bold text-yellow-700">C++ 包装</div>
+                                                    <div className="text-xs text-yellow-600">面向对象</div>
+                                                </div>
+                                                <div className="p-3 bg-purple-50 rounded">
+                                                    <div className="font-bold text-purple-700">嵌入式 Python</div>
+                                                    <div className="text-xs text-purple-600">MicroPython</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {step === 6 && renderCallingConv()}
+                                    {step === 7 && (
+                                        <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg">
+                                            <h4 className="text-lg font-bold text-amber-800 mb-4">最佳实践清单</h4>
+                                            <div className="space-y-2">
+                                                {['清晰接口边界', 'extern C 防护', '遵循调用约定', '内存管理一致', '错误处理统一', '数据类型匹配', '文档说明边界', '测试边界条件'].map((item, i) => (
+                                                    <div key={i} className="flex items-center gap-2 p-2 bg-white rounded border-l-4 border-amber-400">
+                                                        <span className="text-amber-500">✓</span>
+                                                        <span className="text-sm">{item}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-yellow-500">
+                                    <h3 className="text-xl font-bold text-yellow-700 mb-3">关键要点</h3>
+                                    <div className="space-y-3">
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 0 ? 'bg-amber-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-amber-600">汇编:</span> asm volatile
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 1 ? 'bg-orange-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-orange-600">C++:</span> extern "C"
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 2 ? 'bg-yellow-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-yellow-600">Python:</span> ctypes
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 3 ? 'bg-green-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-green-600">扩展:</span> C API
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 4 ? 'bg-blue-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-blue-600">链接:</span> .c + .s
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 5 ? 'bg-purple-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-purple-600">应用:</span> 4 场景
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 6 ? 'bg-pink-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-pink-600">ABI:</span> AAPCS
+                                            </p>
+                                        </div>
+                                        <div className={`p-3 rounded transition-all duration-500 ${step === 7 ? 'bg-teal-100 scale-105' : 'bg-gray-50'}`}>
+                                            <p className="text-sm text-gray-800">
+                                                <span className="font-bold text-teal-600">实践:</span> 8 项清单
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                        <p className="text-sm text-yellow-800">
+                                            {CODE_EXAMPLES[step].explanation}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-r from-amber-500 to-orange-600 rounded-lg shadow-lg p-4 text-white">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm">进度</span>
+                                        <span className="text-sm font-bold">{step + 1} / {CODE_EXAMPLES.length}</span>
+                                    </div>
+                                    <div className="w-full bg-white bg-opacity-30 rounded-full h-2">
+                                        <div
+                                            className="bg-white rounded-full h-2 transition-all duration-500"
+                                            style={{ width: `${((step + 1) / CODE_EXAMPLES.length) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <footer className="text-center mt-8 text-gray-600">
+                            <p className="text-sm">C 语言核心 · 混合编程完整指南 · 多语言协作开发基础</p>
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

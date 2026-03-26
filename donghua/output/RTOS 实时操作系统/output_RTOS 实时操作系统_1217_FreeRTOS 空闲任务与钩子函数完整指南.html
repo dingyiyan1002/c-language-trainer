@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreeRTOS 空闲任务与钩子函数完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(20px); } }
+        @keyframes highlight { 0%, 100% { background-color: #8b5cf6; } 50% { background-color: #a78bfa; } }
+        @keyframes idle { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes hook { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes sleep { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.1; } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s ease-in-out infinite; }
+        .animate-highlight { animation: highlight 2s ease-in-out infinite; }
+        .animate-idle { animation: idle 3s linear infinite; }
+        .animate-hook { animation: hook 2s ease-in-out infinite; }
+        .animate-sleep { animation: sleep 2s ease-in-out infinite; }
+
+        .task-block { transition: all 0.3s ease; }
+        .task-block:hover { transform: scale(1.05); }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#8b5cf6',
+            secondary: '#a78bfa',
+            accent: '#c4b5fd',
+            highlight: '#ddd6fe',
+            text: '#f3e8ff',
+            bg: '#5b21b6'
+        };
+
+        const STEPS = [
+            { title: "空闲任务基础", subtitle: "Idle 任务的作用与优先级" },
+            { title: "空闲任务调度", subtitle: "当无线程可运行时的行为" },
+            { title: "空闲钩子函数", subtitle: "configIDLE_HOOK 回调" },
+            { title: "低功耗应用", subtitle: "在空闲钩子中进入低功耗模式" },
+            { title: "内存回收", subtitle: "使用空闲钩子清理资源" },
+            { title: "运行统计", subtitle: "统计 CPU 空闲时间" },
+            { title: "多核空闲任务", subtitle: "SMP 系统中的空闲任务" },
+            { title: "最佳实践", subtitle: "空闲钩子设计原则与注意事项" }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [idleTaskState, setIdleTaskState] = React.useState('waiting');
+            const [cpuUsage, setCpuUsage] = React.useState(0);
+            const [hookTriggered, setHookTriggered] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const simulateIdleTask = (step) => {
+                setIdleTaskState('waiting');
+                setHookTriggered(false);
+                switch(step) {
+                    case 0:
+                        setCpuUsage(70);
+                        setTimeout(() => setIdleTaskState('ready'), 500);
+                        break;
+                    case 1:
+                        setCpuUsage(30);
+                        setTimeout(() => {
+                            setIdleTaskState('running');
+                            setTimeout(() => setIdleTaskState('waiting'), 1000);
+                        }, 500);
+                        break;
+                    case 2:
+                        setCpuUsage(10);
+                        setTimeout(() => {
+                            setIdleTaskState('running');
+                            setTimeout(() => setHookTriggered(true), 800);
+                        }, 500);
+                        break;
+                    case 3:
+                        setCpuUsage(5);
+                        setTimeout(() => {
+                            setIdleTaskState('lowpower');
+                            setHookTriggered(true);
+                        }, 500);
+                        break;
+                    case 4:
+                        setCpuUsage(20);
+                        setTimeout(() => {
+                            setIdleTaskState('cleaning');
+                            setHookTriggered(true);
+                        }, 500);
+                        break;
+                    case 5:
+                        setCpuUsage(50);
+                        break;
+                    case 6:
+                        setCpuUsage(40);
+                        break;
+                    case 7:
+                        setCpuUsage(60);
+                        break;
+                }
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    simulateIdleTask(currentStep);
+                    setTimeout(() => {
+                        const narration = [
+                            "空闲任务是 FreeRTOS 自动创建的特殊任务，优先级最低 (0)。当所有用户任务都阻塞时，空闲任务自动运行。它确保 CPU 永远有任务可执行。",
+                            "调度器总是选择最高优先级的就绪任务运行。当用户任务全部阻塞或挂起时，空闲任务成为唯一就绪任务，获得 CPU 控制权。",
+                            "空闲钩子函数在空闲任务每次循环时调用。通过配置 configIDLE_HOOK 启用。注意：钩子代码必须快速返回，不能阻塞。",
+                            "低功耗是空闲钩子的典型应用。当系统空闲时，调用 WFI 或 WFE 指令进入睡眠模式，显著降低功耗。适用于电池供电设备。",
+                            "内存回收也可在空闲钩子中执行。清理已删除任务的栈内存，释放不再使用的资源。但要避免长时间占用 CPU。",
+                            "CPU 使用率统计基于空闲时间计算。记录空闲任务运行时间占总时间的比例，反推 CPU 使用率。用于性能分析和优化。",
+                            "多核系统中，每个 CPU 核心都有独立的空闲任务。SMP 调度器确保每个核心在无线程可运行时执行各自的空闲任务。",
+                            "空闲钩子设计原则：快速执行、不能阻塞、不能调用可能阻塞的 API。适合轻量级操作，复杂处理应交给专门任务。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            React.useEffect(() => {
+                if (!isPlaying) {
+                    simulateIdleTask(currentStep);
+                }
+            }, [currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const getIdleTaskColor = () => {
+                switch(idleTaskState) {
+                    case 'running': return 'bg-green-500';
+                    case 'ready': return 'bg-yellow-500';
+                    case 'waiting': return 'bg-gray-500';
+                    case 'lowpower': return 'bg-blue-500 animate-pulse';
+                    case 'cleaning': return 'bg-purple-500';
+                    default: return 'bg-gray-500';
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-purple-900 to-indigo-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">FreeRTOS 空闲任务与钩子函数完整指南</h1>
+                            <p className="text-purple-200 text-lg">Idle 任务、低功耗模式与钩子函数设计</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-purple-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-purple-700 text-purple-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-purple-500/30">
+                                <h3 className="text-xl font-bold text-purple-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 空闲任务自动创建，无需手动创建
+// 优先级固定为 0 (最低)
+// 头文件：#include "task.h"
+
+// 空闲任务钩子函数原型
+void vApplicationIdleHook(void);
+
+// 在 FreeRTOSConfig.h 中启用
+#define configUSE_IDLE_HOOK 1
+
+// 空闲任务特点：
+// - 优先级最低 (tskIDLE_PRIORITY = 0)
+// - 永远处于就绪状态
+// - 当无线程可运行时执行`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 空闲任务调度流程
+void prvIdleTask(void* pvParameters) {
+    for (;;) {
+        // 1. 检查是否有任务被删除需要清理
+        prvCheckTasksWaitingTermination();
+
+        // 2. 调用空闲钩子 (如果启用)
+        #if configUSE_IDLE_HOOK
+            vApplicationIdleHook();
+        #endif
+
+        // 3. 进入低功耗模式 (如果启用)
+        #if configUSE_TICKLESS_IDLE
+            portSUPPRESS_TICKS_AND_SLEEP();
+        #endif
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 空闲钩子函数实现
+// 注意：不能阻塞，必须快速返回
+void vApplicationIdleHook(void) {
+    // 示例：LED 心跳指示
+    static uint32_t counter = 0;
+    if (++counter % 1000 == 0) {
+        GPIO_Toggle(LED_HEARTBEAT);
+    }
+
+    // 示例：后台数据处理
+    if (backgroundDataReady) {
+        processBackgroundData();
+    }
+
+    // 立即返回，不能调用 vTaskDelay 等阻塞 API
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 低功耗应用：进入睡眠模式
+void vApplicationIdleHook(void) {
+    // 关闭中断
+    portENTER_CRITICAL();
+
+    // 检查是否可以进入睡眠
+    if (canEnterSleep) {
+        // 配置唤醒源
+        configureWakeupSources();
+
+        // 进入睡眠模式 (WFI = Wait For Interrupt)
+        __WFI();
+
+        // 唤醒后继续执行
+    }
+
+    portEXIT_CRITICAL();
+}
+
+// 适用场景：电池供电设备
+// 功耗可从 mA 级降至 μA 级`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 内存回收应用
+void vApplicationIdleHook(void) {
+    // 清理已删除任务的资源
+    static uint32_t cleanupCounter = 0;
+
+    if (++cleanupCounter >= 100) {
+        cleanupCounter = 0;
+
+        // 检查是否有等待终止的任务
+        if (uxDeletedTasksWaitingCleaning > 0) {
+            // 释放任务栈内存
+            vFreeDeletedTaskMemory();
+        }
+
+        // 回收其他空闲资源
+        reclaimIdleResources();
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// CPU 使用率统计
+void vApplicationIdleHook(void) {
+    static uint32_t idleCount = 0;
+    static uint32_t totalCount = 0;
+
+    idleCount++;  // 空闲任务运行次数
+    totalCount++;
+
+    // 每秒计算一次 CPU 使用率
+    if (totalCount >= 1000) {
+        float idlePercent = (float)idleCount / totalCount * 100;
+        float cpuUsage = 100.0f - idlePercent;
+
+        printf("CPU 使用率：%.1f%%\\n", cpuUsage);
+
+        idleCount = 0;
+        totalCount = 0;
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 多核系统空闲任务 (SMP)
+// 每个 CPU 核心都有独立的空闲任务
+
+// CPU 0 空闲钩子
+void vApplicationIdleHook0(void) {
+    // CPU 0 特定的空闲处理
+}
+
+// CPU 1 空闲钩子
+void vApplicationIdleHook1(void) {
+    // CPU 1 特定的空闲处理
+}
+
+// 配置 (FreeRTOSConfig.h)
+#define configNUMBER_OF_CORES 2
+#define configUSE_PASSIVE_IDLE_HOOK 1`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-purple-300 overflow-x-auto">
+                                            <code>{`// 最佳实践清单
+void vApplicationIdleHook(void) {
+    // ✅ 可以快速执行的操作
+    - GPIO 切换 (LED 指示)
+    - 简单计数器递增
+    - 标志位检查
+    - 进入 WFI/WFE 睡眠
+
+    // ❌ 禁止的操作
+    - vTaskDelay() 等阻塞 API
+    - vTaskSuspend() / vTaskResume()
+    - 长时间循环处理
+    - 可能阻塞的 IPC 操作
+
+    // 原则：钩子必须快速返回！
+}`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => simulateIdleTask(currentStep)}
+                                            className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            ▶️ 运行模拟
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setIdleTaskState('waiting');
+                                                setHookTriggered(false);
+                                                setCpuUsage(50);
+                                            }}
+                                            className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            🔄 重置
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-purple-500/30">
+                                <h3 className="text-xl font-bold text-purple-400 mb-4">🔬 可视化演示</h3>
+                                <div className="space-y-4">
+                                    {/* CPU 使用率 */}
+                                    <div className="text-center">
+                                        <div className="text-2xl font-bold text-purple-400 mb-2">
+                                            CPU 使用率：{cpuUsage}%
+                                        </div>
+                                        <div className="w-full bg-gray-700 rounded-full h-4">
+                                            <div
+                                                className="bg-gradient-to-r from-purple-500 to-pink-500 h-4 rounded-full transition-all duration-500"
+                                                style={{ width: `${cpuUsage}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+
+                                    {/* 任务状态 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-purple-300 mb-3">任务状态</h4>
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-300">用户任务</span>
+                                                <div className={`w-16 h-8 rounded ${cpuUsage > 50 ? 'bg-green-500 animate-pulse' : 'bg-gray-600'}`}></div>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-300">空闲任务</span>
+                                                <div className={`w-16 h-8 rounded ${getIdleTaskColor()} transition-all duration-300`}></div>
+                                            </div>
+                                        </div>
+                                        <div className="text-center mt-3 text-sm text-purple-300">
+                                            空闲任务状态：
+                                            <span className="font-bold ml-2">{idleTaskState.toUpperCase()}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* 钩子触发指示 */}
+                                    <div className={`rounded-lg p-4 transition-all duration-300 ${
+                                        hookTriggered ? 'bg-purple-800/50 border-2 border-purple-400' : 'bg-gray-800'
+                                    }`}>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-300">空闲钩子</span>
+                                            <div className={`w-4 h-4 rounded-full ${
+                                                hookTriggered ? 'bg-green-500 animate-pulse' : 'bg-gray-600'
+                                            }`}></div>
+                                        </div>
+                                        <div className="text-center mt-2 text-sm">
+                                            {hookTriggered ? (
+                                                <span className="text-green-400 font-bold">✅ 已触发</span>
+                                            ) : (
+                                                <span className="text-gray-500">⏸️ 等待中</span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* 调度示意 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-purple-300 mb-3">调度示意</h4>
+                                        <div className="flex gap-1">
+                                            {[...Array(10)].map((_, i) => (
+                                                <div
+                                                    key={i}
+                                                    className={`flex-1 h-8 rounded transition-all ${
+                                                        i < Math.floor(cpuUsage / 10)
+                                                            ? 'bg-green-500'
+                                                            : 'bg-purple-500'
+                                                    }`}
+                                                ></div>
+                                            ))}
+                                        </div>
+                                        <div className="flex justify-between text-xs text-gray-400 mt-1">
+                                            <span>用户任务</span>
+                                            <span>空闲任务</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-purple-500/30">
+                                <h3 className="text-xl font-bold text-purple-400 mb-4">📖 原理解析</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    {currentStep === 0 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 空闲任务基础</h4>
+                                            <p>空闲任务由 FreeRTOS 内核自动创建，优先级固定为 0。当所有用户任务都阻塞、挂起或删除时，空闲任务成为唯一就绪任务，获得 CPU 控制权。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 调度机制</h4>
+                                            <p>调度器总是选择最高优先级就绪任务。空闲任务优先级最低，只有在无线程可运行时才执行。这确保用户任务总是优先于空闲任务。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 空闲钩子函数</h4>
+                                            <p>通过 configUSE_IDLE_HOOK 启用，每次空闲任务循环时调用。可用于 LED 指示、后台处理、性能监控等。但必须快速返回，不能阻塞。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 低功耗应用</h4>
+                                            <p>空闲钩子是进入低功耗模式的理想位置。调用 WFI/WFE指令睡眠，降低功耗。适用于电池设备，功耗可从 mA 降至μA 级。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 内存回收</h4>
+                                            <p>已删除任务的资源可在空闲钩子中清理。定期调用清理函数，释放栈内存和其他资源。但要控制频率，避免影响实时性。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 CPU 使用统计</h4>
+                                            <p>基于空闲时间比例计算 CPU 使用率。空闲任务运行次数越多，CPU 使用率越低。这是最简单有效的性能监控方法。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 多核系统</h4>
+                                            <p>SMP 系统中每个 CPU 核心都有独立空闲任务。可分别为每个核心定义不同的空闲钩子，实现针对性的低功耗或监控策略。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <div>
+                                            <h4 className="font-bold text-purple-300 mb-2">📌 设计原则</h4>
+                                            <p>空闲钩子必须：快速执行、不能阻塞、不能调用可能阻塞的 API。适合轻量操作，复杂处理应交给专门任务。</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-purple-600 hover:bg-purple-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-purple-500/30">
+                            <h2 className="text-2xl font-bold text-purple-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

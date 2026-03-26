@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 定时器 TIM 完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes count { 0% { transform: translateY(0); } 100% { transform: translateY(-20px); } }
+        @keyframes overflow { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+        @keyframes pwm { 0% { height: 10%; } 50% { height: 90%; } 100% { height: 10%; } }
+        @keyframes capture { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-count { animation: count 1s linear infinite; }
+        .animate-overflow { animation: overflow 0.5s ease-in-out infinite; }
+        .animate-pwm { animation: pwm 2s ease-in-out infinite; }
+        .animate-capture { animation: capture 0.3s ease-in-out; }
+
+        .counter-block { transition: all 0.3s ease; }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#3b82f6',
+            secondary: '#60a5fa',
+            accent: '#93c5fd',
+            highlight: '#dbeafe',
+            text: '#eff6ff',
+            bg: '#1e40af'
+        };
+
+        const STEPS = [
+            { title: "定时器分类", subtitle: "高级/通用/基本定时器" },
+            { title: "时基单元", subtitle: "CNT/PSC/ARR 寄存器" },
+            { title: "向上计数模式", subtitle: "CNT 从 0 计数到 ARR" },
+            { title: "向下计数模式", subtitle: "CNT 从 ARR 计数到 0" },
+            { title: "中央对齐模式", subtitle: "向上向下交替计数" },
+            { title: "PWM 输出", subtitle: "TIMx_CCRx 比较输出" },
+            { title: "输入捕获", subtitle: "捕获外部信号边沿" },
+            { title: "定时器中断", subtitle: "更新中断与捕获中断" }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [counterValue, setCounterValue] = React.useState(0);
+            const [prescaler, setPrescaler] = React.useState(83);
+            const [autoReload, setAutoReload] = React.useState(9999);
+            const [countDirection, setCountDirection] = React.useState('up');
+            const [pwmDutyCycle, setPwmDutyCycle] = React.useState(50);
+            const [captureValue, setCaptureValue] = React.useState(0);
+            const [updateEvent, setUpdateEvent] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const simulateCounter = (direction) => {
+                let count = 0;
+                const interval = setInterval(() => {
+                    if (direction === 'up') {
+                        count = (count + 1) % (autoReload + 1);
+                        if (count === 0) setUpdateEvent(true);
+                        else setUpdateEvent(false);
+                    } else {
+                        count = count === 0 ? autoReload : count - 1;
+                        if (count === autoReload) setUpdateEvent(true);
+                        else setUpdateEvent(false);
+                    }
+                    setCounterValue(count);
+                }, 50);
+
+                return () => clearInterval(interval);
+            };
+
+            const simulatePwm = () => {
+                // PWM simulation handled visually
+            };
+
+            const simulateCapture = () => {
+                setCaptureValue(Math.floor(Math.random() * autoReload));
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    setCounterValue(0);
+                    setTimeout(() => {
+                        const narration = [
+                            "STM32 定时器分为 3 类：高级定时器 (TIM1/TIM8) 功能最全，支持互补 PWM、死区插入；通用定时器 (TIM2-TIM5) 常用功能；基本定时器 (TIM6/TIM7) 仅基本计数。",
+                            "时基单元是定时器核心：CNT 计数器当前值，PSC 预分频器分频系数，ARR 自动重装载值。计数频率 = 时钟 / (PSC+1)，溢出时间 = (ARR+1) / 计数频率。",
+                            "向上计数模式：CNT 从 0 递增到 ARR，产生更新事件后重置为 0。最简单的计数模式，适用于定时、脉冲计数等应用。",
+                            "向下计数模式：CNT 从 ARR 递减到 0，产生更新事件后重载为 ARR。适用于需要初始值最大的应用场景。",
+                            "中央对齐模式：CNT 先从 0 计数到 ARR，再从 ARR 计数到 0。对称计数减少 EMI，适用于电机控制等对称性要求高的场合。",
+                            "PWM 输出：通过 TIMx_CCRx 设定占空比。CCR 值越小占空比越小。频率 = 时钟/((PSC+1)*(ARR+1))，占空比 = CCR/(ARR+1)。",
+                            "输入捕获：检测外部信号边沿，捕获时 CNT 值锁存到 CCR 寄存器。可测量脉冲宽度、频率、占空比。适用于编码器、超声波测距。",
+                            "定时器中断：更新中断 (CNT 溢出)、捕获中断 (边沿触发)。更新中断适用于精确定时，捕获中断适用于事件响应。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            React.useEffect(() => {
+                if (isPlaying && currentStep >= 2 && currentStep <= 4) {
+                    const cleanup = simulateCounter(countDirection);
+                    return cleanup;
+                }
+            }, [isPlaying, currentStep, countDirection, autoReload]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const calculateFrequency = () => {
+                const clock = 72000000; // 72MHz
+                const freq = clock / ((prescaler + 1) * (autoReload + 1));
+                return freq.toFixed(2);
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-blue-900 to-indigo-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 定时器 TIM 完整指南</h1>
+                            <p className="text-blue-200 text-lg">时基单元、PWM 输出与输入捕获</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-blue-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-blue-700 text-blue-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-blue-500/30">
+                                <h3 className="text-xl font-bold text-blue-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-blue-300 overflow-x-auto">
+                                            <code>{`// 定时器分类 (以 STM32F1 为例)
+
+// 高级定时器
+TIM1 - 72MHz, 16 位，互补 PWM，死区
+TIM8 - 72MHz, 16 位，互补 PWM，死区
+
+// 通用定时器
+TIM2 - 72MHz, 32 位，4 通道捕获/比较
+TIM3 - 72MHz, 16 位，4 通道捕获/比较
+TIM4 - 72MHz, 16 位，4 通道捕获/比较
+TIM5 - 72MHz, 32 位，4 通道捕获/比较
+
+// 基本定时器
+TIM6 - 72MHz, 16 位，仅基本计数
+TIM7 - 72MHz, 16 位，仅基本计数`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-blue-300 overflow-x-auto">
+                                            <code>{`// 时基单元配置
+void TIM_Base_Init(void) {
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+
+    // 预分频器 (72MHz → 1MHz = 1us)
+    TIM2->PSC = 71;  // 72-1
+
+    // 自动重装载值 (1ms 溢出)
+    TIM2->ARR = 999;  // 1000-1
+
+    // 计数器初始化
+    TIM2->CNT = 0;
+
+    // 使能定时器
+    TIM2->CR1 |= TIM_CR1_CEN;
+}
+
+// 溢出时间 = (PSC+1)×(ARR+1) / 时钟`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-blue-300 overflow-x-auto">
+                                            <code>{`// 向上计数模式
+void TIM_UpCounter_Init(void) {
+    TIM2->PSC = 7199;    // 72MHz/7200 = 10kHz
+    TIM2->ARR = 9999;    // 10kHz/10000 = 1Hz
+    TIM2->CNT = 0;
+
+    // CR1: 向上计数 (DIR=0)
+    TIM2->CR1 &= ~TIM_CR1_DIR;
+    TIM2->CR1 |= TIM_CR1_ARPE;  // 自动重装载预装载
+
+    // 使能更新中断
+    TIM2->DIER |= TIM_DIER_UIE;
+    NVIC_EnableIRQ(TIM2_IRQn);
+
+    TIM2->CR1 |= TIM_CR1_CEN;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-blue-300 overflow-x-auto">
+                                            <code>{`// 向下计数模式
+void TIM_DownCounter_Init(void) {
+    TIM2->PSC = 7199;
+    TIM2->ARR = 9999;
+    TIM2->CNT = 9999;  // 从 ARR 开始
+
+    // CR1: 向下计数 (DIR=1)
+    TIM2->CR1 |= TIM_CR1_DIR;
+    TIM2->CR1 |= TIM_CR1_ARPE;
+
+    TIM2->DIER |= TIM_DIER_UIE;
+    NVIC_EnableIRQ(TIM2_IRQn);
+
+    TIM2->CR1 |= TIM_CR1_CEN;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-blue-300 overflow-x-auto">
+                                            <code>{`// 中央对齐模式
+void TIM_CenterAligned_Init(void) {
+    TIM2->PSC = 7199;
+    TIM2->ARR = 9999;
+    TIM2->CNT = 0;
+
+    // CR1: 中央对齐 (CMS=01/10/11)
+    TIM2->CR1 &= ~TIM_CR1_CMS;
+    TIM2->CR1 |= (0x1 << 5);  // CMS=01
+
+    // 中央对齐频率 = 向上计数的一半
+    TIM2->DIER |= TIM_DIER_UIE;
+    TIM2->CR1 |= TIM_CR1_CEN;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-blue-300 overflow-x-auto">
+                                            <code>{`// PWM 输出配置 (TIM3_CH1 = PA6)
+void TIM_PWM_Init(void) {
+    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    // PA6 复用推挽输出 (AF2 = TIM3)
+    GPIOA->AFRL &= ~(0xF << 24);
+    GPIOA->AFRL |= (0x2 << 24);
+    GPIOA->MODER &= ~(0x3 << 12);
+    GPIOA->MODER |= (0x2 << 12);
+
+    TIM3->PSC = 71;  // 1MHz
+    TIM3->ARR = 999; // 1kHz
+    TIM3->CCR1 = 500; // 50% 占空比
+
+    // 通道 1: PWM 模式 1, 预装载使能
+    TIM3->CCMR1 |= TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1PE;
+    TIM3->CCER |= TIM_CCER_CC1E;  // 使能输出
+
+    TIM3->CR1 |= TIM_CR1_CEN;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-blue-300 overflow-x-auto">
+                                            <code>{`// 输入捕获配置 (测量频率)
+void TIM_InputCapture_Init(void) {
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+
+    // PA0 = TIM2_CH1 浮空输入
+    GPIOA->MODER &= ~(0x3 << 0);
+
+    TIM2->PSC = 71;  // 1MHz = 1us/计数
+    TIM2->ARR = 0xFFFF;
+
+    // 通道 1: 捕获上升沿
+    TIM2->CCMR1 |= TIM_CCMR1_CC1S_0;  // IC1=TI1
+    TIM2->CCER |= TIM_CCER_CC1P;      // 上升沿
+    TIM2->DIER |= TIM_DIER_CC1IE;     // 捕获中断
+    NVIC_EnableIRQ(TIM2_IRQn);
+
+    TIM2->CR1 |= TIM_CR1_CEN;
+}
+
+void TIM2_IRQHandler(void) {
+    if (TIM2->SR & TIM_SR_CC1IF) {
+        capture = TIM2->CCR1;  // 读取捕获值
+        TIM2->SR &= ~TIM_SR_CC1IF;
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-blue-300 overflow-x-auto">
+                                            <code>{`// 定时器中断处理
+void TIM2_IRQHandler(void) {
+    // 更新中断
+    if (TIM2->SR & TIM_SR_UIF) {
+        TIM2->SR &= ~TIM_SR_UIF;  // 清除标志
+        timer_overflow_count++;
+        // 定时任务 (如 1ms 基准)
+    }
+
+    // 捕获中断
+    if (TIM2->SR & TIM_SR_CC1IF) {
+        TIM2->SR &= ~TIM_SR_CC1IF;
+        capture_value = TIM2->CCR1;
+        // 处理捕获事件
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => setCounterValue(0)}
+                                            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            ▶️ 运行模拟
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setCounterValue(0);
+                                                setUpdateEvent(false);
+                                            }}
+                                            className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            🔄 重置
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-blue-500/30">
+                                <h3 className="text-xl font-bold text-blue-400 mb-4">🔬 定时器可视化</h3>
+                                <div className="space-y-4">
+                                    {/* 频率计算 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <div className="grid grid-cols-2 gap-4 mb-4">
+                                            <div>
+                                                <label className="text-xs text-gray-400">PSC 预分频</label>
+                                                <input
+                                                    type="number"
+                                                    value={prescaler}
+                                                    onChange={(e) => setPrescaler(parseInt(e.target.value) || 0)}
+                                                    className="w-full bg-gray-700 text-white px-2 py-1 rounded"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-400">ARR 重装载</label>
+                                                <input
+                                                    type="number"
+                                                    value={autoReload}
+                                                    onChange={(e) => setAutoReload(parseInt(e.target.value) || 0)}
+                                                    className="w-full bg-gray-700 text-white px-2 py-1 rounded"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="text-center text-blue-400">
+                                            输出频率：<span className="text-2xl font-bold">{calculateFrequency()} Hz</span>
+                                        </div>
+                                    </div>
+
+                                    {/* 计数器可视化 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-blue-300 mb-3">计数器</h4>
+                                        <div className="text-center">
+                                            <div className="text-5xl font-bold text-blue-400 mb-2 font-mono">
+                                                {counterValue.toString().padStart(5, '0')}
+                                            </div>
+                                            <div className="text-sm text-gray-400">
+                                                方向：{countDirection === 'up' ? '↑ 向上' : '↓ 向下'}
+                                            </div>
+                                        </div>
+                                        <div className="w-full bg-gray-700 rounded-full h-4 mt-3">
+                                            <div
+                                                className="bg-gradient-to-r from-blue-500 to-cyan-500 h-4 rounded-full transition-all"
+                                                style={{ width: `${(counterValue / autoReload) * 100}%` }}
+                                            ></div>
+                                        </div>
+                                        <div className={`text-center mt-2 text-sm ${updateEvent ? 'text-green-400 animate-overflow' : 'text-gray-500'}`}>
+                                            {updateEvent ? '⚡ 更新事件!' : '等待溢出'}
+                                        </div>
+                                    </div>
+
+                                    {/* 模式切换 */}
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setCountDirection('up')}
+                                            className={`flex-1 py-2 rounded transition ${
+                                                countDirection === 'up'
+                                                    ? 'bg-blue-600 text-white'
+                                                    : 'bg-gray-700 text-gray-400'
+                                            }`}
+                                        >
+                                            ↑ 向上
+                                        </button>
+                                        <button
+                                            onClick={() => setCountDirection('down')}
+                                            className={`flex-1 py-2 rounded transition ${
+                                                countDirection === 'down'
+                                                    ? 'bg-blue-600 text-white'
+                                                    : 'bg-gray-700 text-gray-400'
+                                            }`}
+                                        >
+                                            ↓ 向下
+                                        </button>
+                                    </div>
+
+                                    {/* PWM 占空比 */}
+                                    {currentStep === 5 && (
+                                        <div className="bg-gray-800 rounded-lg p-4">
+                                            <h4 className="text-lg font-bold text-blue-300 mb-3">PWM 输出</h4>
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                value={pwmDutyCycle}
+                                                onChange={(e) => setPwmDutyCycle(parseInt(e.target.value))}
+                                                className="w-full"
+                                            />
+                                            <div className="text-center text-blue-400 mt-2">
+                                                占空比：<span className="font-bold">{pwmDutyCycle}%</span>
+                                            </div>
+                                            <div className="flex items-end gap-1 h-16 mt-2">
+                                                <div
+                                                    className="flex-1 bg-blue-500 animate-pwm transition-all"
+                                                    style={{ height: `${pwmDutyCycle}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* 输入捕获 */}
+                                    {currentStep === 6 && (
+                                        <div className="bg-gray-800 rounded-lg p-4">
+                                            <h4 className="text-lg font-bold text-blue-300 mb-3">输入捕获</h4>
+                                            <div className="text-center text-3xl font-bold text-blue-400 font-mono">
+                                                {captureValue}
+                                            </div>
+                                            <button
+                                                onClick={simulateCapture}
+                                                className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded transition"
+                                            >
+                                                📥 模拟捕获
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-blue-500/30">
+                                <h3 className="text-xl font-bold text-blue-400 mb-4">📖 配置指南</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    {currentStep === 0 && (
+                                        <div>
+                                            <h4 className="font-bold text-blue-300 mb-2">📌 定时器分类</h4>
+                                            <p>高级定时器 (TIM1/8)：互补输出、死区控制、刹车，用于电机控制。通用定时器 (TIM2-5)：4 通道捕获/比较、PWM。基本定时器 (TIM6/7)：仅定时功能。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <div>
+                                            <h4 className="font-bold text-blue-300 mb-2">📌 时基单元</h4>
+                                            <p>CNT 计数器、PSC 预分频、ARR 自动重装载。时钟频率经 PSC 分频后驱动 CNT，CNT 达到 ARR 时产生更新事件并重置。溢出时间 = (PSC+1)×(ARR+1)/时钟。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <div>
+                                            <h4 className="font-bold text-blue-300 mb-2">📌 向上计数</h4>
+                                            <p>最简单模式：CNT 从 0 递增到 ARR，溢出后回 0 并产生更新事件。适用于定时、脉冲计数。DIR=0 选择向上。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <div>
+                                            <h4 className="font-bold text-blue-300 mb-2">📌 向下计数</h4>
+                                            <p>CNT 从 ARR 递减到 0，溢出后重载为 ARR。DIR=1 选择向下。适用于倒计时等场景。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <div>
+                                            <h4 className="font-bold text-blue-300 mb-2">📌 中央对齐</h4>
+                                            <p>CMS 位选择中央对齐模式。CNT 先向上到 ARR，再向下到 0。对称波形减少 EMI，电机控制常用。频率为向上计数的一半。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <div>
+                                            <h4 className="font-bold text-blue-300 mb-2">📌 PWM 输出</h4>
+                                            <p>CCMRx 配置 PWM 模式，CCRx 设定占空比。PWM 模式 1：CNT&lt;CCR 时输出有效电平。频率由 PSC 和 ARR 决定，占空比由 CCR/ARR 决定。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <div>
+                                            <h4 className="font-bold text-blue-300 mb-2">📌 输入捕获</h4>
+                                            <p>CCMRx 配置捕获源和边沿，外部信号边沿触发时 CNT 值锁存到 CCR。可测频率、脉宽、占空比。编码器接口是特殊的双通道捕获。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <div>
+                                            <h4 className="font-bold text-blue-300 mb-2">📌 定时器中断</h4>
+                                            <p>更新中断 (UIF)：CNT 溢出时触发。捕获中断 (CCxIF)：边沿捕获时触发。ISR 中必须清除标志位。</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-blue-600 hover:bg-blue-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-blue-500/30">
+                            <h2 className="text-2xl font-bold text-blue-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

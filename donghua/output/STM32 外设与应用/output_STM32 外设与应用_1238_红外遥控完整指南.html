@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 红外遥控完整指南 - 题库动画生成器</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { visibility: visible; } 50% { visibility: hidden; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 100% { transform: translateY(20px); } }
+        @keyframes press { 0% { transform: scale(1); } 50% { transform: scale(0.95); } 100% { transform: scale(1); } }
+        @keyframes release { 0% { transform: scale(0.95); } 100% { transform: scale(1); } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        @keyframes jitter { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+        @keyframes debounce { 0% { transform: scale(1); } 50% { transform: scale(0.8); } 100% { transform: scale(1); } }
+        @keyframes longpress { 0% { transform: scale(1); } 100% { transform: scale(1.1); } }
+        @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(255,255,0,0.3); } 50% { background-color: rgba(255,255,0,0.8); } }
+        @keyframes activate { 0% { box-shadow: 0 0 5px currentColor; } 50% { box-shadow: 0 0 20px currentColor; } 100% { box-shadow: 0 0 5px currentColor; } }
+        @keyframes wave { 0% { transform: rotate(0deg); } 25% { transform: rotate(-10deg); } 75% { transform: rotate(10deg); } 100% { transform: rotate(0deg); } }
+        @keyframes staircase { 0% { transform: translateY(0); } 25% { transform: translateY(-5px); } 50% { transform: translateY(-10px); } 75% { transform: translateY(-15px); } 100% { transform: translateY(0); } }
+        @keyframes smooth { 0% { transform: translateY(0); } 100% { transform: translateY(-20px); } }
+        @keyframes triangle { 0% { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); } 50% { clip-path: polygon(50% 100%, 0% 0%, 100% 0%); } 100% { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); } }
+        @keyframes noise { 0% { transform: translate(0,0); } 25% { transform: translate(-2px,2px); } 50% { transform: translate(2px,-2px); } 75% { transform: translate(-2px,-2px); } 100% { transform: translate(0,0); } }
+        @keyframes tick { 0% { transform: rotate(-30deg); } 100% { transform: rotate(0deg); } }
+        @keyframes second { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes update { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+        @keyframes alarm { 0%, 100% { background-color: rgba(255,0,0,0.3); } 50% { background-color: rgba(255,0,0,0.8); } }
+        @keyframes backup { 0% { transform: translateX(0); } 50% { transform: translateX(10px); } 100% { transform: translateX(0); } }
+        @keyframes circular { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes transfer { 0% { transform: translateX(0) scale(1); } 50% { transform: translateX(50px) scale(0.8); } 100% { transform: translateX(0) scale(1); } }
+        @keyframes read { 0% { transform: scaleX(1); } 50% { transform: scaleX(1.2); } 100% { transform: scaleX(1); } }
+        @keyframes write { 0% { transform: scaleY(1); } 50% { transform: scaleY(0.8); } 100% { transform: scaleY(1); } }
+        @keyframes move { 0% { transform: translate(0,0); } 25% { transform: translate(10px,0); } 50% { transform: translate(20px,10px); } 75% { transform: translate(10px,20px); } 100% { transform: translate(0,0); } }
+        @keyframes irWave { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+        @keyframes carrierWave { 0% { transform: scaleX(1); } 100% { transform: scaleX(2); } }
+        @keyframes bitPulse { 0% { height: 100%; } 50% { height: 50%; } 100% { height: 100%; } }
+        .animate-pulse { animation: pulse 2s infinite; }
+        .animate-blink { animation: blink 1s infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s infinite; }
+        .animate-press { animation: press 0.2s ease-out; }
+        .animate-release { animation: release 0.2s ease-out; }
+        .animate-bounce { animation: bounce 1s infinite; }
+        .animate-jitter { animation: jitter 0.3s infinite; }
+        .animate-debounce { animation: debounce 0.3s ease-out; }
+        .animate-longpress { animation: longpress 1.5s infinite; }
+        .animate-scan { animation: scan 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s infinite; }
+        .animate-activate { animation: activate 1s infinite; }
+        .animate-wave { animation: wave 1s infinite; }
+        .animate-staircase { animation: staircase 2s infinite; }
+        .animate-smooth { animation: smooth 1.5s infinite; }
+        .animate-triangle { animation: triangle 2s infinite; }
+        .animate-noise { animation: noise 0.3s infinite; }
+        .animate-tick { animation: tick 0.3s ease-out; }
+        .animate-second { animation: second 1s linear infinite; }
+        .animate-update { animation: update 1s infinite; }
+        .animate-alarm { animation: alarm 0.5s infinite; }
+        .animate-backup { animation: backup 0.5s infinite; }
+        .animate-circular { animation: circular 1s linear infinite; }
+        .animate-transfer { animation: transfer 1s infinite; }
+        .animate-read { animation: read 0.5s ease-out; }
+        .animate-write { animation: write 0.5s ease-out; }
+        .animate-move { animation: move 2s infinite; }
+        .animate-irWave { animation: irWave 0.5s infinite; }
+        .animate-carrierWave { animation: carrierWave 0.026s infinite; }
+        .animate-bitPulse { animation: bitPulse 1s infinite; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#8b5cf6',
+            secondary: '#7c3aed',
+            accent: '#a78bfa',
+            light: '#ede9fe',
+            dark: '#4c1d95',
+            highlight: '#c4b5fd'
+        };
+
+        const STEPS = [
+            {
+                title: "红外遥控基础",
+                narration: "红外遥控使用 38kHz 载波调制信号。NEC 协议最常见，32 位数据包含地址码和命令码。红外接收头解调后输出 TTL 电平。",
+                code: `// NEC 协议帧格式
+// ┌──────┬────────┬────────┬────────┐
+// │引导码│ 地址码 │ 地址反 │ 命令码 │
+// │9ms   │ 8 位    │ 8 位    │ 8 位    │
+// └──────┴────────┴────────┴────────┘
+//         命令反   │ 32 位总计
+//         8 位     │
+// └────────────────┘
+
+// NEC 协议参数
+// 载波频率：38kHz (周期 26.3μs)
+// 引导码：9ms 载波 + 4.5ms 间隔
+// 逻辑 0:560μs 载波 + 560μs 间隔
+// 逻辑 1:560μs 载波 + 1.68ms 间隔
+// 帧重复：110ms 周期
+
+// 常见遥控器参数
+// 工作电压：3.3V-5V
+// 有效距离：5-10 米
+// 辐射角度：±30°`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-purple-900 to-purple-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">NEC 协议帧格式</div>
+                        {/* 帧结构 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="flex items-center space-x-1">
+                                <div className="bg-red-600 rounded p-2 border-2 border-red-400">
+                                    <div className="text-white text-xs text-center">引导码</div>
+                                    <div className="text-red-200 text-xs text-center">9ms+4.5ms</div>
+                                </div>
+                                <div className="bg-blue-600 rounded p-2 border-2 border-blue-400">
+                                    <div className="text-white text-xs text-center">地址码</div>
+                                    <div className="text-blue-200 text-xs text-center">8 位</div>
+                                </div>
+                                <div className="bg-green-600 rounded p-2 border-2 border-green-400">
+                                    <div className="text-white text-xs text-center">地址反码</div>
+                                    <div className="text-green-200 text-xs text-center">8 位</div>
+                                </div>
+                                <div className="bg-yellow-600 rounded p-2 border-2 border-yellow-400">
+                                    <div className="text-white text-xs text-center">命令码</div>
+                                    <div className="text-yellow-200 text-xs text-center">8 位</div>
+                                </div>
+                                <div className="bg-purple-600 rounded p-2 border-2 border-purple-400">
+                                    <div className="text-white text-xs text-center">命令反码</div>
+                                    <div className="text-purple-200 text-xs text-center">8 位</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* 38kHz 载波 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <div className="text-white text-xs mb-2 text-center">38kHz 载波 (周期 26.3μs)</div>
+                            <svg width="200" height="40">
+                                {Array.from({length: 40}).map((_, i) => (
+                                    <rect key={i} x={i*5} y="10" width="2" height="20" fill="#a78bfa" className="animate-carrierWave" />
+                                ))}
+                            </svg>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "NEC 协议：最常用红外遥控协议",
+                    "32 位数据：地址 8 位 + 地址反 8 位 + 命令 8 位 + 命令反 8 位",
+                    "引导码：9ms 载波 +4.5ms 间隔",
+                    "逻辑 0:560μs 载波 +560μs 间隔=1.12ms",
+                    "逻辑 1:560μs 载波 +1.68ms 间隔=2.24ms",
+                    "38kHz 载波：红外 LED 调制频率",
+                    "接收头：解调输出 TTL 电平",
+                    "帧重复：按键持续时每 110ms 重复"
+                ]
+            },
+            {
+                title: "工作原理",
+                narration: "红外发射管发射 38kHz 调制信号，接收头接收并解调。通过检测低电平间隔时间来判断逻辑 0 或 1。",
+                code: `// 红外信号解调原理
+// 发射端：GPIO → 38kHz PWM → 红外 LED
+// 接收端：红外接收头 → TTL 电平 → GPIO 输入
+//
+// 接收头输出特性:
+// - 收到 38kHz 信号：输出低电平
+// - 无信号：输出高电平 (上拉)
+//
+// NEC 编码波形:
+// 引导码：━━━━━━━━━        (9ms 低)
+//         ━━━━━━━━━       (4.5ms 高)
+// 逻辑 0:  ━   ━           (560μs 低 +560μs 高)
+// 逻辑 1:  ━       ━       (560μs 低 +1.68ms 高)
+//
+// 解码方法:
+// 1. 检测引导码下降沿
+// 2. 定时测量低电平宽度
+// 3. 根据高电平时间判断 0/1`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-purple-900 to-purple-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">信号调制解调</div>
+                        {/* 发射接收流程 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="flex items-center space-x-4">
+                                {/* MCU */}
+                                <div className="bg-blue-800 rounded p-3 border-2 border-blue-500">
+                                    <div className="text-white text-xs text-center">STM32</div>
+                                    <div className="text-cyan-300 text-xs text-center">数据</div>
+                                </div>
+                                {/* 调制 */}
+                                <div className="text-white text-2xl">→</div>
+                                {/* 发射 */}
+                                <div className="bg-red-800 rounded p-3 border-2 border-red-500 animate-irWave">
+                                    <div className="text-white text-xs text-center">红外发射</div>
+                                    <div className="text-red-300 text-xs text-center">38kHz</div>
+                                </div>
+                                {/* 空间传输 */}
+                                <div className="text-white text-2xl">~~~&gt;</div>
+                                {/* 接收 */}
+                                <div className="bg-green-800 rounded p-3 border-2 border-green-500">
+                                    <div className="text-white text-xs text-center">接收头</div>
+                                    <div className="text-green-300 text-xs text-center">解调</div>
+                                </div>
+                                {/* 解调 */}
+                                <div className="text-white text-2xl">→</div>
+                                {/* MCU */}
+                                <div className="bg-blue-800 rounded p-3 border-2 border-blue-500">
+                                    <div className="text-white text-xs text-center">STM32</div>
+                                    <div className="text-cyan-300 text-xs text-center">解码</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* 波形对比 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <div className="text-white text-xs mb-2 text-center">调制 vs 解调</div>
+                            <svg width="300" height="50">
+                                {/* 调制信号 */}
+                                <polyline points="0,15 20,15 20,25 40,25 40,15 60,15 60,25 80,25 80,15 100,15" fill="none" stroke="#ef4444" strokeWidth="2" />
+                                <text x="5" y="12" fill="#ef4444" fontSize="8">38kHz</text>
+                                {/* 解调信号 */}
+                                <polyline points="0,40 50,40 50,35 100,35 100,40" fill="none" stroke="#22c55e" strokeWidth="2" />
+                                <text x="5" y="33" fill="#22c55e" fontSize="8">TTL</text>
+                            </svg>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "发射：GPIO 输出 38kHz PWM 调制",
+                    "红外 LED: 发射 940nm 红外光",
+                    "接收头：内置 PIN 光电二极管",
+                    "解调：滤除 38kHz 载波",
+                    "输出：TTL 电平 (反相)",
+                    "上拉电阻：无信号时高电平",
+                    "检测：测量低电平间隔时间",
+                    "判断：&gt;1ms 为 1，&lt;1ms 为 0"
+                ]
+            },
+            {
+                title: "硬件连接",
+                narration: "红外接收头 VCC 接 3.3V，GND 接地，OUT 接 GPIO(如 PA0)。红外发射管通过三极管驱动，PWM 信号接基极。",
+                code: `// STM32 与红外模块连接
+// 接收头 (VS1838B/HS0038)
+// VCC → 3.3V
+// GND → GND
+// OUT → PA0 (定时器输入捕获/外部中断)
+
+// 红外发射电路
+// STM32 PWM → 1kΩ → 三极管基极
+// 发射管 + → 5V(串联 100Ω限流)
+// 发射管 - → 三极管集电极
+// 三极管发射极 → GND
+
+// 推荐引脚
+// 接收：PA0(TIM2_CH1 输入捕获)
+//       或任意 EXTI 引脚
+// 发射：PA0(TIM2_CH1 PWM 输出)
+//       或 GPIO+ 软件模拟
+
+// 接收头上拉电阻
+// 可选：10kΩ上拉增强抗干扰`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-purple-900 to-purple-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">硬件连接图</div>
+                        {/* 接收头 */}
+                        <div className="absolute top-16 left-8">
+                            <div className="bg-gray-800 rounded-lg p-3 border-2 border-gray-500">
+                                <div className="text-white text-xs text-center font-bold">接收头</div>
+                                <div className="grid grid-cols-3 gap-2 mt-2">
+                                    <div className="text-red-300 text-xs text-center">V</div>
+                                    <div className="text-gray-300 text-xs text-center">G</div>
+                                    <div className="text-green-300 text-xs text-center">O</div>
+                                </div>
+                                <div className="text-white text-xs text-center mt-1">VS1838B</div>
+                            </div>
+                            <div className="text-white text-xs text-center mt-2">→ PA0</div>
+                        </div>
+                        {/* STM32 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 w-24 h-32 bg-gradient-to-b from-blue-800 to-blue-900 rounded-lg border-2 border-blue-500">
+                            <div className="text-white text-xs text-center py-2 font-bold">STM32</div>
+                            <div className="text-cyan-300 text-xs text-center font-mono mt-4">PA0</div>
+                            <div className="text-purple-300 text-xs text-center">TIM2_CH1</div>
+                        </div>
+                        {/* 发射管 */}
+                        <div className="absolute top-16 right-8">
+                            <div className="bg-red-800 rounded-lg p-3 border-2 border-red-500 animate-irWave">
+                                <div className="text-white text-xs text-center font-bold">发射管</div>
+                                <div className="text-red-300 text-xs text-center mt-1">940nm</div>
+                                <div className="text-red-300 text-xs text-center">38kHz</div>
+                            </div>
+                            <div className="text-white text-xs text-center mt-2">← PWM</div>
+                        </div>
+                        {/* 连线 */}
+                        <svg className="absolute inset-0 w-full h-full">
+                            <line x1="140" y1="120" x2="180" y2="120" stroke="#22d3ee" strokeWidth="2" />
+                            <line x1="230" y1="120" x2="270" y2="120" stroke="#ef4444" strokeWidth="2" />
+                        </svg>
+                    </div>
+                ),
+                explanations: [
+                    "VS1838B: 常用红外接收头",
+                    "VCC:3.3V 供电 (兼容 5V)",
+                    "GND: 共地连接",
+                    "OUT: 解调后 TTL 输出",
+                    "PA0: 输入捕获或 EXTI 引脚",
+                    "发射管：940nm 波长",
+                    "限流电阻：100Ω串联",
+                    "三极管驱动：扩大电流"
+                ]
+            },
+            {
+                title: "GPIO 配置",
+                narration: "配置 PA0 为定时器输入捕获模式。检测下降沿触发捕获，测量低电平和高电平时间。",
+                code: `void IR_GPIO_Init(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+
+    // PA0(TIM2_CH1): 浮空输入 (接收头推挽输出)
+    GPIOA->CRL &= ~0x0000000F;
+
+    // 定时器 2 输入捕获配置
+    TIM2->PSC = 71;  // 72MHz/72 = 1MHz (1μs 分辨率)
+    TIM2->ARR = 0xFFFF;  // 最大 65ms
+    TIM2->CCMR1 |= TIM_CCMR1_CC1S_0;  // CH1 输入 IC1
+    TIM2->CCER |= TIM_CCER_CC1P;  // 下降沿捕获
+    TIM2->DIER |= TIM_DIER_CC1IE;  // 捕获中断
+    TIM2->CR1 |= TIM_CR1_CEN;  // 使能定时器
+    NVIC_EnableIRQ(TIM2_IRQn);
+}
+
+// 外部中断方式 (简单)
+void IR_EXTI_Init(void) {
+    // PA0: 浮空输入
+    GPIOA->CRL &= ~0x0000000F;
+    // EXTI0 下降沿触发
+    EXTI->IMR |= EXTI_IMR_MR0;
+    EXTI->FTSR |= EXTI_FTSR_TR0;
+    NVIC_EnableIRQ(EXTI0_IRQn);
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-purple-900 to-purple-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">输入捕获配置</div>
+                        {/* 定时器结构 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="bg-blue-900 rounded-lg p-4 border-2 border-blue-500">
+                                <div className="text-white text-sm font-bold mb-2">TIM2 输入捕获</div>
+                                <div className="grid grid-cols-4 gap-2">
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">PSC</div>
+                                        <div className="text-yellow-400 text-sm font-mono">71</div>
+                                    </div>
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">ARR</div>
+                                        <div className="text-green-400 text-sm font-mono">0xFFFF</div>
+                                    </div>
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">CC1S</div>
+                                        <div className="text-blue-400 text-sm font-mono">01</div>
+                                    </div>
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">CC1P</div>
+                                        <div className="text-purple-400 text-sm font-mono">1</div>
+                                    </div>
+                                </div>
+                                <div className="text-white text-xs mt-2">1MHz 计数，下降沿捕获</div>
+                            </div>
+                        </div>
+                        {/* 捕获波形 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <svg width="200" height="50">
+                                <polyline points="0,20 50,20 50,40 150,40 150,20 200,20" fill="none" stroke="#a78bfa" strokeWidth="2" />
+                                <text x="60" y="35" fill="white" fontSize="10">低电平</text>
+                                <text x="110" y="35" fill="white" fontSize="10">高电平</text>
+                                <line x1="50" y1="15" x2="50" y2="25" stroke="#ef4444" strokeWidth="2" />
+                                <text x="45" y="12" fill="#ef4444" fontSize="8">↓捕获</text>
+                            </svg>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "RCC 使能：GPIOA+TIM2 时钟",
+                    "PA0 浮空输入：接收头推挽输出",
+                    "PSC=71:72MHz 分频为 1MHz",
+                    "ARR=0xFFFF:最大 65ms 范围",
+                    "CC1S=01:CH1 配置为输入",
+                    "CC1P=1:下降沿触发捕获",
+                    "CC1IE: 捕获中断使能",
+                    "EXTI 方式：简单但精度低"
+                ]
+            },
+            {
+                title: "解码算法",
+                narration: "通过输入捕获测量低电平和高电平时间。引导码识别帧开始，然后根据高电平时间判断逻辑 0 或 1。",
+                code: `uint32_t ir_code = 0;
+uint8_t ir_bit_count = 0;
+uint16_t last_capture = 0;
+
+void TIM2_IRQHandler(void) {
+    if (TIM2->SR & TIM_SR_CC1IF) {
+        uint16_t current = TIM2->CCR1;
+        uint16_t diff = current - last_capture;
+        last_capture = current;
+
+        if (diff > 13000) {  // &gt;13ms 引导码
+            ir_bit_count = 0;
+            ir_code = 0;
+        } else if (ir_bit_count < 32) {
+            ir_code <<= 1;
+            if (diff > 1500) {  // &gt;1.5ms 为 1
+                ir_code |= 1;
+            }
+            ir_bit_count++;
+        }
+
+        TIM2->SR &= ~TIM_SR_CC1IF;
+    }
+}
+
+// 获取命令值
+uint8_t IR_GetCommand(void) {
+    return (ir_code >> 8) & 0xFF;
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-purple-900 to-purple-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">解码流程</div>
+                        {/* 解码流程 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="text-white text-xs mb-2 text-center">时间测量 → 位判断</div>
+                            <div className="flex items-center space-x-2">
+                                <div className="bg-blue-800 rounded p-2 border border-blue-500">
+                                    <div className="text-white text-xs text-center">捕获值</div>
+                                    <div className="text-cyan-300 text-xs font-mono text-center">CCR1</div>
+                                </div>
+                                <div className="text-white text-xl">→</div>
+                                <div className="bg-green-800 rounded p-2 border border-green-500">
+                                    <div className="text-white text-xs text-center">时间差</div>
+                                    <div className="text-green-300 text-xs font-mono text-center">diff</div>
+                                </div>
+                                <div className="text-white text-xl">→</div>
+                                <div className="bg-yellow-800 rounded p-2 border border-yellow-500">
+                                    <div className="text-white text-xs text-center">判断 0/1</div>
+                                    <div className="text-yellow-300 text-xs font-mono text-center">&gt;1.5ms?</div>
+                                </div>
+                                <div className="text-white text-xl">→</div>
+                                <div className="bg-purple-800 rounded p-2 border border-purple-500">
+                                    <div className="text-white text-xs text-center">移位存入</div>
+                                    <div className="text-purple-300 text-xs font-mono text-center">ir_code</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* 波形判断 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <svg width="250" height="60">
+                                {/* 逻辑 0 */}
+                                <polyline points="10,40 30,40 30,20 50,20 50,40 70,40" fill="none" stroke="#4ade80" strokeWidth="2" />
+                                <text x="35" y="35" fill="#4ade80" fontSize="10">0.56ms</text>
+                                <text x="55" y="35" fill="#4ade80" fontSize="10">0.56ms</text>
+                                <text x="20" y="55" fill="#4ade80" fontSize="10">逻辑 0</text>
+                                {/* 逻辑 1 */}
+                                <polyline points="90,40 110,40 110,20 170,20 170,40 190,40" fill="none" stroke="#f87171" strokeWidth="2" />
+                                <text x="115" y="35" fill="#f87171" fontSize="10">0.56ms</text>
+                                <text x="140" y="35" fill="#f87171" fontSize="10">1.68ms</text>
+                                <text x="120" y="55" fill="#f87171" fontSize="10">逻辑 1</text>
+                            </svg>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "TIM2 中断：捕获事件触发",
+                    "CCR1: 捕获时刻计数值",
+                    "diff: 与上次捕获时间差",
+                    "diff&gt;13ms: 引导码识别",
+                    "diff&gt;1.5ms: 逻辑 1",
+                    "diff&lt;1ms: 逻辑 0",
+                    "ir_code:32 位移位存储",
+                    "ir_bit_count: 位计数 (0-31)"
+                ]
+            },
+            {
+                title: "按键识别",
+                narration: "32 位数据解析：高 8 位地址码，次 8 位地址反码，次 8 位命令码，低 8 位命令反码。验证地址和命令的正确性。",
+                code: `// NEC 协议数据结构
+typedef struct {
+    uint8_t address;      // 地址码 (高 8 位)
+    uint8_t address_inv;  // 地址反码
+    uint8_t command;      // 命令码
+    uint8_t command_inv;  // 命令反码
+} IR_Frame_t;
+
+// 解析接收到的数据
+IR_Frame_t IR_Parse(uint32_t code) {
+    IR_Frame_t frame;
+    frame.address = (code >> 24) & 0xFF;
+    frame.address_inv = (code >> 16) & 0xFF;
+    frame.command = (code >> 8) & 0xFF;
+    frame.command_inv = code & 0xFF;
+
+    // 验证反码
+    if (frame.address != ~frame.address_inv) {
+        return (IR_Frame_t){0};  // 错误
+    }
+    if (frame.command != ~frame.command_inv) {
+        return (IR_Frame_t){0};  // 错误
+    }
+    return frame;
+}
+
+// 按键映射表
+const uint8_t key_map[] = {
+    0x40,  // 电源
+    0x43,  // 菜单
+    0x47,  // 上
+    0x46,  // 下
+    // ... 更多按键
+};`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-purple-900 to-purple-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">数据解析</div>
+                        {/* 32 位数据结构 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="flex items-center space-x-1">
+                                <div className="bg-blue-600 rounded p-3 border-2 border-blue-400">
+                                    <div className="text-white text-xs text-center">地址码</div>
+                                    <div className="text-blue-200 text-lg font-mono text-center">0x00</div>
+                                    <div className="text-blue-300 text-xs text-center">[31:24]</div>
+                                </div>
+                                <div className="bg-green-600 rounded p-3 border-2 border-green-400">
+                                    <div className="text-white text-xs text-center">地址反码</div>
+                                    <div className="text-green-200 text-lg font-mono text-center">0xFF</div>
+                                    <div className="text-green-300 text-xs text-center">[23:16]</div>
+                                </div>
+                                <div className="bg-yellow-600 rounded p-3 border-2 border-yellow-400 animate-pulse">
+                                    <div className="text-white text-xs text-center">命令码</div>
+                                    <div className="text-yellow-200 text-lg font-mono text-center">0x45</div>
+                                    <div className="text-yellow-300 text-xs text-center">[15:8]</div>
+                                </div>
+                                <div className="bg-purple-600 rounded p-3 border-2 border-purple-400">
+                                    <div className="text-white text-xs text-center">命令反码</div>
+                                    <div className="text-purple-200 text-lg font-mono text-center">0xBA</div>
+                                    <div className="text-purple-300 text-xs text-center">[7:0]</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* 验证逻辑 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <div className="text-white text-xs text-center">
+                                <div>address == ~address_inv ✓</div>
+                                <div>command == ~command_inv ✓</div>
+                            </div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "address: 设备地址码 (区分设备)",
+                    "address_inv: 地址反码 (校验用)",
+                    "command: 按键命令码",
+                    "command_inv: 命令反码 (校验用)",
+                    "反码验证：确保传输正确",
+                    "验证失败：丢弃数据",
+                    "key_map: 命令码→按键映射",
+                    "应用：电视/空调/音响遥控"
+                ]
+            },
+            {
+                title: "发射控制",
+                narration: "使用定时器 PWM 产生 38kHz 载波。按 NEC 协议时序调制载波，发送引导码和数据位。",
+                code: `// 38kHz PWM 配置 (TIM2)
+void IR_PWM_Init(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+
+    // PA0(TIM2_CH1): 复用推挽输出
+    GPIOA->CRL &= ~0x0000000F;
+    GPIOA->CRL |= 0x00000008;
+
+    TIM2->PSC = 0;  // 72MHz 直接计数
+    TIM2->ARR = 1894;  // 72M/1895 ≈ 38kHz
+    TIM2->CCR1 = 631;  // 33% 占空比
+    TIM2->CCMR1 |= TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2;
+    TIM2->CCER |= TIM_CCER_CC1E;
+}
+
+// 发送载波脉冲
+void IR_SendCarrier(uint16_t duration_us) {
+    TIM2->CR1 |= TIM_CR1_CEN;  // 开启 PWM
+    Delay_us(duration_us);
+    TIM2->CR1 &= ~TIM_CR1_CEN;  // 关闭 PWM
+}
+
+// 发送 NEC 帧
+void IR_SendNEC(uint8_t addr, uint8_t cmd) {
+    // 引导码
+    IR_SendCarrier(9000);
+    Delay_us(4500);
+    // 发送数据...
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-purple-900 to-purple-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">PWM 发射</div>
+                        {/* PWM 配置 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2">
+                            <div className="bg-blue-900 rounded-lg p-4 border-2 border-blue-500">
+                                <div className="text-white text-sm font-bold mb-2">TIM2 PWM (38kHz)</div>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">PSC</div>
+                                        <div className="text-yellow-400 text-sm font-mono">0</div>
+                                    </div>
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">ARR</div>
+                                        <div className="text-green-400 text-sm font-mono">1894</div>
+                                    </div>
+                                    <div className="bg-gray-800 rounded p-2">
+                                        <div className="text-cyan-300 text-xs">CCR1</div>
+                                        <div className="text-blue-400 text-sm font-mono">631</div>
+                                    </div>
+                                </div>
+                                <div className="text-white text-xs mt-2">f = 72M/1895 ≈ 38kHz</div>
+                            </div>
+                        </div>
+                        {/* 调制波形 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                            <svg width="250" height="50">
+                                {/* 9ms 载波 */}
+                                <rect x="10" y="15" width="80" height="20" fill="#ef4444" opacity="0.6" />
+                                <text x="30" y="30" fill="white" fontSize="8">9ms</text>
+                                {/* 4.5ms 间隔 */}
+                                <rect x="95" y="25" width="40" height="10" fill="none" stroke="#a78bfa" strokeWidth="1" />
+                                <text x="100" y="22" fill="white" fontSize="8">4.5ms</text>
+                                {/* 数据位 */}
+                                <rect x="140" y="15" width="15" height="20" fill="#ef4444" opacity="0.6" />
+                                <rect x="160" y="25" width="20" height="10" fill="none" />
+                                <rect x="185" y="15" width="15" height="20" fill="#ef4444" opacity="0.6" />
+                                <text x="160" y="45" fill="white" fontSize="8">数据位</text>
+                            </svg>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "PSC=0:72MHz 直接计数",
+                    "ARR=1894:72M/1895≈38kHz",
+                    "CCR1=631:33% 占空比",
+                    "IR_SendCarrier: 开启/关闭 PWM",
+                    "引导码：9ms 载波 +4.5ms 间隔",
+                    "逻辑 0:560μs 载波 +560μs 间隔",
+                    "逻辑 1:560μs 载波 +1.68ms 间隔",
+                    "应用：万能遥控器/学习遥控"
+                ]
+            },
+            {
+                title: "应用实例",
+                narration: "红外遥控综合应用：电视遥控、空调控制、音响系统、智能家居。结合学习功能实现万能遥控。",
+                code: `// 电视遥控功能
+void TV_Power(void) {
+    IR_SendNEC(0x00, 0x40);  // 电源键
+}
+
+void TV_VolumeUp(void) {
+    IR_SendNEC(0x00, 0x4A);  // 音量+
+}
+
+void TV_ChannelUp(void) {
+    IR_SendNEC(0x00, 0x52);  // 频道+
+}
+
+// 空调遥控 (温度设置)
+void AC_SetTemp(uint8_t temp) {
+    uint8_t cmd = 0x30 + temp;  // 温度码
+    IR_SendNEC(0x05, cmd);
+}
+
+// 红外学习功能
+uint32_t IR_Learn(void) {
+    // 等待并接收红外信号
+    while (ir_bit_count < 32) {
+        // 等待接收
+    }
+    return ir_code;  // 返回学习到的码值
+}
+
+// 万能遥控
+void UniversalRemote(uint32_t code) {
+    IR_SendNEC((code>>24)&0xFF, (code>>8)&0xFF);
+}`,
+                visualization: () => (
+                    <div className="relative bg-gradient-to-br from-purple-900 to-purple-700 rounded-xl p-6 h-80">
+                        <div className="absolute top-4 left-4 text-white text-sm font-bold">应用实例</div>
+                        {/* 电视遥控 */}
+                        <div className="absolute top-16 left-4 w-20 h-32 bg-gray-800 rounded-lg border-2 border-gray-500">
+                            <div className="text-white text-xs text-center py-2 font-bold">电视</div>
+                            <div className="grid grid-cols-2 gap-1 p-2">
+                                <div className="bg-red-600 rounded p-1 text-white text-xs text-center">电源</div>
+                                <div className="bg-green-600 rounded p-1 text-white text-xs text-center">音量</div>
+                                <div className="bg-blue-600 rounded p-1 text-white text-xs text-center">频道</div>
+                                <div className="bg-yellow-600 rounded p-1 text-white text-xs text-center">菜单</div>
+                            </div>
+                        </div>
+                        {/* 空调遥控 */}
+                        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 w-20 h-32 bg-blue-800 rounded-lg border-2 border-blue-500">
+                            <div className="text-white text-xs text-center py-2 font-bold">空调</div>
+                            <div className="text-white text-2xl text-center mt-4">26°C</div>
+                            <div className="text-blue-300 text-xs text-center mt-2">制冷</div>
+                        </div>
+                        {/* 学习遥控 */}
+                        <div className="absolute top-16 right-4 w-20 h-32 bg-green-800 rounded-lg border-2 border-green-500">
+                            <div className="text-white text-xs text-center py-2 font-bold">学习</div>
+                            <div className="text-green-300 text-xs text-center mt-4">接收中...</div>
+                            <div className="text-green-400 text-xs text-center mt-2 animate-pulse">💾</div>
+                        </div>
+                        {/* 设备选择 */}
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-2">
+                            <div className="bg-gray-700 rounded px-3 py-1 text-white text-xs">电视</div>
+                            <div className="bg-gray-700 rounded px-3 py-1 text-white text-xs">空调</div>
+                            <div className="bg-gray-700 rounded px-3 py-1 text-white text-xs">音响</div>
+                        </div>
+                    </div>
+                ),
+                explanations: [
+                    "电视遥控：电源/音量/频道",
+                    "IR_SendNEC: 发送地址 + 命令",
+                    "空调遥控：温度码 0x30+temp",
+                    "不同品牌：不同地址码",
+                    "红外学习：接收并存储码值",
+                    "万能遥控：回放学习到的码",
+                    "设备切换：多套码值存储",
+                    "智能家居：红外桥接控制"
+                ]
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(true);
+            const [isInitialized, setIsInitialized] = React.useState(false);
+            const [availableVoices, setAvailableVoices] = React.useState([]);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                const voices = speechSynthesis.getVoices();
+                setAvailableVoices(voices);
+                const preferredVoice = voices.find(v => v.lang === 'zh-CN' && v.name.includes('Xiaoxiao')) ||
+                                       voices.find(v => v.lang === 'zh-CN') ||
+                                       voices[0];
+                if (preferredVoice && isPlaying && !isInitialized) {
+                    setIsInitialized(true);
+                    speakStep(0, preferredVoice);
+                }
+            }, []);
+
+            const getPreferredVoice = () => {
+                return availableVoices.find(v => v.lang === 'zh-CN' && v.name.includes('Xiaoxiao')) ||
+                       availableVoices.find(v => v.lang === 'zh-CN') ||
+                       availableVoices[0];
+            };
+
+            const speakStep = (stepIndex, voice) => {
+                if (voiceEndTimerRef.current) {
+                    clearTimeout(voiceEndTimerRef.current);
+                    voiceEndTimerRef.current = null;
+                }
+
+                speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(STEPS[stepIndex].narration);
+                utterance.lang = 'zh-CN';
+                utterance.voice = voice || getPreferredVoice();
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            const next = (prev + 1) % STEPS.length;
+                            if (isPlaying) {
+                                setTimeout(() => speakStep(next, voice), 100);
+                            }
+                            return next;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('语音合成错误:', event);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            const next = (prev + 1) % STEPS.length;
+                            if (isPlaying) {
+                                setTimeout(() => speakStep(next, voice), 100);
+                            }
+                            return next;
+                        });
+                    }, 800);
+                };
+
+                speechSynthesis.speak(utterance);
+            };
+
+            const handleStepClick = (index) => {
+                setCurrentStep(index);
+                const voice = getPreferredVoice();
+                speakStep(index, voice);
+            };
+
+            const togglePlayPause = () => {
+                if (isPlaying) {
+                    speechSynthesis.cancel();
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                        voiceEndTimerRef.current = null;
+                    }
+                    setIsPlaying(false);
+                } else {
+                    setIsPlaying(true);
+                    const voice = getPreferredVoice();
+                    speakStep(currentStep, voice);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 p-8">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="text-center mb-8">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 红外遥控完整指南</h1>
+                            <p className="text-purple-300">NEC 协议 / 38kHz 载波 / 输入捕获 / 解码发射</p>
+                        </div>
+
+                        {/* Controls */}
+                        <div className="flex justify-center items-center space-x-4 mb-6">
+                            <button
+                                onClick={() => handleStepClick((currentStep - 1 + STEPS.length) % STEPS.length)}
+                                className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+                            >
+                                ← 上一步
+                            </button>
+                            <button
+                                onClick={togglePlayPause}
+                                className={`px-8 py-3 rounded-lg transition-colors ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'} text-white`}
+                            >
+                                {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                            </button>
+                            <button
+                                onClick={() => handleStepClick((currentStep + 1) % STEPS.length)}
+                                className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+                            >
+                                下一步 →
+                            </button>
+                        </div>
+
+                        {/* Progress */}
+                        <div className="flex justify-center space-x-2 mb-8">
+                            {STEPS.map((_, index) => (
+                                <div
+                                    key={index}
+                                    className={`w-3 h-3 rounded-full transition-colors ${index === currentStep ? 'bg-purple-400' : 'bg-gray-600'}`}
+                                />
+                            ))}
+                        </div>
+
+                        {/* Main Content */}
+                        <div className="grid grid-cols-3 gap-6">
+                            {/* Code */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-purple-400 mb-4">💻 代码</h3>
+                                <pre className="text-purple-400 text-sm overflow-auto h-80 font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+
+                            {/* Visualization */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-purple-400 mb-4">🎨 可视化</h3>
+                                <div className="h-80">
+                                    {STEPS[currentStep].visualization()}
+                                </div>
+                            </div>
+
+                            {/* Explanations */}
+                            <div className="bg-gray-800 rounded-xl p-6 shadow-2xl">
+                                <h3 className="text-xl font-bold text-purple-400 mb-4">📖 解释</h3>
+                                <ul className="space-y-3">
+                                    {STEPS[currentStep].explanations.map((exp, index) => (
+                                        <li key={index} className="text-white text-sm flex items-start">
+                                            <span className="text-purple-400 mr-2">•</span>
+                                            <span>{exp}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+
+                        {/* Step Info */}
+                        <div className="mt-8 text-center">
+                            <h2 className="text-2xl font-bold text-purple-400">
+                                {currentStep + 1}. {STEPS[currentStep].title}
+                            </h2>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

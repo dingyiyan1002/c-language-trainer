@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1166 - 联合体深入解析</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(139, 92, 246, 0.2); } 50% { background-color: rgba(139, 92, 246, 0.5); } }
+        @keyframes overlap { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(10px); } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .animate-blink { animation: blink 1s steps(2) infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+        .animate-overlap { animation: overlap 1s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#8b5cf6',
+            secondary: '#7c3aed',
+            accent: '#a78bfa',
+            highlight: '#c4b5fd',
+            bg: '#4c1d95',
+            text: '#ede9fe'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const steps = [
+                { title: '联合体基础概念', voice: '联合体基础概念。联合体 union 是一种特殊的数据结构，所有成员共享同一块内存空间。这与结构体完全不同，结构体每个成员有独立的内存空间。联合体的大小等于最大成员的大小。' },
+                { title: '联合体内存模型', voice: '联合体内存模型。联合体的所有成员从同一地址开始存储。修改任一成员会影响其他成员的值。这种特性可用于类型双关，即从不同角度解释同一块内存数据。' },
+                { title: '联合体 vs 结构体', voice: '联合体与结构体对比。结构体每个成员独立存储，总大小是各成员大小加填充。联合体所有成员重叠存储，大小等于最大成员大小。选择依据：需要同时保存多个值用结构体，只需要其中一个用联合体。' },
+                { title: '类型双关应用', voice: '类型双关应用。联合体允许从不同类型访问同一数据。例如，将 float 和 uint32_t 放在联合体中，可以查看 float 的 IEEE 754 二进制表示，无需类型转换。这在调试和底层编程中非常有用。' },
+                { title: '变体类型实现', voice: '变体类型实现。联合体配合标签字段可实现变体类型，即一个变量在不同时刻存储不同类型的值。常见于解析器、协议处理等场景，可以节省内存并提高代码可读性。' },
+                { title: '硬件寄存器映射', voice: '硬件寄存器映射。联合体可用于硬件寄存器访问。同一寄存器可以用 32 位整型整体读写，也可以用位域单独操作每个字段。这种双重访问方式在嵌入式驱动开发中非常常见。' },
+                { title: '大小端检测', voice: '大小端检测。联合体可用于检测处理器字节序。将多字节值存入联合体，通过单字节数组访问可判断字节顺序。这在网络通信和跨平台数据交换中至关重要。' },
+                { title: '注意事项与陷阱', voice: '注意事项与陷阱。联合体不保留类型信息，程序员必须自己跟踪当前存储的是哪个成员。未初始化的联合体访问是未定义行为。C11 引入匿名联合体简化了访问语法。' }
+            ];
+
+            useEffect(() => {
+                if (!isPlaying) return;
+                const speak = () => {
+                    if (isMuted || !steps[currentStep]) return;
+                    const utterance = new SpeechSynthesisUtterance(steps[currentStep].voice);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak();
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    window.speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, isMuted]);
+
+            const UnionMemoryModel = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>联合体内存布局 (4 字节)</h4>
+                        <div className="relative h-32 bg-gray-700 rounded-lg overflow-hidden">
+                            <div className={`absolute inset-0 ${currentStep >= 1 ? 'animate-highlight' : ''} bg-gradient-to-r from-purple-600 to-indigo-600 flex items-center justify-center`}>
+                                <span className="text-white font-mono text-lg">共享内存空间</span>
+                            </div>
+                            <div className="absolute bottom-0 left-0 right-0 bg-black/50 p-2">
+                                <div className="flex justify-between text-xs text-gray-300">
+                                    <span>偏移 0</span>
+                                    <span>偏移 1</span>
+                                    <span>偏移 2</span>
+                                    <span>偏移 3</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mt-4 space-y-2">
+                            <div className="flex items-center gap-3">
+                                <span className="w-20 text-sm text-purple-300">uint8_t c:</span>
+                                <div className="flex-1 h-8 bg-purple-600/50 rounded flex items-center px-2 text-xs">
+                                    占用字节 0
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="w-20 text-sm text-indigo-300">uint16_t s:</span>
+                                <div className="flex-1 h-8 bg-indigo-600/50 rounded flex items-center px-2 text-xs">
+                                    占用字节 0-1
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="w-20 text-sm text-violet-300">uint32_t l:</span>
+                                <div className="flex-1 h-8 bg-violet-600/50 rounded flex items-center px-2 text-xs">
+                                    占用字节 0-3
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const StructVsUnion = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>结构体 vs 联合体</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">结构体 struct</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono">
+{`struct Data {
+    char c;    // 0
+    // pad      // 1-3
+    short s;   // 4-5
+    // pad      // 6-7
+    int l;     // 8-11
+};
+// 总共：12 字节
+// 每个成员独立存储`}
+                                </pre>
+                                <div className="mt-2 text-xs text-gray-400">
+                                    内存使用：1+3+2+2+4 = 12 字节
+                                </div>
+                            </div>
+                            <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-purple-400 font-bold mb-2">联合体 union</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono">
+{`union Data {
+    char c;    // 偏移 0
+    short s;   // 偏移 0-1
+    int l;     // 偏移 0-3
+};
+// 总共：4 字节
+// 所有成员共享`}
+                                </pre>
+                                <div className="mt-2 text-xs text-gray-400">
+                                    内存使用：max(1,2,4) = 4 字节
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const TypePunning = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>类型双关 - 查看 float 二进制</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-green-300">
+{`union FloatInt {
+    float f;
+    uint32_t i;
+};
+
+union FloatInt fi;
+fi.f = 3.14159f;
+printf("0x%08X\\n", fi.i);
+// 输出：0x40490FDB`}
+                            </pre>
+                            <div className="bg-purple-900/30 rounded p-3 border border-purple-600">
+                                <div className="text-xs text-purple-200 mb-2">IEEE 754 单精度浮点数格式:</div>
+                                <div className="flex gap-1 text-xs font-mono">
+                                    <span className="bg-red-600 px-2 py-1 rounded">S(1)</span>
+                                    <span className="bg-blue-600 px-4 py-1 rounded">指数 (8)</span>
+                                    <span className="bg-green-600 px-8 py-1 rounded">尾数 (23)</span>
+                                </div>
+                                <div className="mt-2 text-xs text-purple-300">
+                                    0 10000000 10010010000111111011011 = 3.14159
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const VariantType = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>变体类型 - 标签联合体</h4>
+                        <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`typedef enum {
+    TYPE_INT,
+    TYPE_FLOAT,
+    TYPE_STRING
+} ValueType;
+
+typedef struct {
+    ValueType type;  // 标签
+    union {          // 匿名联合体
+        int i;
+        float f;
+        const char* s;
+    } data;
+} Variant;
+
+// 使用
+Variant v;
+v.type = TYPE_INT;
+v.data.i = 42;`}
+                        </pre>
+                        <div className="mt-3 text-xs text-gray-400">
+                            内存占用：sizeof(ValueType) + max(sizeof(int), sizeof(float), sizeof(char*)) = 1 + 8 = 9 字节
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const HardwareRegister = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>硬件寄存器双重访问</h4>
+                        <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`typedef union {
+    uint32_t raw;      // 整体访问
+    struct {
+        uint32_t EN   : 1;   // 位 0: 使能
+        uint32_t MODE : 2;   // 位 1-2: 模式
+        uint32_t SPEED: 3;   // 位 3-5: 速度
+        uint32_t Reserved:27;// 保留
+    } bits;
+} GPIO_Reg_t;
+
+// 整体读写
+reg.raw = 0x00000001;
+// 位操作
+reg.bits.EN = 1;
+reg.bits.MODE = 2;`}
+                        </pre>
+                        <div className="mt-3 grid grid-cols-32 gap-px">
+                            {[...Array(32)].map((_, i) => (
+                                <div key={i} className={`h-6 text-xs flex items-center justify-center ${i === 0 ? 'bg-emerald-600' : i <= 2 ? 'bg-blue-600' : i <= 5 ? 'bg-purple-600' : 'bg-gray-600'}`}>
+                                    {31 - i}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-2 flex gap-4 text-xs">
+                            <span className="text-emerald-400">EN</span>
+                            <span className="text-blue-400">MODE</span>
+                            <span className="text-purple-400">SPEED</span>
+                            <span className="text-gray-400">Reserved</span>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const EndianDetect = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>大小端检测</h4>
+                        <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`union EndianTest {
+    uint32_t value;
+    uint8_t bytes[4];
+};
+
+int isLittleEndian(void) {
+    union EndianTest e;
+    e.value = 0x12345678;
+    return e.bytes[0] == 0x78;  // 小端返回 1
+}
+
+// 小端：0x78 0x56 0x34 0x12
+// 大端：0x12 0x34 0x56 0x78`}
+                        </pre>
+                        <div className="mt-3 grid grid-cols-2 gap-4 text-xs">
+                            <div className="bg-blue-900/30 p-2 rounded">
+                                <div className="text-blue-300 font-bold">小端 (Little Endian)</div>
+                                <div className="text-gray-400">低字节在低地址</div>
+                                <div className="font-mono mt-1">[0x78][0x56][0x34][0x12]</div>
+                            </div>
+                            <div className="bg-purple-900/30 p-2 rounded">
+                                <div className="text-purple-300 font-bold">大端 (Big Endian)</div>
+                                <div className="text-gray-400">高字节在高地址</div>
+                                <div className="font-mono mt-1">[0x12][0x34][0x56][0x78]</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch(currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-6">
+                                <div className="bg-gradient-to-r from-purple-900/50 to-indigo-900/50 rounded-lg p-6">
+                                    <h3 className="text-2xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>联合体基础概念</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">▸</span>
+                                            <span>所有成员共享同一块内存空间</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">▸</span>
+                                            <span>大小等于最大成员的大小</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">▸</span>
+                                            <span>任一时刻只能存储一个成员的值</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">▸</span>
+                                            <span>修改一个成员会影响其他成员</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300">
+{`union Data {
+    uint8_t  byte;
+    uint16_t word;
+    uint32_t dword;
+};
+// sizeof(union Data) = 4 字节`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return <UnionMemoryModel />;
+                    case 2:
+                        return <StructVsUnion />;
+                    case 3:
+                        return <TypePunning />;
+                    case 4:
+                        return <VariantType />;
+                    case 5:
+                        return <HardwareRegister />;
+                    case 6:
+                        return <EndianDetect />;
+                    case 7:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gradient-to-r from-purple-900/50 to-indigo-900/50 rounded-lg p-6">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>注意事项与陷阱</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-yellow-400 mr-2">⚠️</span>
+                                            <span><strong>类型信息丢失：</strong>联合体不记录当前存储的是哪个成员，程序员必须自行跟踪</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-yellow-400 mr-2">⚠️</span>
+                                            <span><strong>未定义行为：</strong>访问未初始化的联合体成员是未定义行为</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-yellow-400 mr-2">⚠️</span>
+                                            <span><strong>类型双关风险：</strong>通过联合体进行类型双关在 C 中合法，但在 C++ 中是未定义行为</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-emerald-400 mr-2">✓</span>
+                                            <span><strong>C11 匿名联合体：</strong>可直接访问成员，无需.data 前缀</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300">
+{`// 正确的联合体使用模式
+typedef struct {
+    int type;
+    union {
+        int i;
+        float f;
+    };  // C11 匿名联合体
+} Variant;
+
+Variant v;
+v.type = TYPE_INT;
+v.i = 42;  // 无需 v.data.i`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-6 flex items-center justify-between">
+                            <div>
+                                <h1 className="text-3xl font-bold" style={{ color: COLOR_MAP.primary }}>
+                                    1166 - 联合体深入解析
+                                </h1>
+                                <p className="text-gray-400 mt-1">C 语言核心 · 步骤 {currentStep + 1} / {steps.length}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setIsMuted(!isMuted)}
+                                    className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-purple-600'} hover:opacity-80`}>
+                                    {isMuted ? '🔇 静音' : '🔊 语音'}
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className={`px-4 py-2 rounded ${isPlaying ? 'bg-purple-600' : 'bg-gray-600'} hover:opacity-80`}>
+                                    {isPlaying ? '⏸ 暂停' : '▶ 继续'}
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-3 gap-6">
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>代码示例</h3>
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`union Data {
+    uint8_t  c;
+    uint16_t s;
+    uint32_t l;
+};
+
+union Data d;
+d.l = 0x12345678;
+printf("%02X", d.c);  // 78
+printf("%04X", d.s);  // 5678`}
+                                    </pre>
+                                </div>
+                                <UnionMemoryModel />
+                            </div>
+
+                            <div className="col-span-1">
+                                <div className="bg-gray-800 rounded-lg p-6 h-full">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>
+                                        {steps[currentStep].title}
+                                    </h3>
+                                    {renderContent()}
+                                </div>
+                            </div>
+
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>关键点</h3>
+                                    <ul className="space-y-2 text-sm text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">•</span>
+                                            <span>所有成员共享同一内存地址</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">•</span>
+                                            <span>大小等于最大成员的大小</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">•</span>
+                                            <span>用于类型双关和变体类型</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">•</span>
+                                            <span>硬件寄存器双重访问模式</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <StructVsUnion />
+                            </div>
+                        </div>
+
+                        <footer className="mt-8 flex justify-center gap-2">
+                            {steps.map((_, idx) => (
+                                <button key={idx} onClick={() => setCurrentStep(idx)}
+                                    className={`w-3 h-3 rounded-full transition-all ${idx === currentStep ? 'w-8' : ''}`}
+                                    style={{ backgroundColor: idx <= currentStep ? COLOR_MAP.primary : '#374151' }} />
+                            ))}
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

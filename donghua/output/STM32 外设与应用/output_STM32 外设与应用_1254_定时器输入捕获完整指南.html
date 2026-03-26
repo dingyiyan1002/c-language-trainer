@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 定时器输入捕获完整指南 - 脉宽测量与频率检测可视化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // 8 个步骤 - 语音驱动自动播放
+        const STEPS = [
+            {
+                title: "输入捕获基础",
+                code: `// 输入捕获功能
+// - 检测输入信号的边沿 (上升/下降)
+// - 捕获时记录定时器计数值
+// - 用于测量脉宽、频率、占空比
+
+// STM32 定时器输入捕获
+// - TIM1/TIM2/TIM3/TIM4 支持
+// - 每个通道可独立配置
+// - 可配置捕获极性
+// - 支持输入滤波器
+
+// 应用场景
+// - 遥控器 PWM 信号解码
+// - 传感器频率测量
+// - 编码器信号采集
+// - 超声波测距`,
+                visualization: "capture-basic",
+                explanation: "输入捕获功能通过检测 GPIO 引脚的电平边沿变化，在边沿到来时锁存定时器计数值。两个边沿的时间差即为脉宽，周期可通过连续捕获计算。广泛应用于 PWM 解码和频率测量。"
+            },
+            {
+                title: "输入捕获配置",
+                code: `// 输入捕获初始化 (检测上升沿)
+void IC_Init(void) {
+    // 1. 使能时钟
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    // 2. GPIO 配置 (浮空输入)
+    GPIOA->CRL &= ~0x000000F0;
+    GPIOA->CRL |= 0x00000080;  // PA1 浮空输入
+
+    // 3. 定时器配置
+    TIM2->PSC = 71;  // 72MHz/72 = 1MHz (1us 计数)
+    TIM2->ARR = 0xFFFF;  // 16 位计数
+
+    // 4. 输入捕获配置 (通道 1)
+    // CC1S=01: IC1 映射到 TI1
+    TIM2->CCMR1 |= TIM_CCMR1_CC1S_0;
+    // CC1P=0: 上升沿捕获
+    TIM2->CCER &= ~TIM_CCER_CC1P;
+    // 使能捕获
+    TIM2->CCER |= TIM_CCER_CC1E;
+
+    // 5. 使能捕获中断
+    TIM2->DIER |= TIM_DIER_CC1IE;
+    NVIC_EnableIRQ(TIM2_IRQn);
+
+    // 6. 启动定时器
+    TIM2->CR1 |= TIM_CR1_CEN;
+}`,
+                visualization: "capture-config",
+                explanation: "配置输入捕获需要：设置 GPIO 为输入模式，配置定时器预分频，设置捕获通道映射，选择捕获边沿极性，使能捕获和中断。预分频决定时间分辨率，72 分频得到 1us 精度。"
+            },
+            {
+                title: "脉宽测量",
+                code: `// 脉宽测量 (上升沿 + 下降沿捕获)
+volatile uint32_t riseTime = 0, fallTime = 0;
+volatile uint8_t captureState = 0;
+
+void TIM2_IRQHandler(void) {
+    if (TIM2->SR & TIM_SR_CC1IF) {
+        TIM2->SR &= ~TIM_SR_CC1IF;  // 清除标志
+
+        if (captureState == 0) {
+            // 第一次：上升沿
+            riseTime = TIM2->CCR1;
+            captureState = 1;
+            // 切换为下降沿捕获
+            TIM2->CCER |= TIM_CCER_CC1P;
+        } else {
+            // 第二次：下降沿
+            fallTime = TIM2->CCR1;
+            captureState = 0;
+            // 切换为上升沿捕获
+            TIM2->CCER &= ~TIM_CCER_CC1P;
+
+            // 计算脉宽 (us)
+            if (fallTime >= riseTime) {
+                pulseWidth = fallTime - riseTime;
+            } else {
+                pulseWidth = (0xFFFF - riseTime) + fallTime;
+            }
+        }
+    }
+}`,
+                visualization: "pulse-width",
+                explanation: "脉宽测量通过捕获上升沿和下降沿的时间戳计算。首次捕获上升沿后切换极性检测下降沿，两次捕获值之差即为高电平脉宽。需处理定时器溢出情况。"
+            },
+            {
+                title: "频率测量",
+                code: `// 频率测量 (周期法)
+volatile uint32_t periodStart = 0, periodEnd = 0;
+volatile float frequency = 0;
+
+void TIM2_IRQHandler(void) {
+    if (TIM2->SR & TIM_SR_CC1IF) {
+        TIM2->SR &= ~TIM_SR_CC1IF;
+
+        static uint32_t lastCapture = 0;
+        periodEnd = TIM2->CCR1;
+
+        // 计算周期 (考虑溢出)
+        if (periodEnd >= lastCapture) {
+            period = periodEnd - lastCapture;
+        } else {
+            period = (0xFFFF - lastCapture) + periodEnd;
+        }
+
+        // 计算频率 (定时器 1MHz)
+        if (period > 0) {
+            frequency = 1000000.0 / period;  // Hz
+        }
+
+        lastCapture = periodEnd;
+    }
+}
+
+// 频率 = 1MHz / 周期计数值`,
+                visualization: "frequency-measure",
+                explanation: "频率测量通过捕获连续上升沿计算周期。两个上升沿之间的时间即为信号周期，频率=1/ 周期。定时器时钟 1MHz 时，计数值直接对应微秒。"
+            },
+            {
+                title: "PWM 输入模式",
+                code: `// PWM 输入模式 (硬件自动测量)
+// 通道 1 捕获上升沿 (周期), 通道 2 捕获下降沿 (脉宽)
+
+void PWM_Input_Init(void) {
+    // 1. 基础配置同上
+    TIM2->PSC = 71;
+    TIM2->ARR = 0xFFFF;
+
+    // 2. 通道 1: 上升沿捕获 (周期)
+    TIM2->CCMR1 |= TIM_CCMR1_CC1S_0;  // IC1→TI1
+    TIM2->CCER &= ~TIM_CCER_CC1P;     // 上升沿
+    TIM2->CCER |= TIM_CCER_CC1E;
+
+    // 3. 通道 2: 下降沿捕获 (脉宽)
+    // 使用 TI1 作为通道 2 输入
+    TIM2->CCMR1 |= TIM_CCMR1_CC2S_1;  // IC2→TI1
+    TIM2->CCER |= TIM_CCER_CC2P;      // 下降沿
+    TIM2->CCER |= TIM_CCER_CC2E;
+
+    // 4. 从模式：TI1FP1 触发
+    TIM2->SMCR |= TIM_SMCR_TS_2;  // TI1FP1
+    TIM2->SMCR |= TIM_SMCR_SMS_2; // Reset mode
+
+    // 5. 使能捕获
+    TIM2->CR1 |= TIM_CR1_CEN;
+}
+
+// CCR1: 周期值，CCR2: 脉宽值
+// 占空比 = CCR2 / CCR1 * 100%`,
+                visualization: "pwm-input",
+                explanation: "PWM 输入模式使用两个捕获通道同时测量周期和脉宽。通道 1 捕获上升沿，通道 2 捕获下降沿，从模式设置为复位模式，每次上升沿重置计数器。CCR1 为周期，CCR2 为脉宽。"
+            },
+            {
+                title: "输入滤波器",
+                code: `// 输入滤波器配置 (消除噪声)
+// CCMR 寄存器 IC1F 位 [11:8]
+
+// 滤波器设置 (N 个连续采样有效)
+// 0000: 无滤波
+// 0001: fCK_INT, N=2
+// 0010: fCK_INT, N=4
+// 0011: fCK_INT, N=8
+// ...
+// 1111: fDTS/16, N=16
+
+void IC_Filter_Config(uint8_t filter) {
+    // 清除 IC1F 位
+    TIM2->CCMR1 &= ~TIM_CCMR1_IC1F;
+    // 设置滤波器
+    TIM2->CCMR1 |= (filter << TIM_CCMR1_IC1F_Pos);
+}
+
+// 建议：
+// - 干净信号：不用滤波
+// - 一般噪声：IC1F=3 (8 个采样)
+// - 强噪声：IC1F=6 (32 个采样)`,
+                visualization: "input-filter",
+                explanation: "输入滤波器通过连续采样消除噪声干扰。设置 IC1F 位选择滤波强度，值越大滤波效果越强但响应越慢。强噪声环境建议使用较高滤波值。"
+            },
+            {
+                title: "捕获中断处理",
+                code: `// 完整的捕获中断处理
+
+volatile uint16_t captureValue[4];
+volatile uint8_t captureIdx = 0;
+volatile uint8_t captureComplete = 0;
+
+void TIM2_IRQHandler(void) {
+    uint32_t sr = TIM2->SR;
+
+    // 通道 1 捕获中断
+    if (sr & TIM_SR_CC1IF) {
+        TIM2->SR &= ~TIM_SR_CC1IF;
+        captureValue[captureIdx++] = TIM2->CCR1;
+        if (captureIdx >= 2) {
+            captureComplete = 1;
+            captureIdx = 0;
+        }
+    }
+
+    // 更新中断 (溢出)
+    if (sr & TIM_SR_UIF) {
+        TIM2->SR &= ~TIM_SR_UIF;
+        overflowCount++;
+    }
+}
+
+// 主循环处理
+if (captureComplete) {
+    // 处理捕获数据
+    ProcessCapture(captureValue[0], captureValue[1]);
+    captureComplete = 0;
+}`,
+                visualization: "capture-interrupt",
+                explanation: "捕获中断需及时读取 CCR 寄存器，否则会丢失数据。同时需处理 UIF 溢出中断，记录溢出次数以扩展测量范围。中断中只做数据保存，处理放在主循环。"
+            },
+            {
+                title: "应用实例",
+                code: `// 实例 1: 遥控器 PPW 解码
+// 通道脉宽范围：1000us-2000us
+
+uint16_t channel[8];
+void DecodePPM(void) {
+    // 使用输入捕获测量每个脉冲宽度
+    // 根据脉宽计算摇杆值 (1000-2000 → 0-1000)
+    uint16_t value = (pulseWidth - 1000) * 1000 / 1000;
+    channel[currentChannel] = value;
+}
+
+// 实例 2: 超声波测距 (HC-SR04)
+// Echo 脉宽 = 距离×58us/cm
+
+float MeasureDistance(void) {
+    // 触发信号
+    GPIO_SetBits(GPIOA, TRIG_PIN);
+    Delay_us(15);
+    GPIO_ResetBits(GPIOA, TRIG_PIN);
+
+    // 等待输入捕获
+    while (!captureComplete);
+
+    // 计算距离
+    float distance = pulseWidth / 58.0;  // cm
+    return distance;
+}
+
+// 实例 3: 频率计
+// 显示信号频率和占空比`,
+                visualization: "capture-apps",
+                explanation: "输入捕获应用于 PWM 解码、超声波测距、频率计等。PPM 解码需测量多个脉宽，HC-SR04 通过 Echo 脉宽计算距离，频率计显示信号频率和占空比。"
+            }
+        ];
+
+        // 颜色映射 - 绿色调
+        const COLOR_MAP = {
+            primary: '#059669',    // emerald-600
+            secondary: '#10b981',  // emerald-500
+            accent: '#14b8a6',     // teal-500
+            success: '#10b981',    // emerald-500
+            warning: '#f59e0b',    // amber-500
+            danger: '#ef4444',     // red-500
+            info: '#3b82f6',       // blue-500
+            rising: '#10b981',     // 上升沿绿色
+            falling: '#ef4444',    // 下降沿红色
+            gradients: [
+                'from-emerald-600 to-teal-600',
+                'from-blue-500 to-cyan-500',
+                'from-violet-500 to-purple-500'
+            ]
+        };
+
+        // 输入捕获基础可视化
+        const CaptureBasic = ({ step }) => {
+            const [signalState, setSignalState] = useState(false);
+            const [capturePoint, setCapturePoint] = useState(null);
+
+            useEffect(() => {
+                const cycle = async () => {
+                    setSignalState(false);
+                    await sleep(1000);
+                    setSignalState(true);
+                    setCapturePoint('rising');
+                    await sleep(1500);
+                    setSignalState(false);
+                    setCapturePoint('falling');
+                    await sleep(1000);
+                    setCapturePoint(null);
+                    await sleep(500);
+                };
+                cycle();
+                const interval = setInterval(cycle, 4000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        边沿捕获
+                    </div>
+                    <div className={`h-24 rounded-lg transition-all flex items-center px-4 ${
+                        signalState ? 'bg-green-100' : 'bg-gray-100'
+                    }`}>
+                        <div className="text-xs text-gray-500">信号:</div>
+                        <div className={`h-16 flex-1 mx-2 rounded transition-all ${
+                            signalState ? 'bg-green-500' : 'bg-gray-400'
+                        }`} />
+                        <div className="text-xs text-gray-500">电平:{signalState ? 'H' : 'L'}</div>
+                    </div>
+                    {capturePoint && (
+                        <div className={`p-3 rounded-lg text-center font-bold ${
+                            capturePoint === 'rising' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                        }`}>
+                            {capturePoint === 'rising' ? '⬆️ 上升沿捕获!' : '⬇️ 下降沿捕获!'}
+                        </div>
+                    )}
+                    <div className="text-xs text-gray-500">
+                        <div>• 检测边沿变化</div>
+                        <div>• 锁存计数器值</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 输入捕获配置可视化
+        const CaptureConfig = ({ step }) => {
+            const [configured, setConfigured] = useState(false);
+            const [steps, setSteps] = useState([]);
+
+            useEffect(() => {
+                const configSteps = ['时钟使能', 'GPIO 配置', '定时器配置', '捕获配置', '中断使能', '启动'];
+                let i = 0;
+                const interval = setInterval(() => {
+                    if (i < configSteps.length) {
+                        setSteps(prev => [...prev, configSteps[i]]);
+                        i++;
+                    } else {
+                        setConfigured(true);
+                        clearInterval(interval);
+                    }
+                }, 800);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className={`p-4 rounded-lg text-center transition-all ${
+                        configured ? 'bg-green-100' : 'bg-gray-100'
+                    }`}>
+                        <div className="text-2xl mb-2">{configured ? '✅' : '⏳'}</div>
+                        <div className="font-semibold">{configured ? '配置完成' : '配置中...'}</div>
+                    </div>
+                    <div className="space-y-2">
+                        {steps.map((s, i) => (
+                            <div key={i} className="p-2 bg-emerald-50 rounded text-sm text-center">
+                                {i + 1}. {s} ✓
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // 脉宽测量可视化
+        const PulseWidth = ({ step }) => {
+            const [phase, setPhase] = useState('low');
+            const [pulseWidth, setPulseWidth] = useState(0);
+            const [measuring, setMeasuring] = useState(false);
+
+            useEffect(() => {
+                const measure = async () => {
+                    setPhase('low');
+                    await sleep(1000);
+                    setPhase('rising');
+                    setMeasuring(true);
+                    const riseTime = Date.now();
+                    await sleep(1500);
+                    setPhase('high');
+                    await sleep(Math.random() * 1000 + 500);
+                    setPhase('falling');
+                    const fallTime = Date.now();
+                    setPulseWidth(fallTime - riseTime);
+                    await sleep(500);
+                    setMeasuring(false);
+                };
+                measure();
+                const interval = setInterval(measure, 4000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        脉宽测量
+                    </div>
+                    <div className={`h-20 rounded-lg transition-all flex items-center px-4 ${
+                        phase === 'high' || phase === 'rising' || phase === 'falling' ? 'bg-green-100' : 'bg-gray-100'
+                    }`}>
+                        <div className={`h-12 flex-1 rounded transition-all ${
+                            phase === 'high' ? 'bg-green-500' :
+                            phase === 'rising' ? 'bg-green-300' :
+                            phase === 'falling' ? 'bg-red-300' : 'bg-gray-300'
+                        }`} />
+                    </div>
+                    {measuring && (
+                        <div className="text-center text-sm text-emerald-600">
+                            ⏱️ 测量中...
+                        </div>
+                    )}
+                    {pulseWidth > 0 && !measuring && (
+                        <div className="bg-emerald-50 rounded-lg p-3 text-center">
+                            <div className="text-xs text-gray-500">脉宽</div>
+                            <div className="text-2xl font-bold text-emerald-600">{pulseWidth} us</div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // 频率测量可视化
+        const FrequencyMeasure = ({ step }) => {
+            const [frequency, setFrequency] = useState(0);
+            const [signalOn, setSignalOn] = useState(false);
+
+            useEffect(() => {
+                const measure = async () => {
+                    setSignalOn(true);
+                    await sleep(200);
+                    setSignalOn(false);
+                    await sleep(Math.random() * 300 + 100);
+                    setFrequency(Math.floor(1000000 / (200 + Math.random() * 300 + 100)));
+                };
+                measure();
+                const interval = setInterval(measure, 500);
+                return () => clearInterval(interval);
+            }, []);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        频率测量
+                    </div>
+                    <div className="flex justify-center space-x-1 h-16 items-end">
+                        {Array(20).fill(0).map((_, i) => (
+                            <div
+                                key={i}
+                                className={`w-3 rounded transition-all ${
+                                    (i + Date.now() / 200) % 2 < 1 ? 'bg-emerald-500 h-12' : 'bg-gray-200 h-4'
+                                }`}
+                            />
+                        ))}
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-4 text-center">
+                        <div className="text-xs text-gray-500">测量频率</div>
+                        <div className="text-3xl font-bold text-emerald-600">{frequency} Hz</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // PWM 输入模式可视化
+        const PwmInput = ({ step }) => {
+            const [period, setPeriod] = useState(0);
+            const [pulseWidth, setPulseWidth] = useState(0);
+            const [dutyCycle, setDutyCycle] = useState(0);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    const p = Math.floor(Math.random() * 500 + 500);
+                    const pw = Math.floor(Math.random() * 300 + 100);
+                    setPeriod(p);
+                    setPulseWidth(pw);
+                    setDutyCycle(Math.round(pw / p * 100));
+                }, 2000);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        PWM 输入模式
+                    </div>
+                    <div className="h-16 bg-gray-100 rounded-lg relative overflow-hidden">
+                        <div
+                            className="absolute top-0 left-0 h-full bg-emerald-500 transition-all"
+                            style={{ width: `${dutyCycle}%` }}
+                        />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-gray-50 p-2 rounded">
+                            <div className="text-xs">周期</div>
+                            <div className="font-bold">{period} us</div>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded">
+                            <div className="text-xs">脉宽</div>
+                            <div className="font-bold">{pulseWidth} us</div>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded">
+                            <div className="text-xs">占空比</div>
+                            <div className="font-bold">{dutyCycle}%</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 输入滤波器可视化
+        const InputFilter = ({ step }) => {
+            const [filterLevel, setFilterLevel] = useState(0);
+            const [noisySignal, setNoisySignal] = useState([]);
+            const [filteredSignal, setFilteredSignal] = useState([]);
+
+            useEffect(() => {
+                const signal = Array(20).fill(0).map(() => Math.random() > 0.8 ? 1 : 0);
+                setNoisySignal(signal);
+                // 简单模拟滤波：取平均
+                const filtered = signal.map((v, i) => {
+                    if (i < filterLevel) return 0;
+                    return signal.slice(Math.max(0, i - filterLevel), i + 1)
+                        .reduce((a, b) => a + b, 0) / (filterLevel + 1) > 0.5 ? 1 : 0;
+                });
+                setFilteredSignal(filtered);
+            }, [filterLevel]);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        输入滤波器
+                    </div>
+                    <div className="flex justify-center space-x-2 mb-2">
+                        {[0, 2, 4, 6].map(level => (
+                            <button
+                                key={level}
+                                onClick={() => setFilterLevel(level)}
+                                className={`px-2 py-1 rounded text-xs ${
+                                    filterLevel === level ? 'bg-emerald-500 text-white' : 'bg-gray-200'
+                                }`}
+                            >
+                                {level}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="space-y-2">
+                        <div className="text-xs">噪声信号:</div>
+                        <div className="flex space-x-1">
+                            {noisySignal.map((v, i) => (
+                                <div key={i} className={`w-4 h-6 rounded ${v ? 'bg-red-500' : 'bg-gray-300'}`} />
+                            ))}
+                        </div>
+                        <div className="text-xs">滤波后:</div>
+                        <div className="flex space-x-1">
+                            {filteredSignal.map((v, i) => (
+                                <div key={i} className={`w-4 h-6 rounded ${v ? 'bg-emerald-500' : 'bg-gray-300'}`} />
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 捕获中断可视化
+        const CaptureInterrupt = ({ step }) => {
+            const [interrupts, setInterrupts] = useState([]);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    const type = Math.random() > 0.8 ? 'UIF' : 'CC1IF';
+                    setInterrupts(prev => [{ type, time: Date.now() }, ...prev.slice(0, 4)]);
+                }, 1500);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        捕获中断
+                    </div>
+                    <div className="space-y-2">
+                        {interrupts.map((evt, i) => (
+                            <div
+                                key={i}
+                                className={`p-3 rounded-lg ${
+                                    evt.type === 'CC1IF' ? 'bg-emerald-100' : 'bg-amber-100'
+                                }`}
+                            >
+                                <div className="flex justify-between items-center">
+                                    <span className="font-mono text-sm">{evt.type}</span>
+                                    <span className="text-xs text-gray-500">
+                                        {evt.type === 'CC1IF' ? '📍 捕获' : '⏱️ 溢出'}
+                                    </span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // 应用实例可视化
+        const CaptureApps = ({ step }) => {
+            const [app, setApp] = useState('ppm');
+            const [values, setValues] = useState([]);
+
+            useEffect(() => {
+                if (app === 'ppm') {
+                    const interval = setInterval(() => {
+                        setValues(Array(8).fill(0).map(() => Math.floor(Math.random() * 1000)));
+                    }, 1000);
+                    return () => clearInterval(interval);
+                } else if (app === 'sonar') {
+                    const interval = setInterval(() => {
+                        setValues([Math.floor(Math.random() * 400 + 20)]);
+                    }, 1000);
+                    return () => clearInterval(interval);
+                }
+            }, [app]);
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-3 gap-2">
+                        <button onClick={() => setApp('ppm')} className={`p-2 rounded text-xs ${app === 'ppm' ? 'bg-emerald-500 text-white' : 'bg-gray-200'}`}>PPM 解码</button>
+                        <button onClick={() => setApp('sonar')} className={`p-2 rounded text-xs ${app === 'sonar' ? 'bg-emerald-500 text-white' : 'bg-gray-200'}`}>超声波</button>
+                        <button onClick={() => setApp('freq')} className={`p-2 rounded text-xs ${app === 'freq' ? 'bg-emerald-500 text-white' : 'bg-gray-200'}`}>频率计</button>
+                    </div>
+                    {app === 'ppm' && (
+                        <div className="space-y-1">
+                            {values.map((v, i) => (
+                                <div key={i} className="flex items-center text-xs">
+                                    <span className="w-12">CH{i+1}:</span>
+                                    <div className="flex-1 bg-gray-200 rounded-full h-3">
+                                        <div className="bg-emerald-500 h-3 rounded-full" style={{ width: `${v/10}%` }} />
+                                    </div>
+                                    <span className="w-10 text-right">{v}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {app === 'sonar' && (
+                        <div className="text-center">
+                            <div className="text-4xl font-bold text-emerald-600">{values[0] / 58} cm</div>
+                        </div>
+                    )}
+                    {app === 'freq' && (
+                        <div className="text-center">
+                            <div className="text-3xl font-bold">{Math.floor(Math.random() * 1000 + 1000)} Hz</div>
+                            <div className="text-sm">占空比：{Math.floor(Math.random() * 80 + 10)}%</div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // 主 App 组件
+        const App = () => {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                const voices = window.speechSynthesis.getVoices();
+                const xiaoXiao = voices.find(v => v.name.includes('XiaoXiao') || v.name.includes('zh-CN'));
+                if (xiaoXiao) utterance.voice = xiaoXiao;
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                window.speechSynthesis.speak(utterance);
+            }, [isMuted]);
+
+            useEffect(() => {
+                if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                speak(STEPS[currentStep].explanation);
+                return () => { if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current); };
+            }, [currentStep, speak]);
+
+            useEffect(() => {
+                const handleKeydown = (e) => {
+                    if (e.code === 'Space') { e.preventDefault(); setIsPlaying(prev => !prev); }
+                    else if (e.code === 'ArrowRight' && currentStep < STEPS.length - 1) setCurrentStep(prev => prev + 1);
+                    else if (e.code === 'ArrowLeft' && currentStep > 0) setCurrentStep(prev => prev - 1);
+                };
+                window.addEventListener('keydown', handleKeydown);
+                return () => window.removeEventListener('keydown', handleKeydown);
+            }, [currentStep]);
+
+            const renderVisualization = () => {
+                switch (STEPS[currentStep].visualization) {
+                    case 'capture-basic': return <CaptureBasic step={STEPS[currentStep]} />;
+                    case 'capture-config': return <CaptureConfig step={STEPS[currentStep]} />;
+                    case 'pulse-width': return <PulseWidth step={STEPS[currentStep]} />;
+                    case 'frequency-measure': return <FrequencyMeasure step={STEPS[currentStep]} />;
+                    case 'pwm-input': return <PwmInput step={STEPS[currentStep]} />;
+                    case 'input-filter': return <InputFilter step={STEPS[currentStep]} />;
+                    case 'capture-interrupt': return <CaptureInterrupt step={STEPS[currentStep]} />;
+                    case 'capture-apps': return <CaptureApps step={STEPS[currentStep]} />;
+                    default: return <div>可视化组件</div>;
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <h1 className="text-3xl font-bold text-center mb-6 bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+                            STM32 定时器输入捕获完整指南
+                        </h1>
+                        <div className="flex justify-center mb-6">
+                            <div className="flex space-x-2">
+                                {STEPS.map((_, idx) => (
+                                    <button key={idx} onClick={() => setCurrentStep(idx)}
+                                        className={`w-3 h-3 rounded-full transition-all ${
+                                            idx === currentStep ? 'bg-emerald-600 scale-125' :
+                                            idx < currentStep ? 'bg-emerald-400' : 'bg-gray-300'
+                                        }`} />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-emerald-600 flex items-center">
+                                    <span className="mr-2">💻</span>{STEPS[currentStep].title}
+                                </h2>
+                                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-teal-600 flex items-center">
+                                    <span className="mr-2">🎨</span>可视化演示
+                                </h2>
+                                <div className="h-96 overflow-auto">{renderVisualization()}</div>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-cyan-600 flex items-center">
+                                    <span className="mr-2">📖</span>说明
+                                </h2>
+                                <p className="text-gray-700 leading-relaxed">{STEPS[currentStep].explanation}</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-center mt-6 space-x-4">
+                            <button onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0 ? 'bg-gray-200 text-gray-400' : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                }`}>⏮ 上一步</button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isPlaying ? 'bg-yellow-500 text-white' : 'bg-green-500 text-white'
+                                }`}>{isPlaying ? '⏸ 暂停' : '▶ 播放'}</button>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isMuted ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'
+                                }`}>{isMuted ? '🔇 取消静音' : '🔊 静音'}</button>
+                            <button onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1 ? 'bg-gray-200 text-gray-400' : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                }`}>下一步 ⏭</button>
+                        </div>
+                        <div className="text-center mt-4 text-sm text-gray-500">快捷键：空格 播放/暂停 | ← → 切换步骤</div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

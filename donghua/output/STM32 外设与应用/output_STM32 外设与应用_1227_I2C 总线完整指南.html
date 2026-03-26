@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 I2C 总线完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes sda { 0% { transform: translateY(0); } 50% { transform: translateY(-8px); } 100% { transform: translateY(0); } }
+        @keyframes scl { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+        @keyframes start { 0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-sda { animation: sda 1s ease-in-out infinite; }
+        .animate-scl { animation: scl 0.5s linear infinite; }
+        .animate-start { animation: start 2s ease-in-out infinite; }
+
+        .i2c-line { transition: all 0.3s ease; }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#6366f1',
+            secondary: '#818cf8',
+            accent: '#a5b4fc',
+            highlight: '#c7d2fe',
+            text: '#e0e7ff',
+            bg: '#3730a3'
+        };
+
+        const STEPS = [
+            { title: "I2C 基础架构", subtitle: "2 线制半双工通信" },
+            { title: "起始与停止条件", subtitle: "START/STOP 时序" },
+            { title: "数据帧格式", subtitle: "地址 + 读写位 + 数据+ACK" },
+            { title: "7 位地址模式", subtitle: "地址帧与 R/W 位" },
+            { title: "主机发送数据", subtitle: "Master 写 Slave" },
+            { title: "主机接收数据", subtitle: "Master 读 Slave" },
+            { title: "事件与中断", subtitle: "TXE/RXE/BTF 标志" },
+            { title: "应用实例", subtitle: "EEPROM/传感器/RTC" }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [sdaState, setSdaState] = React.useState(1);
+            const [sclState, setSclState] = React.useState(0);
+            const [i2cData, setI2cData] = React.useState([]);
+            const [currentAddress, setCurrentAddress] = React.useState(0x50);
+            const [isReading, setIsReading] = React.useState(false);
+            const [txBuffer, setTxBuffer] = React.useState([]);
+            const [rxBuffer, setRxBuffer] = React.useState([]);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const simulateI2CTransfer = (write, data) => {
+                // Simulate START condition
+                setSdaState(1);
+                setSclState(0);
+                setTimeout(() => {
+                    setSdaState(0);  // START: SDA high→low while SCL high
+                    setTimeout(() => {
+                        setSclState(1);
+                        // Simulate address + R/W bit
+                        const addrByte = ((currentAddress << 1) | (write ? 0 : 1)) & 0xFF;
+                        simulateByte(addrByte, () => {
+                            // Simulate data bytes
+                            if (data.length > 0) {
+                                data.forEach((byte, i) => {
+                                    setTimeout(() => simulateByte(byte), i * 100);
+                                });
+                            }
+                            // STOP condition
+                            setTimeout(() => {
+                                setSdaState(0);
+                                setSclState(1);
+                                setTimeout(() => setSdaState(1), 50);  // STOP: SDA low→high while SCL high
+                            }, data.length * 100 + 100);
+                        });
+                    }, 50);
+                }, 50);
+            };
+
+            const simulateByte = (byte, callback) => {
+                for (let i = 7; i >= 0; i--) {
+                    setTimeout(() => {
+                        setSdaState((byte >> i) & 1);
+                        setTimeout(() => setSclState(1), 25);
+                        setTimeout(() => setSclState(0), 50);
+                    }, (7 - i) * 100);
+                }
+                setTimeout(() => {
+                    if (callback) callback();
+                }, 800);
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    setTimeout(() => {
+                        const narration = [
+                            "I2C 是 2 线制半双工同步总线：SDA(数据线) 和 SCL(时钟线)。开漏输出需外加上拉电阻。支持多主多从，7 位地址最多 127 个设备，10 位地址扩展更多。",
+                            "起始条件 (START):SCL 高电平时 SDA 由高变低，标志传输开始。停止条件 (STOP):SCL 高电平时 SDA 由低变高，标志传输结束。主机产生 START 和 STOP。",
+                            "数据帧：1 个起始位 +7 位地址 +1 位 R/W+1 位 ACK+8 位数据 +1 位 ACK+...+1 个停止位。每字节后跟 ACK/NACK 应答位。SDA 在 SCL 高期间必须稳定。",
+                            "7 位地址模式：地址占 7 位 (0x00-0x7F)，第 8 位为 R/W 位 (0= 写，1= 读)。如 EEPROM 地址 0x50，写操作发送 0xA0，读操作发送 0xA1。",
+                            "主机发送：产生 START，发送地址+ 写位 (0)，等待 ACK，发送数据字节，等待 ACK，产生 STOP。TXE 标志表示可写下一个数据。",
+                            "主机接收：产生 START，发送地址 + 读位 (1)，等待 ACK，读取数据，发送 NACK(最后一个字节) 或 ACK，产生 STOP。RXNE 标志表示数据已到。",
+                            "事件标志：TXE(发送缓冲区空)、RXNE(接收缓冲区非空)、BTF(字节传输完成)、ADDR(地址匹配)、STOPF(检测到 STOP)。使能对应中断可通知 CPU 处理。",
+                            "应用实例：AT24Cxx EEPROM 随机读写字节；MPU6050 加速度计读写寄存器；DS3231 RTC 读取时间；OLED 显示屏 (SSD1306) 发送命令数据。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-indigo-900 to-purple-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 I2C 总线完整指南</h1>
+                            <p className="text-indigo-200 text-lg">START/STOP 时序、地址帧与应用实例</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-indigo-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-indigo-700 text-indigo-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-indigo-500/30">
+                                <h3 className="text-xl font-bold text-indigo-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-indigo-300 overflow-x-auto">
+                                            <code>{`// I2C 信号线 (开漏输出 + 上拉)
+// SDA - Serial Data (数据线)
+// SCL - Serial Clock (时钟线)
+
+// 引脚定义 (I2C1)
+// SDA = PB7 (AF4)
+// SCL = PB6 (AF4)
+
+// 上拉电阻：4.7kΩ (标准模式)
+// 速度：标准 100kbps, 快速 400kbps`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-indigo-300 overflow-x-auto">
+                                            <code>{`// START/STOP 条件
+// START: SCL=H 时，SDA: H→L
+// STOP:  SCL=H 时，SDA: L→H
+
+void I2C_Start(I2C_TypeDef* I2Cx) {
+    // 产生 START
+    I2Cx->CR1 |= I2C_CR1_START;
+    while (!(I2Cx->SR1 & I2C_SR1_SB));  // 等待 START
+}
+
+void I2C_Stop(I2C_TypeDef* I2Cx) {
+    // 产生 STOP
+    I2Cx->CR1 |= I2C_CR1_STOP;
+    // 无需等待，STOP 后总线释放
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-indigo-300 overflow-x-auto">
+                                            <code>{`// 数据帧格式
+// [START][Addr7:0][R/W][ACK][Data8][ACK]...[STOP]
+
+// 时序要求
+// - SDA 在 SCL=H 期间必须稳定
+// - SDA 变化只能在 SCL=L 期间
+// - 每字节后跟 ACK/NACK
+
+// ACK 生成
+I2Cx->CR1 |= I2C_CR1_ACK;  // 使能 ACK
+// NACK (最后一个字节前)
+I2Cx->CR1 &= ~I2C_CR1_ACK;`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-indigo-300 overflow-x-auto">
+                                            <code>{`// 7 位地址格式
+// 写操作：地址 << 1 | 0
+// 读操作：地址 << 1 | 1
+
+// EEPROM 0x50 示例
+#define EEPROM_ADDR     0x50
+#define EEPROM_WRITE    (EEPROM_ADDR << 1 | 0)  // 0xA0
+#define EEPROM_READ     (EEPROM_ADDR << 1 | 1)  // 0xA1
+
+// MPU6050 (0x68)
+#define MPU6050_ADDR    0x68
+#define MPU6050_WRITE   0xD0
+#define MPU6050_READ    0xD1`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-indigo-300 overflow-x-auto">
+                                            <code>{`// 主机发送 (写操作)
+void I2C_Write(I2C_TypeDef* I2Cx, uint8_t addr,
+               uint8_t reg, uint8_t data) {
+    I2C_Start(I2Cx);
+
+    // 发送地址 + 写位
+    I2Cx->DR = (addr << 1) | 0;
+    while (!(I2Cx->SR1 & I2C_SR1_ADDR));
+    I2Cx->SR2;  // 清除 ADDR
+
+    // 发送寄存器地址
+    I2Cx->DR = reg;
+    while (!(I2Cx->SR1 & I2C_SR1_TxE));
+
+    // 发送数据
+    I2Cx->DR = data;
+    while (!(I2Cx->SR1 & I2C_SR1_BTF));
+
+    I2C_Stop(I2Cx);
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-indigo-300 overflow-x-auto">
+                                            <code>{`// 主机接收 (读操作)
+uint8_t I2C_Read(I2C_TypeDef* I2Cx, uint8_t addr,
+                 uint8_t reg) {
+    I2C_Start(I2Cx);
+
+    // 发送地址 + 写位 (设置寄存器地址)
+    I2Cx->DR = (addr << 1) | 0;
+    while (!(I2Cx->SR1 & I2C_SR1_ADDR));
+    I2Cx->SR2;
+
+    I2Cx->DR = reg;
+    while (!(I2Cx->SR1 & I2C_SR1_BTF));
+
+    // 重复 START
+    I2C_Start(I2Cx);
+
+    // 发送地址 + 读位
+    I2Cx->DR = (addr << 1) | 1;
+    while (!(I2Cx->SR1 & I2C_SR1_ADDR));
+
+    // NACK (最后一个字节)
+    I2Cx->CR1 &= ~I2C_CR1_ACK;
+    I2Cx->SR2;
+
+    while (!(I2Cx->SR1 & I2C_SR1_RxNE));
+    uint8_t data = I2Cx->DR;
+
+    I2C_Stop(I2Cx);
+    return data;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-indigo-300 overflow-x-auto">
+                                            <code>{`// 事件标志与中断
+void I2C_Init(void) {
+    // 使能事件中断
+    I2C1->CR2 |= I2C_CR2_ITEVTEN;
+    I2C1->CR2 |= I2C_CR2_ITBUFEN;
+    NVIC_EnableIRQ(I2C1_EV_IRQn);
+}
+
+// 事件中断处理
+void I2C1_EV_IRQHandler(void) {
+    if (I2C1->SR1 & I2C_SR1_TxE) {
+        // 发送缓冲区空，写下一个数据
+        I2C1->DR = tx_data[tx_index++];
+    }
+    if (I2C1->SR1 & I2C_SR1_RxNE) {
+        // 接收缓冲区非空，读取数据
+        rx_data[rx_index++] = I2C1->DR;
+    }
+    if (I2C1->SR1 & I2C_SR1_BTF) {
+        // 字节传输完成
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-indigo-300 overflow-x-auto">
+                                            <code>{`// EEPROM AT24C02 示例
+void EEPROM_WriteByte(uint16_t addr, uint8_t data) {
+    I2C_Start(I2C1);
+    I2C1->DR = 0xA0;  // EEPROM 写地址
+    while (!(I2C1->SR1 & I2C_SR1_ADDR));
+    I2C1->SR2;
+
+    I2C1->DR = addr & 0xFF;  // 存储地址
+    while (!(I2C1->SR1 & I2C_SR1_TxE));
+
+    I2C1->DR = data;  // 数据
+    while (!(I2C1->SR1 & I2C_SR1_BTF));
+
+    I2C_Stop(I2C1);
+}
+
+// MPU6050 读取加速度计
+int16_t MPU6050_ReadAxis(uint8_t reg) {
+    uint8_t high = I2C_Read(I2C1, 0x68, reg);
+    uint8_t low = I2C_Read(I2C1, 0x68, reg+1);
+    return (high << 8) | low;
+}`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => {
+                                                simulateI2CTransfer(true, [0x55]);
+                                                setTxBuffer([0xA0, 0x00, 0x55]);
+                                            }}
+                                            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            ▶️ 写模拟
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                simulateI2CTransfer(false, [0xAA]);
+                                                setRxBuffer([0xAA]);
+                                            }}
+                                            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            ▶️ 读模拟
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-indigo-500/30">
+                                <h3 className="text-xl font-bold text-indigo-400 mb-4">🔬 I2C 时序可视化</h3>
+                                <div className="space-y-4">
+                                    {/* 信号线状态 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-indigo-300 mb-3">信号线状态</h4>
+                                        <div className="space-y-3">
+                                            <div>
+                                                <div className="flex justify-between text-sm text-gray-400 mb-1">
+                                                    <span>SCL 时钟</span>
+                                                    <span>{sclState ? 'HIGH' : 'LOW'}</span>
+                                                </div>
+                                                <div className="flex gap-1 h-8">
+                                                    {[...Array(16)].map((_, i) => (
+                                                        <div
+                                                            key={i}
+                                                            className={`flex-1 rounded transition-all ${
+                                                                sclState ? 'bg-blue-500' : 'bg-gray-700'
+                                                            }`}
+                                                        ></div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div className="flex justify-between text-sm text-gray-400 mb-1">
+                                                    <span>SDA 数据</span>
+                                                    <span>{sdaState ? 'HIGH' : 'LOW'}</span>
+                                                </div>
+                                                <div className="flex gap-1 h-8">
+                                                    {[...Array(16)].map((_, i) => (
+                                                        <div
+                                                            key={i}
+                                                            className={`flex-1 rounded transition-all ${
+                                                                sdaState ? 'bg-green-500 animate-sda' : 'bg-gray-700'
+                                                            }`}
+                                                        ></div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* START/STOP 条件 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-indigo-300 mb-3">时序条件</h4>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="p-3 bg-gray-700 rounded">
+                                                <div className="text-sm text-gray-400 mb-2">START 条件</div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-8 h-8 bg-red-500 rounded flex items-center justify-center text-white text-xs animate-start">S</div>
+                                                    <span className="text-xs text-gray-300">SCL=H 时 SDA: H→L</span>
+                                                </div>
+                                            </div>
+                                            <div className="p-3 bg-gray-700 rounded">
+                                                <div className="text-sm text-gray-400 mb-2">STOP 条件</div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-8 h-8 bg-green-500 rounded flex items-center justify-center text-white text-xs animate-start">P</div>
+                                                    <span className="text-xs text-gray-300">SCL=H 时 SDA: L→H</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 地址配置 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-indigo-300 mb-3">从机地址</h4>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-gray-400 text-sm">0x</span>
+                                            <input
+                                                type="text"
+                                                maxLength="2"
+                                                value={currentAddress.toString(16).toUpperCase()}
+                                                onChange={(e) => setCurrentAddress(parseInt(e.target.value || '0', 16))}
+                                                className="w-16 bg-gray-700 text-white px-2 py-1 rounded text-center"
+                                            />
+                                            <span className="text-gray-400 text-sm">
+                                                → 写：0x{((currentAddress << 1) | 0).toString(16).toUpperCase().padStart(2, '0')}
+                                            </span>
+                                            <span className="text-gray-400 text-sm">
+                                                → 读：0x{((currentAddress << 1) | 1).toString(16).toUpperCase().padStart(2, '0')}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* 数据缓冲区 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-indigo-300 mb-3">数据缓冲</h4>
+                                        <div className="space-y-2">
+                                            <div>
+                                                <span className="text-gray-400 text-sm">TX: </span>
+                                                <div className="flex gap-1 mt-1">
+                                                    {txBuffer.map((byte, i) => (
+                                                        <div key={i} className="w-8 h-8 bg-green-600 rounded flex items-center justify-center text-white text-xs font-mono">
+                                                            {byte.toString(16).toUpperCase().padStart(2, '0')}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <span className="text-gray-400 text-sm">RX: </span>
+                                                <div className="flex gap-1 mt-1">
+                                                    {rxBuffer.map((byte, i) => (
+                                                        <div key={i} className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center text-white text-xs font-mono">
+                                                            {byte.toString(16).toUpperCase().padStart(2, '0')}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-indigo-500/30">
+                                <h3 className="text-xl font-bold text-indigo-400 mb-4">📖 配置指南</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    {currentStep === 0 && (
+                                        <div>
+                                            <h4 className="font-bold text-indigo-300 mb-2">📌 I2C 架构</h4>
+                                            <p>2 线制开漏输出，需外加上拉电阻。半双工通信，时钟由主机产生。支持多主仲裁、时钟 stretching、多从寻址。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <div>
+                                            <h4 className="font-bold text-indigo-300 mb-2">📌 START/STOP</h4>
+                                            <p>START: SCL 高期间 SDA 下降沿。STOP: SCL 高期间 SDA 上升沿。只有主机产生，标志传输开始/结束。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <div>
+                                            <h4 className="font-bold text-indigo-300 mb-2">📌 数据帧</h4>
+                                            <p>每字节 8 位，MSB 先行。SCL 高期间 SDA 必须稳定。每字节后跟 ACK/NACK。ACK=SDA 低，NACK=SDA 高。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <div>
+                                            <h4 className="font-bold text-indigo-300 mb-2">📌 7 位地址</h4>
+                                            <p>7 位地址 (0x00-0x7F)+1 位 R/W。写=0，读=1。如 0x50 设备：写 0xA0，读 0xA1。10 位地址用特殊格式。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <div>
+                                            <h4 className="font-bold text-indigo-300 mb-2">📌 主机发送</h4>
+                                            <p>START→地址 + 写→ACK→寄存器地址→ACK→数据→ACK→STOP。等待 TXE 写 DR，等待 BTF 产生 STOP。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <div>
+                                            <h4 className="font-bold text-indigo-300 mb-2">📌 主机接收</h4>
+                                            <p>重复 START 机制：先写寄存器地址，再重复 START 发送读地址。最后一个字节前发 NACK，然后 STOP。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <div>
+                                            <h4 className="font-bold text-indigo-300 mb-2">📌 事件中断</h4>
+                                            <p>TXE/RXNE/BTF/ADDR/STOPF 等标志。使能 ITEVTEN/ITBUFEN 中断。ISR 中及时处理避免丢失数据。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <div>
+                                            <h4 className="font-bold text-indigo-300 mb-2">📌 应用实例</h4>
+                                            <p>EEPROM: 字节写/随机读。MPU6050: 读写寄存器。DS3231: 时间日期读取。OLED: 命令/数据发送。</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-indigo-600 hover:bg-indigo-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-indigo-500/30">
+                            <h2 className="text-2xl font-bold text-indigo-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>变量作用域 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#4c1d95;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#7c3aed;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#f5f3ff,#ede9fe);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#ddd6fe;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#8b5cf6;box-shadow:0 0 20px rgba(139,92,246,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#4c1d95;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .scope-container{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}
+    .scope-box{border-radius:12px;padding:16px;transition:all 0.4s ease;border:3px solid transparent}
+    .scope-box.global{background:linear-gradient(135deg:#fef3c7,#fde68a);border-color:#f59e0b}
+    .scope-box.local{background:linear-gradient(135deg:#dbeafe,#bfdbfe);border-color:#3b82f6}
+    .scope-box.block{background:linear-gradient(135deg:#d1fae5,#a7f3d0);border-color:#22c55e}
+    .scope-box.active{transform:scale(1.02);box-shadow:0 8px 24px rgba(0,0,0,0.15)}
+    .scope-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .scope-title{font-size:14px;font-weight:700;color:#1e293b}
+    .scope-badge{padding:4px 8px;background:#1e293b;color:#22d3ee;border-radius:4px;font-size:10px;font-family:'Consolas',monospace}
+    .variable-list{display:flex;flex-direction:column;gap:8px}
+    .variable-item{background:white;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center;transition:all 0.3s ease}
+    .variable-item.pending{opacity:0.5}
+    .variable-item.active{background:linear-gradient(135deg:#f5f3ff,#ede9fe);border:2px solid#8b5cf6}
+    .variable-item.inaccessible{background:#f1f5f9;opacity:0.4;text-decoration:line-through}
+    .var-name-small{font-size:12px;font-weight:600;color:#475569}
+    .var-value{font-size:14px;font-weight:700;font-family:'Consolas',monospace;color:#8b5cf6}
+    .visibility-indicator{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+    .visibility-row{display:flex;align-items:center;gap:8px}
+    .visibility-dot{width:12px;height:12px;border-radius:50%;background:#e2e8f0;transition:all 0.3s ease}
+    .visibility-dot.visible{background:#22c55e;box-shadow:0 0 8px rgba(34,197,94,0.5)}
+    .visibility-dot.hidden{background:#ef4444}
+    .visibility-label{font-size:12px;color:#64748b}
+    .scope-diagram{background:#1e293b;border-radius:12px;padding:16px;margin:16px 0}
+    .scope-layer{padding:12px;margin-bottom:8px;border-radius:8px;transition:all 0.4s ease}
+    .scope-layer.global{background:#f59e0b;color:white}
+    .scope-layer.function{background:#3b82f6;color:white}
+    .scope-layer.block{background:#22c55e;color:white}
+    .scope-layer.active{transform:scale(1.02);box-shadow:0 4px 16px rgba(0,0,0,0.3)}
+    .scope-layer-label{font-size:11px;opacity:0.8}
+    .scope-layer-content{font-size:14px;font-weight:700;font-family:'Consolas',monospace}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#22d3ee;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#8b5cf6',blue:'#3b82f6',teal:'#14b8a6'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'#include <stdint.h>',color:'#7c3aed'},
+      3:{step:1,text:'',color:'#94a3b8'},
+      4:{step:1,text:'int32_t global_var = 100;',color:'#f59e0b'},
+      5:{step:1,text:'',color:'#94a3b8'},
+      6:{step:2,text:'void modify(void) {',color:'#3b82f6'},
+      7:{step:2,text:'    int32_t local_var = 50;',color:'#3b82f6'},
+      8:{step:3,text:'    global_var = 200;',color:'#f59e0b'},
+      9:{step:3,text:'    printf("Inside: %d\\n", global_var);',color:'#eab308'},
+      10:{step:3,text:'    printf("Local: %d\\n", local_var);',color:'#3b82f6'},
+      11:{step:4,text:'}',color:'#94a3b8'},
+      12:{step:5,text:'int main(void) {',color:'#3b82f6'},
+      13:{step:5,text:'    modify();',color:'#3b82f6'},
+      14:{step:6,text:'    printf("Global: %d\\n", global_var);',color:'#eab308'},
+      15:{step:6,text:'    return 0;',color:'#3b82f6'},
+      16:{step:6,text:'}',color:'#94a3b8'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，定义全局变量 global_var=100，全局作用域在整个程序中可见',
+      2:'进入 modify 函数，创建局部作用域，定义局部变量 local_var=50',
+      3:'在函数内部访问 global_var 并修改为 200，全局变量可以被任何函数访问',
+      4:'modify 函数结束，local_var 被销毁，但 global_var 仍然存在',
+      5:'main 函数调用 modify 函数，全局变量已经被修改',
+      6:'在 main 中打印 global_var 显示 200，局部变量只能在定义的作用域内访问'
+    };
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',chip:'M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z',scope:'M3 3v18h18V3H3zm16 16H5V5h14v14zM7 7h2v10H7V7zm4 0h2v10h-2V7zm4 0h2v10h-2V7z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [globalVar,setGlobalVar] = useState(100);
+      const [localVar,setLocalVar] = useState(null);
+      const [activeScope,setActiveScope] = useState('global');
+      const [visibleVars,setVisibleVars] = useState({globalVar:true,localVar:false});
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 16; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setGlobalVar(100);
+          setLocalVar(null);
+          setActiveScope('global');
+          setVisibleVars({globalVar:true,localVar:false});
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setActiveScope('modify');
+          setLocalVar(50);
+          setVisibleVars({globalVar:true,localVar:true});
+        } else if(step === 3) {
+          setGlobalVar(200);
+          setTerminalLines(['Inside: 200','Local: 50']);
+        } else if(step === 4) {
+          setActiveScope('global');
+          setLocalVar(null);
+          setVisibleVars({globalVar:true,localVar:false});
+        } else if(step === 5) {
+          setActiveScope('main');
+        } else if(step === 6) {
+          setTerminalLines(prev => [...prev,'Global: 200']);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setGlobalVar(100);
+        setLocalVar(null);
+        setActiveScope('global');
+        setVisibleVars({globalVar:true,localVar:false});
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>变量作用域 - C 语言可视化</h1>
+            <p>全局作用域 | 局部作用域 | 块级作用域</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.purple,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                variable_scope.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.scope} size={22} />
+                作用域可视化
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">作用域层次</span>
+                  <span className="var-type">Scope Levels</span>
+                </div>
+                <div className="scope-container">
+                  <div className={`scope-box global ${activeScope === 'global' ? 'active' : ''}`}>
+                    <div className="scope-header">
+                      <span className="scope-title">全局作用域</span>
+                      <span className="scope-badge">Global</span>
+                    </div>
+                    <div className="variable-list">
+                      <div className={`variable-item ${step >= 1 ? 'active' : 'pending'}`}>
+                        <span className="var-name-small">global_var</span>
+                        <span className="var-value">{globalVar}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`scope-box local ${(step === 2 || step === 3) ? 'active' : ''}`}>
+                    <div className="scope-header">
+                      <span className="scope-title">modify() 作用域</span>
+                      <span className="scope-badge">Function</span>
+                    </div>
+                    <div className="variable-list">
+                      <div className={`variable-item ${step >= 2 && step <= 3 ? 'active' : localVar === null ? 'inaccessible' : 'pending'}`}>
+                        <span className="var-name-small">local_var</span>
+                        <span className="var-value">{localVar !== null ? localVar : '×'}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="scope-diagram">
+                  <div className={`scope-layer global ${step >= 1 ? 'active' : ''}`}>
+                    <div className="scope-layer-label">程序级</div>
+                    <div className="scope-layer-content">global_var = {globalVar}</div>
+                  </div>
+                  {(step === 2 || step === 3) && (
+                    <div className={`scope-layer function active`}>
+                      <div className="scope-layer-label">modify()</div>
+                      <div className="scope-layer-content">local_var = {localVar}</div>
+                    </div>
+                  )}
+                  {step >= 5 && (
+                    <div className={`scope-layer function active`}>
+                      <div className="scope-layer-label">main()</div>
+                      <div className="scope-layer-content">调用 modify()</div>
+                    </div>
+                  )}
+                </div>
+                <div className="visibility-indicator">
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>变量可见性</div>
+                  <div className="visibility-row">
+                    <div className={`visibility-dot ${visibleVars.globalVar ? 'visible' : 'hidden'}`}></div>
+                    <span className="visibility-label">global_var (全局可见)</span>
+                  </div>
+                  <div className="visibility-row">
+                    <div className={`visibility-dot ${visibleVars.localVar ? 'visible' : 'hidden'}`}></div>
+                    <span className="visibility-label">local_var (仅函数内可见)</span>
+                  </div>
+                </div>
+              </div>
+              {step >= 3 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.purple}}>全局变量</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>整个程序可见，生命周期贯穿程序运行</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>局部变量</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>仅函数内可见，函数结束即销毁</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>作用域规则</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>内层可访问外层，外层不可访问内层</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>最佳实践</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>减少全局变量，优先使用局部变量</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

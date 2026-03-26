@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 低功耗模式完整指南 - 睡眠/停机/待机模式可视化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // 8 个步骤 - 语音驱动自动播放
+        const STEPS = [
+            {
+                title: "低功耗基础",
+                code: `// STM32 三种低功耗模式
+// 睡眠模式 (Sleep): CPU 停止，外设运行
+// 停机模式 (Stop): CPU+ 外设停止，SRAM 保留
+// 待机模式 (Standby): 仅备份域运行
+
+// 功耗对比 (STM32F103)
+// 运行模式：~36mA @72MHz
+// 睡眠模式：~24mA (降频可更低)
+// 停机模式：~20μA
+// 待机模式：~2μA`,
+                visualization: "low-power-compare",
+                explanation: "STM32 提供三种低功耗模式。睡眠模式只停止 CPU，外设继续运行。停机模式停止所有时钟，但保留 SRAM 内容。待机模式功耗最低，但会丢失大部分状态。"
+            },
+            {
+                title: "睡眠模式配置",
+                code: `// 进入睡眠模式 (WFE 方式)
+void Enter_Sleep_WFE(void) {
+    // 配置 EXTI 为唤醒源
+    EXTI->IMR |= EXTI_IMR_MR0;  // 使能 EXTI0
+    EXTI->FTSR |= EXTI_FTSR_TR0; // 下降沿触发
+
+    // 设置 SYSCLK 为 HSI/4 降频
+    RCC->CFGR |= RCC_CFGR_HPRE_3;
+
+    // 进入睡眠 (WFE)
+    __WFE();
+}
+
+// 进入睡眠模式 (WFI 方式)
+void Enter_Sleep_WFI(void) {
+    SCB->SCR &= ~SCB_SCR_SLEEPDEEP;
+    __WFI();  // 等待中断
+}`,
+                visualization: "sleep-mode",
+                explanation: "睡眠模式可通过 WFE(等待事件) 或 WFI(等待中断) 进入。建议先降低系统时钟频率以减少功耗。任何中断或事件都可以唤醒。"
+            },
+            {
+                title: "停机模式配置",
+                code: `// 进入停机模式
+void Enter_Stop_Mode(void) {
+    // 使能 PWR 时钟
+    RCC->APB1ENR |= RCC_APB1ENR_PWREN;
+
+    // 设置 PDDS=0 进入停机模式
+    PWR->CR &= ~PWR_CR_PDDS;
+
+    // 设置 LPDS 低压断电
+    PWR->CR |= PWR_CR_LPDS;
+
+    // 设置深度睡眠
+    SCB->SCR |= SCB_SCR_SLEEPDEEP;
+
+    // 进入停机 (WFI)
+    __WFI();
+}
+
+// 唤醒后配置系统时钟
+void SystemClock_Config(void);`,
+                visualization: "stop-mode",
+                explanation: "停机模式需要设置 PWR 寄存器和 SCB 的 SLEEPDEEP 位。唤醒后会丢失时钟配置，必须重新初始化系统时钟。唤醒源包括 EXTI、PVD、RTC 等。"
+            },
+            {
+                title: "待机模式配置",
+                code: `// 进入待机模式
+void Enter_Standby_Mode(void) {
+    // 使能 PWR 时钟
+    RCC->APB1ENR |= RCC_APB1ENR_PWREN;
+
+    // 清除 Wakeup Flag
+    PWR->CSR |= PWR_CSR_CWUF;
+
+    // 使能 WKUP 引脚 (PA0)
+    PWR->CSR |= PWR_CSR_EWUP;
+
+    // 设置 PDDS=1 进入待机
+    PWR->CR |= PWR_CR_PDDS;
+
+    // 深度睡眠
+    SCB->SCR |= SCB_SCR_SLEEPDEEP;
+
+    // 进入待机
+    __WFI();
+}`,
+                visualization: "standby-mode",
+                explanation: "待机模式是最低功耗模式，仅备份域和 WKUP 引脚保持活动。唤醒后相当于系统复位，需要从复位向量开始执行。WKUP 引脚 (PA0) 上升沿可唤醒。"
+            },
+            {
+                title: "唤醒源配置",
+                code: `// EXTI 唤醒配置 (停机/睡眠模式)
+void EXTI_Wakeup_Config(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    GPIOA->CRL &= ~0x0F;  // PA0 输入
+    AFIO->EXTICR[0] = 0;   // PA0→EXTI0
+
+    EXTI->FTSR |= EXTI_FTSR_TR0; // 下降沿
+    EXTI->IMR |= EXTI_IMR_MR0;   // 使能中断
+
+    NVIC_EnableIRQ(EXTI0_IRQn);
+}
+
+// RTC 闹钟唤醒 (停机模式)
+void RTC_Alarm_Wakeup(void) {
+    RTC->CRH |= RTC_CRH_ALRIE;  // 闹钟中断
+    RTC->ALRH = 0;
+    RTC->ALRL = 32767;  // 1 秒后唤醒
+}`,
+                visualization: "wakeup-sources",
+                explanation: "多种唤醒源可用于不同模式。EXTI 引脚适用于所有低功耗模式。RTC 闹钟适合定时唤醒。PVD(电源电压检测) 可用于电池低压唤醒。"
+            },
+            {
+                title: "低功耗外设",
+                code: `// 低功耗模式下的外设管理
+
+// 进入低功耗前：关闭未用外设时钟
+void Before_LowPower(void) {
+    RCC->APB2ENR = 0;  // 关闭 APB2 外设
+    RCC->APB1ENR = 0;  // 关闭 APB1 外设
+    // 保留必要的：RCC, FLASH, PWR
+}
+
+// 唤醒后：恢复外设时钟
+void After_Wakeup(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+    // ... 重新初始化外设
+}`,
+                visualization: "peripheral-power",
+                explanation: "进入低功耗模式前应关闭所有不必要的外设时钟。唤醒后需要重新初始化外设。USART、TIM 等外设可在睡眠模式下继续运行用于唤醒。"
+            },
+            {
+                title: "功耗测量",
+                code: `// 功耗优化技巧
+
+// 1. 降低时钟频率
+RCC->CFGR |= RCC_CFGR_HPRE_3;  // HCLK/2
+
+// 2. 关闭未用 GPIO
+GPIOA->CRL = 0x88888888;  // 模拟输入
+
+// 3. 禁用未用外设时钟
+RCC->APB1ENR &= ~unused_mask;
+
+// 4. 使用中断代替轮询
+// 避免 busy-wait 消耗功耗
+
+// 5. 选择合适低功耗模式
+// 根据唤醒时间要求选择`,
+                visualization: "power-measurement",
+                explanation: "功耗测量需要使用电流表串联电源。典型值：运行 36mA，睡眠 24mA，停机 20μA，待机 2μA。关闭未用 GPIO(设为模拟输入) 可减少漏电流。"
+            },
+            {
+                title: "电池供电应用",
+                code: `// 电池供电系统低功耗策略
+
+// 主循环：大部分时间待机
+int main(void) {
+    System_Init();
+    RTC_Init();  // 定时唤醒
+
+    while (1) {
+        // 1. 执行测量/通信
+        Sensor_Read();
+        Data_Transmit();
+
+        // 2. 进入待机模式
+        Enter_Standby_Mode();
+        // 唤醒后从复位开始执行
+    }
+}
+
+// 唤醒标志检测
+if (PWR->CSR & PWR_CSR_WUF) {
+    // 从待机唤醒
+    PWR->CSR |= PWR_CSR_CWUF;  // 清除标志
+}`,
+                visualization: "battery-application",
+                explanation: "电池供电设备应最大化待机时间。典型策略：唤醒→测量→发送→立即返回待机。使用 RTC 定时唤醒可实现周期性数据采集。备份寄存器可保存关键数据。"
+            }
+        ];
+
+        // 颜色映射 - 蓝紫色调
+        const COLOR_MAP = {
+            primary: '#6366f1',    // indigo-500
+            secondary: '#8b5cf6',  // violet-500
+            accent: '#ec4899',     // pink-500
+            success: '#10b981',    // emerald-500
+            warning: '#f59e0b',    // amber-500
+            danger: '#ef4444',     // red-500
+            info: '#3b82f6',       // blue-500
+            sleep: '#06b6d4',      // cyan-500
+            stop: '#8b5cf6',       // violet-500
+            standby: '#ec4899',    // pink-500
+            gradients: [
+                'from-indigo-500 to-violet-500',
+                'from-cyan-500 to-blue-500',
+                'from-pink-500 to-rose-500'
+            ]
+        };
+
+        // 低功耗模式对比组件
+        const LowPowerCompare = ({ step }) => {
+            const [selectedMode, setSelectedMode] = useState(0);
+            const modes = [
+                { name: '运行', current: '36mA', clocks: '全部', sram: '保持', wakeup: '即时' },
+                { name: '睡眠', current: '24mA', clocks: 'CPU 停', sram: '保持', wakeup: '即时' },
+                { name: '停机', current: '20μA', clocks: '全部停', sram: '保持', wakeup: '中断' },
+                { name: '待机', current: '2μA', clocks: '仅备份', sram: '丢失', wakeup: 'WKUP/RTC' }
+            ];
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-4 gap-2">
+                        {modes.map((mode, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => setSelectedMode(idx)}
+                                className={`p-3 rounded-lg text-sm transition-all ${
+                                    selectedMode === idx
+                                        ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-lg scale-105'
+                                        : 'bg-gray-100 hover:bg-gray-200'
+                                }`}
+                            >
+                                <div className="font-semibold">{mode.name}</div>
+                                <div className="text-xs opacity-80">{mode.current}</div>
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="bg-gray-50 rounded-lg p-4">
+                        <div className="text-center text-2xl font-bold mb-4">
+                            电流：{modes[selectedMode].current}
+                        </div>
+                        <div className="grid grid-cols-3 gap-4 text-center">
+                            <div>
+                                <div className="text-xs text-gray-500">时钟状态</div>
+                                <div className="font-medium">{modes[selectedMode].clocks}</div>
+                            </div>
+                            <div>
+                                <div className="text-xs text-gray-500">SRAM</div>
+                                <div className="font-medium">{modes[selectedMode].sram}</div>
+                            </div>
+                            <div>
+                                <div className="text-xs text-gray-500">唤醒方式</div>
+                                <div className="font-medium">{modes[selectedMode].wakeup}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 睡眠模式可视化
+        const SleepMode = ({ step }) => {
+            const [cpuRunning, setCpuRunning] = useState(true);
+            const [peripheralRunning, setPeripheralRunning] = useState(true);
+
+            useEffect(() => {
+                setCpuRunning(false);
+                setPeripheralRunning(true);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm text-gray-600">
+                        睡眠模式：CPU 停止，外设继续运行
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className={`p-4 rounded-lg text-center transition-all ${
+                            cpuRunning ? 'bg-green-100' : 'bg-gray-200'
+                        }`}>
+                            <div className="text-2xl mb-2">{cpuRunning ? '🟢' : '⏸️'}</div>
+                            <div className="font-semibold">CPU 内核</div>
+                            <div className="text-xs">{cpuRunning ? '运行' : '停止'}</div>
+                        </div>
+                        <div className={`p-4 rounded-lg text-center transition-all ${
+                            peripheralRunning ? 'bg-green-100' : 'bg-gray-200'
+                        }`}>
+                            <div className="text-2xl mb-2">{peripheralRunning ? '🟢' : '⏸️'}</div>
+                            <div className="font-semibold">外设 (TIM/USART 等)</div>
+                            <div className="text-xs">{peripheralRunning ? '运行' : '停止'}</div>
+                        </div>
+                    </div>
+                    <div className="bg-indigo-50 rounded-lg p-3 text-center">
+                        <div className="text-sm">唤醒源：任意中断</div>
+                        <div className="text-xs text-gray-600">EXTI, TIM, USART, ADC, ...</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 停机模式可视化
+        const StopMode = ({ step }) => {
+            const [powerState, setPowerState] = useState('on');
+            const [wakeupTriggered, setWakeupTriggered] = useState(false);
+
+            useEffect(() => {
+                setPowerState('stop');
+                const timer = setTimeout(() => {
+                    setWakeupTriggered(true);
+                    setTimeout(() => {
+                        setPowerState('on');
+                        setWakeupTriggered(false);
+                    }, 2000);
+                }, 2000);
+                return () => clearTimeout(timer);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm text-gray-600">
+                        停机模式：所有时钟停止，SRAM 保持
+                    </div>
+                    <div className="relative">
+                        <div className={`p-6 rounded-lg text-center transition-all ${
+                            powerState === 'on' ? 'bg-green-100' : 'bg-gray-800 text-white'
+                        }`}>
+                            <div className="text-3xl mb-2">
+                                {powerState === 'on' ? '🟢' : '🔴'}
+                            </div>
+                            <div className="font-semibold">系统电源域</div>
+                            <div className="text-sm mt-1">
+                                {powerState === 'on' ? '正常运行' : '停机 (20μA)'}
+                            </div>
+                        </div>
+                        {wakeupTriggered && (
+                            <div className="absolute top-0 left-1/2 transform -translate-x-1/2">
+                                <div className="bg-yellow-400 text-black px-3 py-1 rounded-full text-xs font-bold animate-pulse">
+                                    ⚡ 唤醒中!
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <div className="bg-violet-50 rounded-lg p-3">
+                        <div className="text-sm font-semibold mb-2">唤醒源:</div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>EXTI 0-15</div>
+                            <div>PVD</div>
+                            <div>RTC 闹钟</div>
+                            <div>USB 唤醒</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 待机模式可视化
+        const StandbyMode = ({ step }) => {
+            const [backupDomain, setBackupDomain] = useState(true);
+            const [mainDomain, setMainDomain] = useState(true);
+            const [wakeupPulse, setWakeupPulse] = useState(false);
+
+            useEffect(() => {
+                setMainDomain(false);
+                const timer = setTimeout(() => {
+                    setWakeupPulse(true);
+                    setTimeout(() => {
+                        setWakeupPulse(false);
+                        setMainDomain(true);
+                    }, 2000);
+                }, 2500);
+                return () => clearTimeout(timer);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm text-gray-600">
+                        待机模式：仅备份域运行 (2μA)
+                    </div>
+                    <div className="space-y-3">
+                        <div className={`p-4 rounded-lg text-center transition-all ${
+                            mainDomain ? 'bg-green-100' : 'bg-gray-800 text-white'
+                        }`}>
+                            <div className="text-2xl mb-1">{mainDomain ? '🟢' : '⚫'}</div>
+                            <div className="font-semibold">主电源域</div>
+                            <div className="text-xs">
+                                {mainDomain ? '运行' : '关闭 (待机)'}
+                            </div>
+                        </div>
+                        <div className="bg-pink-100 p-4 rounded-lg text-center">
+                            <div className="text-2xl mb-1">🔋</div>
+                            <div className="font-semibold">备份域 (LSE+RTC)</div>
+                            <div className="text-xs">始终运行 (VBAT)</div>
+                        </div>
+                        {wakeupPulse && (
+                            <div className="bg-yellow-400 text-black p-2 rounded-lg text-center font-bold animate-pulse">
+                                ⚡ WKUP 上升沿唤醒!
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // 唤醒源配置可视化
+        const WakeupSources = ({ step }) => {
+            const [activeSource, setActiveSource] = useState('exti');
+            const sources = [
+                { id: 'exti', name: 'EXTI 按键', icon: '🔘', desc: '下降沿触发' },
+                { id: 'rtc', name: 'RTC 闹钟', icon: '⏰', desc: '定时唤醒' },
+                { id: 'wkup', name: 'WKUP 引脚', icon: '📍', desc: 'PA0 上升沿' },
+                { id: 'pvd', name: 'PVD 检测', icon: '⚡', desc: '低压检测' }
+            ];
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                        {sources.map((src) => (
+                            <button
+                                key={src.id}
+                                onClick={() => setActiveSource(src.id)}
+                                className={`p-3 rounded-lg text-left transition-all ${
+                                    activeSource === src.id
+                                        ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white'
+                                        : 'bg-gray-100 hover:bg-gray-200'
+                                }`}
+                            >
+                                <div className="text-xl">{src.icon}</div>
+                                <div className="font-semibold text-sm">{src.name}</div>
+                                <div className="text-xs opacity-80">{src.desc}</div>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4">
+                        <div className="text-sm font-semibold mb-2">
+                            {sources.find(s => s.id === activeSource)?.name} 配置
+                        </div>
+                        <div className="text-xs text-gray-600 font-mono">
+                            {activeSource === 'exti' && 'EXTI->IMR |= EXTI_IMR_MR0;\\nEXTI->FTSR |= EXTI_FTSR_TR0;'}
+                            {activeSource === 'rtc' && 'RTC->CRH |= RTC_CRH_ALRIE;\\nRTC->ALR = target_time;'}
+                            {activeSource === 'wkup' && 'PWR->CSR |= PWR_CSR_EWUP;\\n// PA0 上升沿唤醒'}
+                            {activeSource === 'pvd' && 'PWR->CR |= PWR_CR_PVDE;\\nPVD->EXTI 配置'}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 低功耗外设可视化
+        const PeripheralPower = ({ step }) => {
+            const [peripherals, setPeripherals] = useState({
+                usart: true,
+                tim: true,
+                adc: true,
+                spi: false,
+                i2c: false,
+                gpio: true
+            });
+
+            const togglePeripheral = (name) => {
+                setPeripherals(prev => ({
+                    ...prev,
+                    [name]: !prev[name]
+                }));
+            };
+
+            const totalPower = Object.values(peripherals).filter(v => v).length * 2 + 5;
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        外设功耗管理
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                        {Object.entries(peripherals).map(([name, enabled]) => (
+                            <button
+                                key={name}
+                                onClick={() => togglePeripheral(name)}
+                                className={`p-2 rounded text-xs transition-all ${
+                                    enabled ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-500'
+                                }`}
+                            >
+                                {name.toUpperCase()}
+                                <div>{enabled ? '🟢' : '⚪'}</div>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-sm">估算功耗：</div>
+                        <div className="text-2xl font-bold text-indigo-600">
+                            ~{totalPower} mA
+                        </div>
+                        <div className="text-xs text-gray-500">
+                            关闭未用外设可显著降低功耗
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 功耗测量可视化
+        const PowerMeasurement = ({ step }) => {
+            const [mode, setMode] = useState('run');
+            const powerValues = {
+                run: 36000,  // 36mA in μA
+                sleep: 24000,
+                stop: 20,
+                standby: 2
+            };
+
+            const getBarWidth = (power) => {
+                const max = 36000;
+                return Math.max((power / max) * 100, 1);
+            };
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-4 gap-2">
+                        {Object.entries(powerValues).map(([key, value]) => (
+                            <button
+                                key={key}
+                                onClick={() => setMode(key)}
+                                className={`p-2 rounded text-xs transition-all ${
+                                    mode === key
+                                        ? 'bg-indigo-500 text-white'
+                                        : 'bg-gray-100'
+                                }`}
+                            >
+                                {key}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-4">
+                        <div className="text-3xl font-bold text-center mb-4">
+                            {powerValues[mode] >= 1000
+                                ? `${(powerValues[mode] / 1000).toFixed(1)} mA`
+                                : `${powerValues[mode]} μA`
+                            }
+                        </div>
+                        <div className="relative h-8 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                                className={`h-full transition-all duration-500 ${
+                                    mode === 'run' ? 'bg-red-500' :
+                                    mode === 'sleep' ? 'bg-yellow-500' :
+                                    mode === 'stop' ? 'bg-green-500' : 'bg-blue-500'
+                                }`}
+                                style={{ width: `${getBarWidth(powerValues[mode])}%` }}
+                            />
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-500 mt-1">
+                            <span>0</span>
+                            <span>36mA</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 电池供电应用可视化
+        const BatteryApplication = ({ step }) => {
+            const [phase, setPhase] = useState('measure');
+            const [batteryLevel, setBatteryLevel] = useState(80);
+
+            useEffect(() => {
+                const cycle = async () => {
+                    // 测量阶段
+                    setPhase('measure');
+                    await sleep(1500);
+                    // 发送阶段
+                    setPhase('transmit');
+                    await sleep(1500);
+                    // 待机阶段
+                    setPhase('standby');
+                    await sleep(2000);
+                    // 循环
+                    setPhase('measure');
+                };
+                cycle();
+                const interval = setInterval(cycle, 5000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        电池供电设备工作周期
+                    </div>
+                    <div className="flex justify-center space-x-2">
+                        <div className={`p-3 rounded-lg text-center transition-all ${
+                            phase === 'measure' ? 'bg-green-100 scale-110' : 'bg-gray-100'
+                        }`}>
+                            <div className="text-xl">📊</div>
+                            <div className="text-xs">测量</div>
+                            <div className="text-xs text-gray-500">1.5s</div>
+                        </div>
+                        <div className={`p-3 rounded-lg text-center transition-all ${
+                            phase === 'transmit' ? 'bg-blue-100 scale-110' : 'bg-gray-100'
+                        }`}>
+                            <div className="text-xl">📡</div>
+                            <div className="text-xs">发送</div>
+                            <div className="text-xs text-gray-500">1.5s</div>
+                        </div>
+                        <div className={`p-3 rounded-lg text-center transition-all ${
+                            phase === 'standby' ? 'bg-pink-100 scale-110' : 'bg-gray-100'
+                        }`}>
+                            <div className="text-xl">😴</div>
+                            <div className="text-xs">待机</div>
+                            <div className="text-xs text-gray-500">2s+</div>
+                        </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="flex justify-between items-center mb-2">
+                            <span className="text-sm">电池电量</span>
+                            <span className="text-sm font-bold">{batteryLevel}%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-3">
+                            <div
+                                className={`h-3 rounded-full transition-all ${
+                                    batteryLevel > 50 ? 'bg-green-500' :
+                                    batteryLevel > 20 ? 'bg-yellow-500' : 'bg-red-500'
+                                }`}
+                                style={{ width: `${batteryLevel}%` }}
+                            />
+                        </div>
+                        <div className="text-xs text-gray-500 mt-2 text-center">
+                            优化：最大化待机时间
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 主 App 组件
+        const App = () => {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            // 朗读文本
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                // 优先使用 XiaoXiao
+                const voices = window.speechSynthesis.getVoices();
+                const xiaoXiao = voices.find(v => v.name.includes('XiaoXiao') || v.name.includes('zh-CN'));
+                if (xiaoXiao) utterance.voice = xiaoXiao;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else {
+                                setIsPlaying(false);
+                                return prev;
+                            }
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else {
+                                setIsPlaying(false);
+                                return prev;
+                            }
+                        });
+                    }, 800);
+                };
+
+                window.speechSynthesis.speak(utterance);
+            }, [isMuted]);
+
+            // 切换步骤
+            useEffect(() => {
+                if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+
+                const step = STEPS[currentStep];
+                speak(step.explanation);
+
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                };
+            }, [currentStep, speak]);
+
+            // 播放控制
+            useEffect(() => {
+                const handleKeydown = (e) => {
+                    if (e.code === 'Space') {
+                        e.preventDefault();
+                        setIsPlaying(prev => !prev);
+                    } else if (e.code === 'ArrowRight' && currentStep < STEPS.length - 1) {
+                        setCurrentStep(prev => prev + 1);
+                    } else if (e.code === 'ArrowLeft' && currentStep > 0) {
+                        setCurrentStep(prev => prev - 1);
+                    }
+                };
+                window.addEventListener('keydown', handleKeydown);
+                return () => window.removeEventListener('keydown', handleKeydown);
+            }, [currentStep]);
+
+            // 渲染可视化组件
+            const renderVisualization = () => {
+                const step = STEPS[currentStep];
+                switch (step.visualization) {
+                    case 'low-power-compare':
+                        return <LowPowerCompare step={step} />;
+                    case 'sleep-mode':
+                        return <SleepMode step={step} />;
+                    case 'stop-mode':
+                        return <StopMode step={step} />;
+                    case 'standby-mode':
+                        return <StandbyMode step={step} />;
+                    case 'wakeup-sources':
+                        return <WakeupSources step={step} />;
+                    case 'peripheral-power':
+                        return <PeripheralPower step={step} />;
+                    case 'power-measurement':
+                        return <PowerMeasurement step={step} />;
+                    case 'battery-application':
+                        return <BatteryApplication step={step} />;
+                    default:
+                        return <div className="text-center text-gray-500">可视化组件</div>;
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        {/* 标题 */}
+                        <h1 className="text-3xl font-bold text-center mb-6 bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
+                            STM32 低功耗模式完整指南
+                        </h1>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex space-x-2">
+                                {STEPS.map((_, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => setCurrentStep(idx)}
+                                        className={`w-3 h-3 rounded-full transition-all ${
+                                            idx === currentStep
+                                                ? 'bg-indigo-600 scale-125'
+                                                : idx < currentStep
+                                                ? 'bg-indigo-400'
+                                                : 'bg-gray-300'
+                                        }`}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 主内容区 - 三栏布局 */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 左栏：代码 */}
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-indigo-600 flex items-center">
+                                    <span className="mr-2">💻</span>
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+
+                            {/* 中栏：可视化 */}
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-violet-600 flex items-center">
+                                    <span className="mr-2">🎨</span>
+                                    可视化演示
+                                </h2>
+                                <div className="h-96 overflow-auto">
+                                    {renderVisualization()}
+                                </div>
+                            </div>
+
+                            {/* 右栏：解释 */}
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-pink-600 flex items-center">
+                                    <span className="mr-2">📖</span>
+                                    说明
+                                </h2>
+                                <div className="prose prose-sm">
+                                    <p className="text-gray-700 leading-relaxed">
+                                        {STEPS[currentStep].explanation}
+                                    </p>
+                                </div>
+                                <div className="mt-4 p-4 bg-indigo-50 rounded-lg">
+                                    <div className="text-sm font-semibold text-indigo-800 mb-2">
+                                        💡 关键点
+                                    </div>
+                                    <ul className="text-sm text-indigo-700 space-y-1">
+                                        {currentStep === 0 && (
+                                            <>
+                                                <li>• 睡眠模式：CPU 停，外设运行</li>
+                                                <li>• 停机模式：所有时钟停，SRAM 保持</li>
+                                                <li>• 待机模式：仅备份域运行</li>
+                                            </>
+                                        )}
+                                        {currentStep === 1 && (
+                                            <>
+                                                <li>• WFE 等待事件，WFI 等待中断</li>
+                                                <li>• 建议降频后进入睡眠</li>
+                                                <li>• 任何中断均可唤醒</li>
+                                            </>
+                                        )}
+                                        {currentStep === 2 && (
+                                            <>
+                                                <li>• 设置 PWR_CR 和 SCB_SCR</li>
+                                                <li>• 唤醒后需重配时钟</li>
+                                                <li>• 唤醒源：EXTI/RTC/PVD</li>
+                                            </>
+                                        )}
+                                        {currentStep === 3 && (
+                                            <>
+                                                <li>• 最低功耗模式 (2μA)</li>
+                                                <li>• WKUP 引脚 (PA0) 唤醒</li>
+                                                <li>• 唤醒后相当于复位</li>
+                                            </>
+                                        )}
+                                        {currentStep === 4 && (
+                                            <>
+                                                <li>• EXTI 适用于所有模式</li>
+                                                <li>• RTC 闹钟适合定时唤醒</li>
+                                                <li>• PVD 用于低压检测</li>
+                                            </>
+                                        )}
+                                        {currentStep === 5 && (
+                                            <>
+                                                <li>• 进入前关闭未用外设</li>
+                                                <li>• 唤醒后重新初始化</li>
+                                                <li>• GPIO 设为模拟输入</li>
+                                            </>
+                                        )}
+                                        {currentStep === 6 && (
+                                            <>
+                                                <li>• 运行：~36mA</li>
+                                                <li>• 停机：~20μA</li>
+                                                <li>• 待机：~2μA</li>
+                                            </>
+                                        )}
+                                        {currentStep === 7 && (
+                                            <>
+                                                <li>• 最大化待机时间</li>
+                                                <li>• RTC 定时唤醒采集</li>
+                                                <li>• 备份寄存器保存数据</li>
+                                            </>
+                                        )}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 控制按钮 */}
+                        <div className="flex justify-center mt-6 space-x-4">
+                            <button
+                                onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0
+                                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                        : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                }`}
+                            >
+                                ⏮ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isPlaying
+                                        ? 'bg-yellow-500 text-white hover:bg-yellow-600'
+                                        : 'bg-green-500 text-white hover:bg-green-600'
+                                }`}
+                            >
+                                {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                            </button>
+                            <button
+                                onClick={() => setIsMuted(!isMuted)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isMuted
+                                        ? 'bg-red-500 text-white hover:bg-red-600'
+                                        : 'bg-blue-500 text-white hover:bg-blue-600'
+                                }`}
+                            >
+                                {isMuted ? '🔇 取消静音' : '🔊 静音'}
+                            </button>
+                            <button
+                                onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1
+                                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                        : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                }`}
+                            >
+                                下一步 ⏭
+                            </button>
+                        </div>
+
+                        {/* 快捷键提示 */}
+                        <div className="text-center mt-4 text-sm text-gray-500">
+                            快捷键：空格 播放/暂停 | ← → 切换步骤
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

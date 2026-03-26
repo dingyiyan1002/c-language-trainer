@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1210 - 低功耗模式完整指南 - 嵌入式 C 语言可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(34, 197, 94, 0.2); } 50% { background-color: rgba(34, 197, 94, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes danger { 0%, 100% { background-color: rgba(239, 68, 68, 0.3); } 50% { background-color: rgba(239, 68, 68, 0.6); } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes sleep { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.8); } }
+        @keyframes stop { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.6; } }
+        @keyframes standby { 0%, 100% { opacity: 0.1; } 50% { opacity: 0.3; } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .flow { animation: flow 2s infinite; }
+        .highlight { animation: highlight 2s infinite; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .countdown { animation: countdown 0.3s ease-out; }
+        .danger { animation: danger 1s infinite; }
+        .reset { animation: reset 1s linear; }
+        .sleep { animation: sleep 2s infinite; }
+        .stop { animation: stop 3s infinite; }
+        .standby { animation: standby 4s infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // 颜色主题：绿色/黄色渐变 (低功耗)
+        const COLOR_MAP = {
+            primary: '#22c55e',
+            secondary: '#eab308',
+            accent: '#4ade80',
+            highlight: '#86efac',
+            danger: '#ef4444',
+            warning: '#f59e0b'
+        };
+
+        const STEPS = [
+            {
+                title: "低功耗模式基础",
+                code: `// STM32 低功耗模式概述
+// 功耗从低到高：Stop < Sleep < Run
+
+// 三种低功耗模式:
+
+// 1. Sleep 模式 (睡眠模式)
+// - CPU 时钟停止，外设继续运行
+// - 唤醒源：任意中断
+// - 唤醒时间：立即
+// - 功耗：~10mA (STM32F4)
+
+// 2. Stop 模式 (停止模式)
+// - 所有时钟停止，SRAM 和寄存器保持
+// - 唤醒源：EXTI 中断 (16 线)
+// - 唤醒时间：~50μs
+// - 功耗：~100μA
+
+// 3. Standby 模式 (待机模式)
+// - 除备份域外全部断电
+// - 唤醒源：WKUP 引脚、RTC 闹钟
+// - 唤醒时间：~2ms (系统复位)
+// - 功耗：~1μA
+
+// 选择原则:
+// - 短时休眠 (ms 级): Sleep
+// - 中等休眠 (秒级): Stop
+// - 长时休眠 (分钟级): Standby`,
+                description: "STM32 提供三种低功耗模式。Sleep 模式仅停止 CPU 时钟，外设继续运行，适合短时休眠。Stop 模式停止所有时钟但保持 SRAM 和寄存器内容，适合中等时间休眠。Standby 模式几乎完全断电，仅备份域工作，适合长时间休眠。功耗依次降低，但唤醒时间依次增加。",
+                highlight: "低功耗模式选择：Sleep 适合 ms 级，Stop 适合秒级，Standby 适合分钟级以上"
+            },
+            {
+                title: "Sleep 模式配置",
+                code: `// Sleep 模式 - CPU 休眠，外设继续运行
+
+// 进入 Sleep 模式
+void Enter_Sleep_Mode(void) {
+    // 1. 关闭不必要的外设时钟
+    RCC->AHB1ENR &= ~(RCC_AHB1ENR_DMA2EN | RCC_AHB1ENR_DMA1EN);
+
+    // 2. 降低系统时钟 (可选)
+    // RCC->CFGR |= RCC_CFGR_HPRE_DIV8;
+
+    // 3. 配置 NVIC:只保留需要的中断
+    // NVIC_DisableIRQ(Unused_IRQn);
+
+    // 4. 使能唤醒中断
+    NVIC_EnableIRQ(EXTI0_IRQn);
+
+    // 5. 进入 Sleep 模式
+    // SLEEPDEEP=0: Sleep 模式
+    // SLEEPONEXIT=1: 中断返回后自动睡眠
+    SCB->SCR &= ~(SCB_SCR_SLEEPDEEP_Msk | SCB_SCR_SLEEPONEXIT_Msk);
+    SCB->SCR |= SCB_SCR_SLEEPONEXIT_Msk;
+
+    // 6. 等待中断 (WFI) 或等待事件 (WFE)
+    __WFI();  // Wait For Interrupt
+
+    // 7. 中断唤醒后继续执行
+}
+
+// 唤醒中断服务程序
+void EXTI0_IRQHandler(void) {
+    if(EXTI->PR & EXTI_PR_PR0) {
+        EXTI->PR = EXTI_PR_PR0;  // 清除标志
+        // 处理中断...
+    }
+}`,
+                description: "Sleep 模式配置简单：关闭不必要的外设时钟→配置 NVIC→设置 SLEEPDEEP=0→执行 WFI/WFE。SLEEPONEXIT=1 可使中断返回后自动重新进入睡眠，适合持续休眠的应用。WFI 等待中断唤醒，WFE 等待事件唤醒 (更低功耗)。唤醒后系统时钟和外设状态保持不变。",
+                highlight: "SLEEPONEXIT=1 实现自动循环休眠，无需每次手动进入 Sleep"
+            },
+            {
+                title: "Stop 模式配置",
+                code: `// Stop 模式 - 所有时钟停止，SRAM 保持
+
+// 配置 PWR 控制
+void Enter_Stop_Mode(void) {
+    // 1. 配置唤醒源 (EXTI 线)
+    EXTI->IMR |= EXTI_IMR_MR0;   // 使能 EXTI0
+    EXTI->RTSR |= EXTI_RTSR_TR0; // 上升沿触发
+
+    // 2. 配置 PWR
+    // PDDS=0: Stop 模式
+    // LPDS=1: Stop 模式下使用低电压调节器
+    PWR->CR &= ~PWR_CR_PDDS;
+    PWR->CR |= PWR_CR_LPDS;
+
+    // 3. 配置 Flash 低功耗
+    FLASH->ACR |= FLASH_ACR_PRFTEN;
+
+    // 4. 设置 SLEEPDEEP=1 (Stop 模式)
+    SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
+
+    // 5. 进入 Stop 模式
+    __WFI();
+
+    // 6. 唤醒后恢复系统
+    // HSI 自动启用，需要重新配置系统时钟
+}
+
+// Stop 模式唤醒后时钟恢复
+void SystemClock_Config_AfterStop(void) {
+    // Stop 模式唤醒后 HSI 自动启用
+    // 需要重新配置 PLL 和系统时钟
+    // 如果使用 HSE，需要重新启动 HSE 并等待就绪
+}`,
+                description: "Stop 模式需要配置 PWR 寄存器 (PDDS=0 选择 Stop，LPDS=1 使用低压调节器省电)。设置 SLEEPDEEP=1 后执行 WFI 进入 Stop 模式。唤醒后 HSI 自动启用，如果使用 HSE 或 PLL 需要重新配置系统时钟。Stop 模式保持 SRAM 和寄存器内容，但外设配置会丢失需要重新初始化。",
+                highlight: "Stop 模式唤醒后必须重新配置系统时钟和外设"
+            },
+            {
+                title: "Standby 模式配置",
+                code: `// Standby 模式 - 最低功耗，SRAM 不保持
+
+void Enter_Standby_Mode(void) {
+    // 1. 备份重要数据到备份寄存器或 Flash
+    RTC_WriteBackup(0, critical_data);
+
+    // 2. 配置唤醒源
+    // WKUP 引脚 (PA0)
+    PWR->CSR |= PWR_CSR_EWUP;
+
+    // RTC 闹钟唤醒
+    RTC_SetAlarm(hour, minute);
+    RTC->CR |= RTC_CR_ALRAE;
+
+    // 3. 清除唤醒标志
+    PWR->CR |= PWR_CR_CWUF;
+
+    // 4. 配置 PWR
+    // PDDS=1: Standby 模式
+    PWR->CR |= PWR_CR_PDDS;
+
+    // 5. 设置 SLEEPDEEP=1
+    SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
+
+    // 6. 进入 Standby 模式
+    __WFI();
+
+    // 7. 唤醒后从复位开始执行 (不会执行到这里)
+}
+
+// 检查唤醒源
+void Check_Wakeup_Source(void) {
+    if(PWR->CSR & PWR_CSR_WUF) {
+        // WKUP 引脚唤醒
+    }
+    if(RTC->ISR & RTC_ISR_ALRAF) {
+        // RTC 闹钟唤醒
+    }
+}`,
+                description: "Standby 模式是最低功耗模式，SRAM 和寄存器内容全部丢失，唤醒后从系统复位开始执行。进入 Standby 前必须备份重要数据到 RTC 备份寄存器或 Flash。唤醒源包括 WKUP 引脚 (PA0) 和 RTC 闹钟。唤醒后需要检查唤醒源并恢复系统状态。Standby 模式功耗最低 (约 1μA)，但唤醒时间最长 (约 2ms)。",
+                highlight: "Standby 唤醒后从复位开始执行，必须提前备份重要数据"
+            },
+            {
+                title: "外设时钟管理",
+                code: `// 低功耗编程：外设时钟管理
+
+// 进入低功耗前关闭不需要的时钟
+void DisableUnusedClocks(void) {
+    // AHB1 外设
+    RCC->AHB1ENR = RCC_AHB1ENR_GPIOAEN;  // 仅保留必要 GPIO
+
+    // AHB2 外设
+    RCC->AHB2ENR = 0;  // 关闭 USB、RNG 等
+
+    // AHB3 外设
+    RCC->AHB3ENR = 0;  // 关闭 FSMC/FMC
+
+    // APB1 外设
+    RCC->APB1ENR = RCC_APB1ENR_TIM2EN;  // 仅保留必要定时器
+
+    // APB2 外设
+    RCC->APB2ENR = 0;  // 关闭 ADC、SPI1 等
+}
+
+// 动态时钟控制
+void Peripheral_Clock_Control(uint32_t *enr_reg, uint32_t clock_bit, int enable) {
+    if(enable)
+        *enr_reg |= clock_bit;
+    else
+        *enr_reg &= ~clock_bit;
+}
+
+// 使用示例
+void Sensor_Read(void) {
+    // 1. 启用传感器时钟
+    Peripheral_Clock_Control(&RCC->APB2ENR, RCC_APB2ENR_ADC1EN, 1);
+
+    // 2. 读取传感器
+    ADC1->CR2 |= ADC_CR2_ADON;
+    // ... ADC 转换
+
+    // 3. 立即关闭时钟
+    Peripheral_Clock_Control(&RCC->APB2ENR, RCC_APB2ENR_ADC1EN, 0);
+}`,
+                description: "外设时钟管理是低功耗编程的关键。进入低功耗模式前应关闭所有不必要的外设时钟。对于间歇性工作的外设 (如传感器)，应在使用时临时开启，用完立即关闭。这可以显著降低系统功耗。RCC 的 AHBxENR 和 APBxENR 寄存器控制各外设时钟使能。",
+                highlight: "不用外设立即关闭时钟，可降低 10-50% 功耗"
+            },
+            {
+                title: "GPIO 低功耗配置",
+                code: `// GPIO 低功耗配置
+// 防止浮空引脚漏电流
+
+void GPIO_LowPower_Config(void) {
+    // 1. 未使用引脚：模拟输入 (最高阻抗)
+    GPIOA->MODER |= GPIO_MODER_MODER0;  // 模拟模式
+    GPIOA->PUPDR &= ~GPIO_PUPDR_PUPD0;  // 无上拉下拉
+
+    // 2. 输出引脚：设置为确定电平
+    // 避免浮空导致漏电流
+    GPIOB->ODR |= GPIO_ODR_OD0;  // 输出高电平
+    GPIOB->MODER |= GPIO_MODER_MODER0_0;  // 输出模式
+
+    // 3. 输入引脚：配置上拉/下拉
+    GPIOC->PUPDR |= GPIO_PUPDR_PUPD0_0;  // 上拉
+
+    // 4. 模拟引脚：关闭施密特触发器
+    // STM32U5/L4 系列支持
+    // SYSCFG->APASC0 |= SYSCFG_APASC0_PA0;
+
+    // 5. 高速引脚：降低速度
+    GPIOA->OSPEEDR &= ~GPIO_OSPEEDR_OSPEEDR0;  // 低速
+}
+
+// 功耗对比:
+// 浮空输入：~100μA (漏电流)
+// 模拟输入：~1μA
+// 带上拉输入：~10μA`,
+                description: "GPIO 配置不当会导致显著漏电流。未使用引脚应配置为模拟输入 (最高阻抗)。输出引脚必须设置确定电平，避免浮空。输入引脚根据应用选择上拉或下拉。高速引脚降低速度可减少功耗。对于超低功耗应用，某些 STM32 型号支持关闭施密特触发器进一步降低功耗。",
+                highlight: "浮空 GPIO 可能产生 100μA 漏电流，必须配置为模拟模式或确定状态"
+            },
+            {
+                title: "低功耗应用实例",
+                code: `// 电池供电设备：周期性采样 + 深度睡眠
+
+#include <stdint.h>
+
+// 全局变量 (保持在 Stop 模式)
+volatile uint32_t sensor_data;
+volatile uint8_t measurement_count;
+
+void main(void) {
+    // 1. 系统初始化
+    SystemClock_Config();
+    RTC_WakeupInit(1000);  // 1 秒唤醒
+    GPIO_LowPower_Config();
+
+    // 2. 检查唤醒源
+    if(PWR->CSR & PWR_CSR_WUF) {
+        // RTC 唤醒，执行测量
+        PWR->CR |= PWR_CR_CWUF;  // 清除唤醒标志
+
+        // 3. 恢复外设
+        SystemClock_Config();
+        ADC_Config();
+
+        // 4. 执行测量
+        sensor_data = ADC_Read();
+        measurement_count++;
+
+        // 5. 保存数据
+        RTC_WriteBackup(0, sensor_data);
+
+        // 6. 关闭外设
+        ADC_Disable();
+        DisableUnusedClocks();
+    }
+
+    // 7. 进入 Stop 模式
+    Enter_Stop_Mode();
+
+    // 8. 循环 (从复位重新开始)
+}
+
+// 功耗计算:
+// 测量时间：10ms @ 10mA = 100μC
+// 休眠时间：990ms @ 100μA = 99μC
+// 平均电流：199μC / 1000ms = 199μA
+// 电池寿命：2000mAh / 0.199mA ≈ 10000 小时 ≈ 1.1 年`,
+                description: "典型低功耗应用：周期性唤醒→测量→休眠。使用 RTC 唤醒定时器周期性唤醒系统，测量传感器数据后立即关闭外设并进入 Stop 模式。通过占空比优化，可以显著延长电池寿命。示例中系统 1% 时间工作、99% 时间休眠，平均电流仅 199μA，2000mAh 电池可用 1 年以上。",
+                highlight: "低功耗设计核心：尽可能缩短工作时间，最大化休眠时间"
+            },
+            {
+                title: "功耗优化技巧总结",
+                code: `// 低功耗优化清单
+
+// 1. 系统架构
+// □ 选择合适低功耗模式 (Sleep/Stop/Standby)
+// □ 优化占空比 (工作/休眠时间比)
+// □ 降低工作时钟频率
+
+// 2. 时钟管理
+// □ 关闭未使用外设时钟
+// □ 使用 HSI 代替 HSE (省电 1-2mA)
+// □ 动态调整时钟频率
+
+// 3. GPIO 配置
+// □ 未用引脚设为模拟输入
+// □ 输出引脚设置确定电平
+// □ 降低 GPIO 速度
+
+// 4. 外设使用
+// □ 使用 DMA 减少 CPU 唤醒
+// □ 传感器批量读取后休眠
+// □ 关闭片上稳压器 (LPDS)
+
+// 5. 电源设计
+// □ 选择低静态电流 LDO
+// □ 关闭外部传感器电源
+// □ 使用电源门控开关
+
+// 功耗对比 (STM32F4):
+// Run 模式：~100mA @ 168MHz
+// Sleep 模式：~10mA
+// Stop 模式：~100μA
+// Standby 模式：~1μA`,
+                description: "低功耗优化需要系统级考虑。架构层面选择合适的低功耗模式和占空比。时钟管理方面关闭未用时钟、使用 HSI、动态调频。GPIO 必须正确配置防止漏电。外设使用 DMA 减少 CPU 唤醒时间。电源设计选择低静态电流 LDO，必要时使用电源门控。综合优化可使功耗降低 100-1000 倍。",
+                highlight: "系统级低功耗优化可使电池寿命从几天延长到几年"
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [showCode, setShowCode] = useState(true);
+            const [powerMode, setPowerMode] = useState('run');
+            const voiceEndTimerRef = useRef(null);
+
+            // 模拟功耗变化
+            useEffect(() => {
+                if (currentStep === 0) setPowerMode('run');
+                else if (currentStep === 1) setPowerMode('sleep');
+                else if (currentStep === 2) setPowerMode('stop');
+                else if (currentStep === 3) setPowerMode('standby');
+            }, [currentStep]);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v =>
+                        v.lang === 'zh-CN' ||
+                        v.lang === 'zh-CN-XiaoxiaoNeural' ||
+                        v.lang.includes('Chinese')
+                    );
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.description + "。" + step.highlight);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep]);
+
+            // 功耗模式可视化
+            const PowerModeVisual = () => {
+                const modes = [
+                    { name: 'Run', current: 100, time: '0ms', color: 'bg-red-500', active: powerMode === 'run' },
+                    { name: 'Sleep', current: 10, time: '立即', color: 'bg-yellow-500', active: powerMode === 'sleep' },
+                    { name: 'Stop', current: 0.1, time: '50μs', color: 'bg-green-500', active: powerMode === 'stop' },
+                    { name: 'Standby', current: 0.001, time: '2ms', color: 'bg-blue-500', active: powerMode === 'standby' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-3">低功耗模式对比</h3>
+                        <div className="space-y-2">
+                            {modes.map((m, i) => (
+                                <div key={i} className={`p-2 rounded transition-all ${
+                                    m.active ? m.color + ' scale-105' : 'bg-gray-700 opacity-50'
+                                } ${i === 0 ? 'pulse' : i === 1 ? 'sleep' : i === 2 ? 'stop' : 'standby'}`}>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="font-bold">{m.name}</span>
+                                        <span>{m.current}mA</span>
+                                    </div>
+                                    <div className="text-xs text-gray-400">唤醒：{m.time}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 功耗柱状图
+            const PowerChart = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-yellow-400 mb-3">功耗对比 (对数 scale)</h3>
+                        <div className="space-y-3">
+                            <div>
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span>Run</span>
+                                    <span className="text-red-400">100mA</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded h-4">
+                                    <div className="bg-red-500 h-4 rounded" style={{width: '100%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span>Sleep</span>
+                                    <span className="text-yellow-400">10mA</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded h-4">
+                                    <div className="bg-yellow-500 h-4 rounded" style={{width: '10%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span>Stop</span>
+                                    <span className="text-green-400">100μA</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded h-4">
+                                    <div className="bg-green-500 h-4 rounded" style={{width: '0.1%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span>Standby</span>
+                                    <span className="text-blue-400">1μA</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded h-4">
+                                    <div className="bg-blue-500 h-4 rounded" style={{width: '0.001%'}}></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // GPIO 配置可视化
+            const GPIOVisual = () => {
+                const configs = [
+                    { mode: '浮空输入', current: '~100μA', bad: true },
+                    { mode: '模拟输入', current: '~1μA', good: true },
+                    { mode: '上拉输入', current: '~10μA', warn: true },
+                    { mode: '推挽输出', current: '~5μA', good: true }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-blue-400 mb-3">GPIO 功耗对比</h3>
+                        <div className="space-y-2">
+                            {configs.map((c, i) => (
+                                <div key={i} className={`p-2 rounded text-xs flex justify-between ${
+                                    c.bad ? 'bg-red-900/30' : c.warn ? 'bg-yellow-900/30' : 'bg-green-900/30'
+                                }`}>
+                                    <span>{c.mode}</span>
+                                    <span className={c.bad ? 'text-red-400' : c.warn ? 'text-yellow-400' : 'text-green-400'}>
+                                        {c.current} {c.good ? '✓' : c.bad ? '✗' : '⚠'}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 电池寿命计算
+            const BatteryLife = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-3">电池寿命估算</h3>
+                        <div className="text-xs space-y-2">
+                            <div className="flex justify-between">
+                                <span>电池容量:</span>
+                                <span>2000mAh</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span>工作时间:</span>
+                                <span>10ms @ 10mA</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span>休眠时间:</span>
+                                <span>990ms @ 100μA</span>
+                            </div>
+                            <div className="border-t border-gray-600 pt-2">
+                                <div className="flex justify-between">
+                                    <span>平均电流:</span>
+                                    <span className="text-green-400">199μA</span>
+                                </div>
+                            </div>
+                            <div className="border-t border-gray-600 pt-2">
+                                <div className="flex justify-between">
+                                    <span>电池寿命:</span>
+                                    <span className="text-purple-400 font-bold">~1.1 年</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    {/* 头部 */}
+                    <div className="max-w-7xl mx-auto mb-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-green-400">
+                                1210 - 低功耗模式完整指南
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">
+                                    {isPlaying ? '暂停' : '播放'}
+                                </button>
+                                <button onClick={() => setShowCode(!showCode)} className="px-3 py-1 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                    {showCode ? '隐藏代码' : '显示代码'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div className="flex gap-1 mb-4">
+                            {STEPS.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentStep(i)}
+                                    className={`flex-1 h-2 rounded transition-all ${
+                                        i === currentStep ? 'bg-green-500 scale-110' :
+                                        i < currentStep ? 'bg-green-700' : 'bg-gray-600'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 主内容区 - 三列布局 */}
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* 左列：代码 */}
+                        {showCode && (
+                            <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                                <h2 className="text-sm font-bold text-green-400 mb-2">
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap bg-gray-900 p-3 rounded">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        )}
+
+                        {/* 中列：可视化动画 */}
+                        <div className={`${showCode ? 'col-span-1' : 'col-span-2'} space-y-4`}>
+                            <PowerModeVisual />
+                            <div className="grid grid-cols-2 gap-4">
+                                {currentStep >= 5 ? <GPIOVisual /> : <PowerChart />}
+                                {currentStep >= 6 ? <BatteryLife /> : <div className="bg-gray-800 rounded-lg p-4"><h3 className="text-sm font-bold text-gray-400 mb-2">等待下一步...</h3></div>}
+                            </div>
+                        </div>
+
+                        {/* 右列：说明 */}
+                        <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                            <h3 className="text-sm font-bold text-blue-400 mb-2">说明</h3>
+                            <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                                {STEPS[currentStep].description}
+                            </p>
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2">
+                                <p className="text-xs text-yellow-300">
+                                    <span className="font-bold">💡 重点:</span> {STEPS[currentStep].highlight}
+                                </p>
+                            </div>
+
+                            {/* 导航按钮 */}
+                            <div className="flex gap-2 mt-4">
+                                <button
+                                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                                    disabled={currentStep === 0}
+                                    className="flex-1 py-2 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 text-xs"
+                                >
+                                    ← 上一步
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+                                    disabled={currentStep === STEPS.length - 1}
+                                    className="flex-1 py-2 bg-green-600 rounded hover:bg-green-500 disabled:opacity-50 text-xs"
+                                >
+                                    下一步 →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部摘要 */}
+                    <div className="max-w-7xl mx-auto mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-2">低功耗设计核心要点</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-green-400 font-bold">模式选择</span>
+                                <p className="text-gray-400 mt-1">Sleep/Stop/Standby</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-yellow-400 font-bold">时钟管理</span>
+                                <p className="text-gray-400 mt-1">关闭未用外设</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-blue-400 font-bold">GPIO 配置</span>
+                                <p className="text-gray-400 mt-1">防止浮空漏电</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-purple-400 font-bold">占空优化</span>
+                                <p className="text-gray-400 mt-1">最大化休眠时间</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1215 - FreeRTOS 软件定时器完整指南 - 嵌入式 C 语言可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(99, 102, 241, 0.2); } 50% { background-color: rgba(99, 102, 241, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes danger { 0%, 100% { background-color: rgba(239, 68, 68, 0.3); } 50% { background-color: rgba(239, 68, 68, 0.6); } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes tick { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        @keyframes expire { 0%, 100% { background-color: rgba(34, 197, 94, 0.3); } 50% { background-color: rgba(34, 197, 94, 0.8); } }
+        @keyframes oneshot { 0% { opacity: 1; } 100% { opacity: 0.3; } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .flow { animation: flow 2s infinite; }
+        .highlight { animation: highlight 2s infinite; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .countdown { animation: countdown 0.3s ease-out; }
+        .danger { animation: danger 1s infinite; }
+        .reset { animation: reset 1s linear; }
+        .tick { animation: tick 1s infinite; }
+        .expire { animation: expire 1s infinite; }
+        .oneshot { animation: oneshot 2s infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#6366f1',
+            secondary: '#4f46e5',
+            accent: '#818cf8',
+            highlight: '#c7d2fe',
+            danger: '#ef4444',
+            success: '#10b981'
+        };
+
+        const STEPS = [
+            {
+                title: "软件定时器基础",
+                code: `// FreeRTOS 软件定时器概述
+// 定时器在到期时执行回调函数
+
+// 定时器特性:
+// - 一次性 (One-shot) 或周期性 (Auto-reload)
+// - 回调函数在 RTOS 守护任务中执行
+// - 多个定时器共享一个守护任务
+// - 优先级可配置
+
+// 定时器模式:
+// 1. 一次性定时器：到期执行一次后停止
+// 2. 周期性定时器：到期执行后自动重启
+
+// 应用场景:
+// - 周期性数据采集
+// - 超时检测
+// - LED 闪烁
+// - 延时执行任务
+
+// 配置 (FreeRTOSConfig.h)
+#define configUSE_TIMERS                1
+#define configTIMER_TASK_PRIORITY       3
+#define configTIMER_QUEUE_LENGTH        10
+#define configTIMER_TASK_STACK_DEPTH    128`,
+                description: "FreeRTOS 软件定时器在到期时执行回调函数。支持一次性 (One-shot) 和周期性 (Auto-reload) 两种模式。定时器回调在 RTOS 守护任务 (Daemon Task) 中执行，不是在中断中。多个定时器共享一个守护任务，通过配置项启用和设置优先级。典型应用：周期采集、超时检测、LED 闪烁。",
+                highlight: "定时器回调在守护任务中执行，不是中断，可以使用阻塞 API"
+            },
+            {
+                title: "定时器创建与启动",
+                code: `// 定时器回调函数原型
+void vTimerCallback(TimerHandle_t xTimer);
+
+// 创建定时器
+TimerHandle_t xTimerCreate(
+    const char *pcTimerName,      // 定时器名称
+    TickType_t xTimerPeriod,      // 周期 (Tick)
+    UBaseType_t uxAutoReload,     // pdTRUE=周期性，pdFALSE=一次性
+    void *pvTimerID,              // 定时器 ID(传给回调)
+    TimerCallbackFunction_t pxCallbackFunction  // 回调函数
+);
+
+// 创建示例
+TimerHandle_t xLedTimer;
+xLedTimer = xTimerCreate(
+    "LedTimer",              // 名称
+    pdMS_TO_TICKS(500),      // 500ms 周期
+    pdTRUE,                  // 周期性
+    (void*)0,                // ID
+    vLedTimerCallback        // 回调
+);
+
+// 启动定时器
+xTimerStart(xLedTimer, 0);
+
+// 停止定时器
+xTimerStop(xLedTimer, 0);
+
+// 删除定时器
+xTimerDelete(xLedTimer, 0);`,
+                description: "xTimerCreate 创建定时器，参数包括名称、周期、自动重载标志、ID 和回调函数。周期用 Tick 表示，pdMS_TO_TICKS 转换毫秒。uxAutoReload=pdTRUE 为周期性定时器，pdFALSE 为一次性定时器。xTimerStart 启动定时器，xTimerStop 停止，xTimerDelete 删除。创建时定时器不启动，需要显式调用 xTimerStart。",
+                highlight: "创建定时器时不自动启动，必须调用 xTimerStart"
+            },
+            {
+                title: "定时器回调函数",
+                code: `// 定时器回调函数
+void vLedTimerCallback(TimerHandle_t xTimer) {
+    // 获取定时器 ID
+    void *pvTimerID = pvTimerGetTimerID(xTimer);
+
+    // 执行回调代码
+    GPIOA->ODR ^= GPIO_ODR_OD5;  // 翻转 LED
+}
+
+// 多个定时器共用回调函数
+void vCommonTimerCallback(TimerHandle_t xTimer) {
+    void *id = pvTimerGetTimerID(xTimer);
+
+    if(id == (void*)0) {
+        // 定时器 1 的逻辑
+        Task1_Action();
+    } else if(id == (void*)1) {
+        // 定时器 2 的逻辑
+        Task2_Action();
+    }
+}
+
+// 注意事项:
+// 1. 回调函数不能返回 (必须是 void)
+// 2. 回调在守护任务中执行，不是中断
+// 3. 可以使用阻塞 API (但不推荐)
+// 4. 回调应快速执行，避免阻塞其他定时器`,
+                description: "回调函数是定时器到期时执行的函数。通过 pvTimerGetTimerID 获取创建时设置的 ID，可用于区分不同定时器。多个定时器可以共用同一个回调函数，通过 ID 区分逻辑。回调在守护任务中执行，不是中断上下文，理论上可以使用阻塞 API，但应快速执行避免影响其他定时器。",
+                highlight: "回调函数应快速执行，长时间运行会阻塞其他定时器"
+            },
+            {
+                title: "定时器命令 (中断安全)",
+                code: `// 定时器命令 API
+
+// 启动定时器
+xTimerStart(xTimer, xTicksToWait);
+xTimerStartFromISR(xTimer, &xHigherPriorityTaskWoken);
+
+// 停止定时器
+xTimerStop(xTimer, xTicksToWait);
+xTimerStopFromISR(xTimer, &xHigherPriorityTaskWoken);
+
+// 重启定时器 (重置计时器)
+xTimerReset(xTimer, xTicksToWait);
+
+// 改变周期
+xTimerChangePeriod(xTimer, newPeriod, xTicksToWait);
+
+// 删除定时器
+xTimerDelete(xTimer, xTicksToWait);
+
+// 获取定时器名称
+const char *pcTimerGetName(TimerHandle_t xTimer);
+
+// 获取定时器周期
+TickType_t xTimerGetPeriod(TimerHandle_t xTimer);
+
+// 获取剩余时间
+TickType_t xTimerGetExpiryTime(TimerHandle_t xTimer);
+
+// 注意:
+// - 中断中必须使用 FromISR 版本
+// - xTicksToWait=0 表示不阻塞`,
+                description: "定时器命令包括启动、停止、重启、改变周期、删除等。中断中必须使用 FromISR 版本。xTimerReset 重启定时器 (从当前时间重新计数)。xTimerChangePeriod 动态改变周期。xTicksToWait 指定命令队列等待时间，0 表示立即返回。这些命令通过命令队列发送到守护任务执行。",
+                highlight: "定时器命令通过队列发送到守护任务，不是立即执行"
+            },
+            {
+                title: "一次性定时器应用",
+                code: `// 一次性定时器：超时检测
+
+TimerHandle_t xTimeoutTimer;
+
+// 创建一次性定时器
+xTimeoutTimer = xTimerCreate(
+    "TimeoutTimer",
+    pdMS_TO_TICKS(5000),   // 5 秒超时
+    pdFALSE,               // 一次性
+    NULL,
+    vTimeoutCallback
+);
+
+// 超时回调
+void vTimeoutCallback(TimerHandle_t xTimer) {
+    // 处理超时
+    printf("Operation timeout!\\n");
+    Timeout_Flag = pdTRUE;
+}
+
+// 开始操作前启动定时器
+void Start_Operation(void) {
+    Timeout_Flag = pdFALSE;
+    xTimerStart(xTimeoutTimer, 0);  // 启动超时计时
+
+    // 执行操作...
+    Perform_Operation();
+}
+
+// 操作完成后停止定时器
+void Complete_Operation(void) {
+    xTimerStop(xTimeoutTimer, 0);  // 取消超时
+}
+
+// 应用：通信超时、按钮长按检测、看门狗替代`,
+                description: "一次性定时器适合超时检测场景。开始操作前启动定时器，操作完成后停止。如果操作在超时时间内完成，定时器被取消；否则定时器到期执行超时回调。典型应用：通信超时检测、按钮长按检测、看门狗替代。一次性定时器到期后自动停止，不会再次触发。",
+                highlight: "一次性定时器到期后停止，适合超时检测和单次延时"
+            },
+            {
+                title: "周期性定时器应用",
+                code: `// 周期性定时器：数据采集
+
+TimerHandle_t xSampleTimer;
+
+// 创建周期性定时器
+xSampleTimer = xTimerCreate(
+    "SampleTimer",
+    pdMS_TO_TICKS(100),    // 100ms 周期
+    pdTRUE,                // 周期性
+    (void*)1,
+    vSampleTimerCallback
+);
+
+// 回调函数
+void vSampleTimerCallback(TimerHandle_t xTimer) {
+    // 周期性执行
+    float sensor_value = ADC_Read();
+    Log_Data(sensor_value);
+}
+
+// 启动
+xTimerStart(xSampleTimer, 0);
+
+// 其他周期性应用:
+// - LED 闪烁 (视觉指示)
+// - 心跳包发送
+// - 周期性状态检查
+// - 数据刷新
+
+// 优势:
+// - 无需创建任务
+// - 多个定时器共享守护任务
+// - 代码简洁`,
+                description: "周期性定时器自动重复触发，适合周期性任务。创建时设置 uxAutoReload=pdTRUE。回调函数周期性执行，无需手动重启。典型应用：数据采集、LED 闪烁、心跳包、状态检查。相比创建周期性任务，定时器更轻量，多个定时器共享一个守护任务，节省 RAM。",
+                highlight: "周期性定时器自动重启，无需手动干预，适合周期任务"
+            },
+            {
+                title: "多定时器管理",
+                code: `// 多定时器应用：系统时间管理
+
+#define TIMER_COUNT 5
+TimerHandle_t xTimers[TIMER_COUNT];
+
+// 定时器 ID 枚举
+typedef enum {
+    TIMER_LED,
+    TIMER_SENSOR,
+    TIMER_COMM,
+    TIMER_WATCHDOG,
+    TIMER_USER
+} TimerId_t;
+
+// 初始化所有定时器
+void vTimerSystem_Init(void) {
+    // LED 闪烁定时器 (500ms)
+    xTimers[TIMER_LED] = xTimerCreate("Led", pdMS_TO_TICKS(500),
+                                       pdTRUE, (void*)TIMER_LED, vLedCallback);
+
+    // 传感器采集定时器 (100ms)
+    xTimers[TIMER_SENSOR] = xTimerCreate("Sensor", pdMS_TO_TICKS(100),
+                                          pdTRUE, (void*)TIMER_SENSOR, vSensorCallback);
+
+    // 通信超时定时器 (5s)
+    xTimers[TIMER_COMM] = xTimerCreate("Comm", pdMS_TO_TICKS(5000),
+                                        pdFALSE, (void*)TIMER_COMM, vCommCallback);
+
+    // 启动所有定时器
+    for(int i = 0; i < TIMER_COUNT; i++) {
+        xTimerStart(xTimers[i], 0);
+    }
+}
+
+// 批量停止
+void vTimerSystem_StopAll(void) {
+    for(int i = 0; i < TIMER_COUNT; i++) {
+        xTimerStop(xTimers[i], 0);
+    }
+}`,
+                description: "多定时器系统使用数组管理多个定时器，通过枚举 ID 区分。每个定时器有独立的周期和回调函数。初始化时创建并启动所有定时器。批量操作 (如停止所有) 使用循环处理。这种模式适合复杂系统的时间管理，如多任务调度、多级超时检测等。",
+                highlight: "多定时器数组管理，通过 ID 区分，适合复杂系统"
+            },
+            {
+                title: "定时器与任务对比",
+                code: `// 定时器 vs 周期性任务
+
+// 使用定时器的场景:
+// 1. 简单周期性操作 (LED 闪烁、数据采集)
+// 2. 超时检测
+// 3. 不需要复杂状态逻辑
+// 4. 资源受限 (RAM 紧张)
+
+// 使用任务 + 延时的场景:
+// 1. 复杂周期性逻辑
+// 2. 需要阻塞等待外设
+// 3. 需要独立优先级
+// 4. 需要独立栈空间
+
+// 对比:
+//              定时器    任务
+// 内存占用     低       高 (需要栈)
+// 优先级      共享     独立
+// 复杂度      低       高
+// 灵活性      低       高
+
+// 推荐:
+// - 简单周期操作 → 定时器
+// - 复杂业务逻辑 → 任务 + vTaskDelayUntil
+
+// 组合使用:
+// 定时器触发任务 (通过任务通知)
+void vTimerCallback(TimerHandle_t xTimer) {
+    vTaskNotifyGiveFromISR(xTaskHandle, &xHigherPriorityTaskWoken);
+}`,
+                description: "定时器和周期性任务的选择：定时器轻量、共享优先级、适合简单周期操作；任务有独立优先级和栈、适合复杂逻辑。内存方面：定时器只需几十字节，任务需要栈空间 (通常 128-256 字)。复杂系统可组合使用：定时器到期通过任务通知触发任务执行，兼顾灵活性和效率。",
+                highlight: "定时器适合简单周期操作，复杂逻辑用任务；可组合使用"
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [showCode, setShowCode] = useState(true);
+            const [timerTicks, setTimerTicks] = useState(0);
+            const [timerExpired, setTimerExpired] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            // 模拟定时器计时
+            useEffect(() => {
+                if (!isPlaying) return;
+                const interval = setInterval(() => {
+                    setTimerTicks(prev => {
+                        const newTicks = (prev + 1) % 10;
+                        if (newTicks === 0) {
+                            setTimerExpired(true);
+                            setTimeout(() => setTimerExpired(false), 500);
+                        }
+                        return newTicks;
+                    });
+                }, 500);
+                return () => clearInterval(interval);
+            }, [isPlaying]);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v =>
+                        v.lang === 'zh-CN' ||
+                        v.lang === 'zh-CN-XiaoxiaoNeural' ||
+                        v.lang.includes('Chinese')
+                    );
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.description + "。" + step.highlight);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep]);
+
+            // 定时器可视化
+            const TimerVisual = () => {
+                const periods = 10;
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-indigo-400 mb-3">定时器计时</h3>
+
+                        {/* 计时条 */}
+                        <div className="flex gap-1 mb-3">
+                            {[...Array(periods)].map((_, i) => (
+                                <div key={i} className={`flex-1 h-8 rounded transition-all ${
+                                    i < timerTicks
+                                        ? 'bg-indigo-500'
+                                        : 'bg-gray-600'
+                                } ${i === timerTicks ? 'tick' : ''}`}>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* 状态 */}
+                        <div className="flex justify-between text-xs mb-2">
+                            <span>剩余：{10 - timerTicks}/10</span>
+                            <span className={timerExpired ? 'text-green-400' : 'text-gray-400'}>
+                                {timerExpired ? '✓ 到期!' : '○ 计时中...'}
+                            </span>
+                        </div>
+
+                        {/* 模式指示 */}
+                        <div className="flex gap-2 text-xs">
+                            <div className={`px-2 py-1 rounded ${currentStep >= 4 ? 'bg-purple-500' : 'bg-gray-700'}`}>
+                                一次性
+                            </div>
+                            <div className={`px-2 py-1 rounded ${currentStep >= 5 ? 'bg-green-500' : 'bg-gray-700'}`}>
+                                周期性
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // 多定时器管理可视化
+            const MultiTimerVisual = () => {
+                const timers = [
+                    { name: 'LED', period: '500ms', tick: timerTicks % 5 },
+                    { name: 'Sensor', period: '100ms', tick: timerTicks % 2 },
+                    { name: 'Comm', period: '5000ms', tick: timerTicks % 10 },
+                    { name: 'Watchdog', period: '1000ms', tick: timerTicks % 4 }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-blue-400 mb-3">多定时器管理</h3>
+                        <div className="space-y-2">
+                            {timers.map((t, i) => (
+                                <div key={i} className={`p-2 rounded flex justify-between items-center ${
+                                    t.tick === 0 ? 'bg-green-500 expire' : 'bg-gray-700'
+                                }`}>
+                                    <span className="text-xs">{t.name}</span>
+                                    <span className="text-xs text-gray-400">{t.period}</span>
+                                    <span className="text-xs">{t.tick === 0 ? '🔔' : '○'}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 定时器 vs 任务对比
+            const ComparisonVisual = () => {
+                const comparison = [
+                    { item: '内存', timer: '低', task: '高', timerColor: 'bg-green-500', taskColor: 'bg-red-500' },
+                    { item: '优先级', timer: '共享', task: '独立', timerColor: 'bg-yellow-500', taskColor: 'bg-green-500' },
+                    { item: '复杂度', timer: '低', task: '高', timerColor: 'bg-green-500', taskColor: 'bg-red-500' },
+                    { item: '灵活性', timer: '低', task: '高', timerColor: 'bg-yellow-500', taskColor: 'bg-green-500' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-3">定时器 vs 任务</h3>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                            <div className="font-bold">对比项</div>
+                            <div className="text-indigo-400 font-bold">定时器</div>
+                            <div className="text-blue-400 font-bold">任务</div>
+
+                            {comparison.map((c, i) => (
+                                <React.Fragment key={i}>
+                                    <div className="text-gray-400">{c.item}</div>
+                                    <div className={`${c.timerColor} p-1 rounded text-center`}>{c.timer}</div>
+                                    <div className={`${c.taskColor} p-1 rounded text-center`}>{c.task}</div>
+                                </React.Fragment>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 应用场景可视化
+            const ApplicationVisual = () => {
+                const apps = [
+                    { name: '超时检测', type: '一次性', icon: '⏱️' },
+                    { name: 'LED 闪烁', type: '周期性', icon: '💡' },
+                    { name: '数据采集', type: '周期性', icon: '📊' },
+                    { name: '心跳包', type: '周期性', icon: '💓' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-3">应用场景</h3>
+                        <div className="grid grid-cols-2 gap-2">
+                            {apps.map((a, i) => (
+                                <div key={i} className="p-2 bg-gray-700 rounded text-center">
+                                    <div className="text-xl mb-1">{a.icon}</div>
+                                    <div className="text-xs">{a.name}</div>
+                                    <div className="text-xs text-gray-400">{a.type}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    {/* 头部 */}
+                    <div className="max-w-7xl mx-auto mb-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-indigo-400">
+                                1215 - FreeRTOS 软件定时器完整指南
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">
+                                    {isPlaying ? '暂停' : '播放'}
+                                </button>
+                                <button onClick={() => setShowCode(!showCode)} className="px-3 py-1 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                    {showCode ? '隐藏代码' : '显示代码'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div className="flex gap-1 mb-4">
+                            {STEPS.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentStep(i)}
+                                    className={`flex-1 h-2 rounded transition-all ${
+                                        i === currentStep ? 'bg-indigo-500 scale-110' :
+                                        i < currentStep ? 'bg-indigo-700' : 'bg-gray-600'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 主内容区 - 三列布局 */}
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* 左列：代码 */}
+                        {showCode && (
+                            <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                                <h2 className="text-sm font-bold text-indigo-400 mb-2">
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap bg-gray-900 p-3 rounded">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        )}
+
+                        {/* 中列：可视化动画 */}
+                        <div className={`${showCode ? 'col-span-1' : 'col-span-2'} space-y-4`}>
+                            <TimerVisual />
+                            <div className="grid grid-cols-2 gap-4">
+                                {currentStep >= 6 ? <MultiTimerVisual /> : <ApplicationVisual />}
+                                {currentStep >= 7 ? <ComparisonVisual /> : <div className="bg-gray-800 rounded-lg p-4"><h3 className="text-sm font-bold text-gray-400 mb-2">等待下一步...</h3></div>}
+                            </div>
+                        </div>
+
+                        {/* 右列：说明 */}
+                        <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                            <h3 className="text-sm font-bold text-blue-400 mb-2">说明</h3>
+                            <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                                {STEPS[currentStep].description}
+                            </p>
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2">
+                                <p className="text-xs text-yellow-300">
+                                    <span className="font-bold">💡 重点:</span> {STEPS[currentStep].highlight}
+                                </p>
+                            </div>
+
+                            {/* 导航按钮 */}
+                            <div className="flex gap-2 mt-4">
+                                <button
+                                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                                    disabled={currentStep === 0}
+                                    className="flex-1 py-2 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 text-xs"
+                                >
+                                    ← 上一步
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+                                    disabled={currentStep === STEPS.length - 1}
+                                    className="flex-1 py-2 bg-indigo-600 rounded hover:bg-indigo-500 disabled:opacity-50 text-xs"
+                                >
+                                    下一步 →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部摘要 */}
+                    <div className="max-w-7xl mx-auto mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-indigo-400 mb-2">FreeRTOS 软件定时器核心要点</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-indigo-400 font-bold">两种模式</span>
+                                <p className="text-gray-400 mt-1">一次性/周期性</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-green-400 font-bold">守护任务</span>
+                                <p className="text-gray-400 mt-1">回调非中断上下文</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-blue-400 font-bold">超时检测</span>
+                                <p className="text-gray-400 mt-1">一次性定时器应用</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-purple-400 font-bold">轻量高效</span>
+                                <p className="text-gray-400 mt-1">多定时器共享任务</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

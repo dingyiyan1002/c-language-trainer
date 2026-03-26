@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1171 - static 关键字完整用法</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(139, 92, 246, 0.2); } 50% { background-color: rgba(139, 92, 246, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .animate-blink { animation: blink 1s steps(2) infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out; }
+        .animate-flow { animation: flow 2s linear infinite; }
+        .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#8b5cf6',
+            secondary: '#7c3aed',
+            accent: '#a78bfa',
+            highlight: '#c4b5fd',
+            bg: '#4c1d95',
+            text: '#ede9fe'
+        };
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const steps = [
+                { title: 'static 关键字概述', voice: 'static 关键字概述。static 是 C 语言中最多功能的存储类限定符。在嵌入式 C 中，static 有三种用法：局部静态变量延长生命周期，文件作用域静态变量限制可见性，静态函数实现模块私有接口。正确使用 static 可以提高代码封装性和安全性。' },
+                { title: '局部静态变量', voice: '局部静态变量。函数内的 static 变量只初始化一次，生命周期贯穿整个程序运行期间。与普通局部变量不同，static 变量在函数调用之间保持值不变。这在嵌入式系统中用于状态保持、计数器、单次初始化等场景。' },
+                { title: '文件作用域静态变量', voice: '文件作用域静态变量。在函数外部声明的 static 变量，作用域限制在当前文件内，其他文件无法通过 extern 访问。这实现了数据封装，避免命名冲突，是 C 语言实现模块私有的主要方式。' },
+                { title: '静态函数', voice: '静态函数。static 函数只能在定义它的文件内调用，不能被其他文件访问。这是 C 语言实现私有函数的机制。将辅助函数声明为 static，可以隐藏实现细节，只暴露必要的公共接口。' },
+                { title: '静态变量初始化', voice: '静态变量初始化规则。所有 static 变量如果没有显式初始化，会被自动初始化为 0。静态变量存储在 BSS 段 (未初始化) 或 DATA 段 (已初始化)，而不是栈上。初始化在 main 函数执行前完成。' },
+                { title: 'static 应用场景', voice: 'static 应用场景。一，状态机状态保持。二，单次初始化标志。三，模块私有数据和函数。四，查找表和配置常量。五，计数器和累加器。六，避免大数组占用栈空间。' },
+                { title: 'static 最佳实践', voice: 'static 最佳实践。一，默认使用 static 限制可见性。二，辅助函数优先声明为 static。三，大数组使用 static 避免栈溢出。四，配合 const 实现只读数据。五，避免过度使用静态变量导致状态依赖。' },
+                { title: 'static 内存布局', voice: 'static 内存布局详解。程序内存分为代码段、数据段、BSS 段、堆、栈。static 变量存储在数据段或 BSS 段，生命周期与程序相同。理解内存布局对于嵌入式系统内存优化至关重要。' }
+            ];
+
+            useEffect(() => {
+                if (!isPlaying) return;
+                const speak = () => {
+                    if (isMuted || !steps[currentStep]) return;
+                    const utterance = new SpeechSynthesisUtterance(steps[currentStep].voice);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            setCurrentStep(prev => (prev < steps.length - 1 ? prev + 1 : prev));
+                        }, 800);
+                    };
+                    window.speechSynthesis.speak(utterance);
+                };
+                speak();
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    window.speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, isMuted]);
+
+            const LocalStatic = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>局部静态变量</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-red-400 font-bold mb-2">❌ 普通局部变量</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`int counter(void) {
+    int count = 0;  // 每次调用重新创建
+    count++;
+    return count;   // 总是返回 1
+}
+
+// 调用 10 次，返回 10 次 1`}
+                                </pre>
+                                <div className="mt-2 text-xs text-red-400">
+                                    ⚠️ 变量在栈上，函数返回后销毁
+                                </div>
+                            </div>
+                            <div className={`${currentStep >= 1 ? 'animate-slideIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">✓ 静态局部变量</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`int counter(void) {
+    static int count = 0;  // 只初始化一次
+    count++;               // 保持上次值
+    return count;          // 返回递增的值
+}
+
+// 调用 10 次，返回 1,2,3...10`}
+                                </pre>
+                                <div className="mt-2 text-xs text-emerald-400">
+                                    ✓ 变量在数据段，程序生命周期内保持
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const FileScopeStatic = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>文件作用域 static</h4>
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''}`}>
+                                    <div className="bg-purple-900/30 p-3 rounded border border-purple-600">
+                                        <div className="text-purple-300 font-bold mb-2">file1.c</div>
+                                        <pre className="text-xs font-mono text-gray-300">
+{`#include "module.h"
+
+// 文件私有变量
+static int privateVar = 0;
+static const int MAX_COUNT = 100;
+
+// 公共函数可以访问 privateVar
+void publicFunc(void) {
+    privateVar++;
+}`}
+                                        </pre>
+                                    </div>
+                                </div>
+                                <div className={`${currentStep >= 2 ? 'animate-slideIn' : ''}`}>
+                                    <div className="bg-blue-900/30 p-3 rounded border border-blue-600">
+                                        <div className="text-blue-300 font-bold mb-2">file2.c</div>
+                                        <pre className="text-xs font-mono text-gray-300">
+{`#include "module.h"
+
+// 尝试访问会失败
+// extern int privateVar;  // ✗ 链接错误
+                          // file1 的 privateVar
+                          // 是 static，不可见
+
+void otherFunc(void) {
+    // 无法访问 privateVar
+}`}
+                                        </pre>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-3 bg-amber-900/30 rounded border border-amber-600">
+                                <div className="text-amber-300 text-sm">
+                                    💡 static 全局变量实现了 C 语言的"私有成员"，避免命名冲突，提高封装性
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const StaticFunction = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>静态函数 (私有函数)</h4>
+                        <div className="space-y-3">
+                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`// module.c
+#include "module.h"
+
+// 私有辅助函数 - 外部文件无法调用
+static int validateInput(int value) {
+    return (value >= 0 && value <= 100);
+}
+
+static void internalHelper(void) {
+    // 内部实现细节
+}
+
+// 公共接口 - 可以被外部调用
+int moduleProcess(int input) {
+    if (!validateInput(input)) {  // 内部调用
+        return -1;
+    }
+    // 处理逻辑
+    return input * 2;
+}`}
+                            </pre>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-emerald-900/30 p-3 rounded border border-emerald-600">
+                                    <div className="text-emerald-300 font-bold mb-1">✓ 优点</div>
+                                    <ul className="text-xs text-gray-300 space-y-1">
+                                        <li>• 隐藏实现细节</li>
+                                        <li>• 避免命名冲突</li>
+                                        <li>• 编译器可优化</li>
+                                        <li>• 清晰的接口边界</li>
+                                    </ul>
+                                </div>
+                                <div className="bg-blue-900/30 p-3 rounded border border-blue-600">
+                                    <div className="text-blue-300 font-bold mb-1">应用场景</div>
+                                    <ul className="text-xs text-gray-300 space-y-1">
+                                        <li>• 回调函数</li>
+                                        <li>• 辅助计算函数</li>
+                                        <li>• 状态机处理函数</li>
+                                        <li>• 硬件抽象层内部函数</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const MemoryLayout = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>static 内存布局</h4>
+                        <div className="space-y-2">
+                            <div className={`${currentStep >= 7 ? 'animate-fadeIn' : ''} p-3 bg-gray-900 rounded`}>
+                                <div className="text-purple-300 font-bold mb-2">代码段 (.text)</div>
+                                <div className="text-xs text-gray-400">所有函数代码 (包括 static 函数)</div>
+                            </div>
+                            <div className={`${currentStep >= 7 ? 'animate-fadeIn' : ''} p-3 bg-emerald-900/30 rounded border border-emerald-600`}>
+                                <div className="text-emerald-300 font-bold mb-2">数据段 (.data)</div>
+                                <div className="text-xs text-gray-400 mb-2">已初始化的全局和 static 变量</div>
+                                <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-2 rounded">
+{`int globalInit = 10;        // DATA 段
+static int fileStatic = 20; // DATA 段
+void func(void) {
+    static int local = 30;  // DATA 段`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 7 ? 'animate-fadeIn' : ''} p-3 bg-blue-900/30 rounded border border-blue-600`}>
+                                <div className="text-blue-300 font-bold mb-2">BSS 段 (.bss)</div>
+                                <div className="text-xs text-gray-400 mb-2">未初始化的全局和 static 变量 (自动初始化为 0)</div>
+                                <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-2 rounded">
+{`int globalUninit;           // BSS 段 (=0)
+static int fileStaticUninit; // BSS 段 (=0)
+void func(void) {
+    static int localUninit;  // BSS 段 (=0)`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 7 ? 'animate-fadeIn' : ''} p-3 bg-purple-900/30 rounded border border-purple-600`}>
+                                <div className="text-purple-300 font-bold mb-2">栈 (Stack)</div>
+                                <div className="text-xs text-gray-400">非 static 局部变量，函数返回后销毁</div>
+                            </div>
+                            <div className={`${currentStep >= 7 ? 'animate-fadeIn' : ''} p-3 bg-amber-900/30 rounded border border-amber-600`}>
+                                <div className="text-amber-300 font-bold mb-2">堆 (Heap)</div>
+                                <div className="text-xs text-gray-400">动态分配的内存 (malloc/free)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const UseCases = () => (
+                <div className="space-y-4">
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>static 应用场景</h4>
+                        <div className="space-y-3">
+                            <div className={`${currentStep >= 5 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-emerald-400 font-bold mb-2">状态机状态保持</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`typedef enum { STATE_INIT, STATE_RUN, STATE_STOP } State;
+
+void stateMachine(int event) {
+    static State current = STATE_INIT;  // 保持状态
+
+    switch (current) {
+        case STATE_INIT:
+            if (event == EVT_START) current = STATE_RUN;
+            break;
+        case STATE_RUN:
+            if (event == EVT_STOP) current = STATE_STOP;
+            break;
+    }
+}`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 5 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-cyan-400 font-bold mb-2">单次初始化</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`void initOnce(void) {
+    static int initialized = 0;
+
+    if (initialized) return;  // 已初始化，直接返回
+
+    // 初始化代码 (只执行一次)
+    hardwareInit();
+    configLoad();
+
+    initialized = 1;
+}`}
+                                </pre>
+                            </div>
+                            <div className={`${currentStep >= 5 ? 'animate-scaleIn' : ''}`}>
+                                <div className="text-purple-400 font-bold mb-2">大数组 (避免栈溢出)</div>
+                                <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`void processBuffer(void) {
+    // static 避免占用栈空间
+    static uint8_t buffer[4096];
+
+    // 使用 buffer 进行处理
+    readSensor(buffer, sizeof(buffer));
+    processData(buffer);
+}`}
+                                </pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const BestPractices = () => (
+                <div className="space-y-4">
+                    <div className="bg-gradient-to-r from-purple-900/50 to-indigo-900/50 rounded-lg p-6">
+                        <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>static 最佳实践</h3>
+                        <ul className="space-y-3 text-gray-300">
+                            <li className="flex items-start">
+                                <span className="text-purple-400 mr-2">✓</span>
+                                <span><strong>默认 static：</strong>文件内使用的变量和函数默认声明为 static</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-purple-400 mr-2">✓</span>
+                                <span><strong>辅助函数 static：</strong>不暴露在头文件的辅助函数使用 static</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-purple-400 mr-2">✓</span>
+                                <span><strong>大数组 static：</strong>大于 1KB 的局部数组考虑使用 static</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-purple-400 mr-2">✓</span>
+                                <span><strong>配合 const：</strong>只读的查找表使用 static const</span>
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-yellow-400 mr-2">⚠️</span>
+                                <span><strong>避免状态依赖：</strong>过度使用 static 变量可能导致难以调试的状态依赖问题</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h4 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>完整示例：模块封装</h4>
+                        <pre className="text-xs font-mono text-gray-300">
+{`// sensor.c - 传感器模块
+#include "sensor.h"
+
+// 私有数据
+static int sensorOffset = 0;
+static const int CALIBRATION_TABLE[256] = {0};
+
+// 私有函数
+static int calibrateRaw(int raw) {
+    return raw + sensorOffset;
+}
+
+// 公共接口
+int sensorRead(void) {
+    int raw = readHardware();
+    return calibrateRaw(raw);
+}
+
+void sensorCalibrate(int offset) {
+    sensorOffset = offset;
+}`}
+                        </pre>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch(currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-6">
+                                <div className="bg-gradient-to-r from-purple-900/50 to-indigo-900/50 rounded-lg p-6">
+                                    <h3 className="text-2xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>static 关键字概述</h3>
+                                    <ul className="space-y-3 text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">▸</span>
+                                            <span>最多功能的存储类限定符</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">▸</span>
+                                            <span>三种用法：局部静态、文件静态、静态函数</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">▸</span>
+                                            <span>改变变量生命周期和可见性</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">▸</span>
+                                            <span>实现 C 语言的封装机制</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <pre className="text-xs font-mono text-gray-300">
+{`// 1. 局部静态变量
+void func(void) {
+    static int count = 0;  // 只初始化一次
+}
+
+// 2. 文件作用域静态变量
+static int fileVar = 0;    // 仅当前文件可见
+
+// 3. 静态函数
+static void helper(void) { // 仅当前文件可调用
+}`}
+                                    </pre>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return <LocalStatic />;
+                    case 2:
+                        return <FileScopeStatic />;
+                    case 3:
+                        return <StaticFunction />;
+                    case 4:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h4 className="text-lg font-bold mb-4" style={{ color: COLOR_MAP.text }}>static 初始化规则</h4>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className={`${currentStep >= 4 ? 'animate-slideIn' : ''}`}>
+                                            <div className="text-emerald-400 font-bold mb-2">✓ 自动初始化为 0</div>
+                                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`static int a;        // = 0
+static int b = 0;    // = 0
+int global;          // = 0
+
+// 都在 BSS 段，自动清零`}
+                                            </pre>
+                                        </div>
+                                        <div className={`${currentStep >= 4 ? 'animate-slideIn' : ''}`}>
+                                            <div className="text-blue-400 font-bold mb-2">显式初始化</div>
+                                            <pre className="bg-gray-900 p-3 rounded text-xs font-mono text-gray-300">
+{`static int x = 10;    // DATA 段
+const int MAX = 100;  // DATA 段
+
+// 初始化在 main 前完成`}
+                                            </pre>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 p-3 bg-blue-900/30 rounded border border-blue-600">
+                                        <p className="text-blue-300 text-sm">
+                                            💡 static 变量初始化只执行一次，在程序启动时完成，不是每次函数调用时
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 5:
+                        return <UseCases />;
+                    case 6:
+                        return <BestPractices />;
+                    case 7:
+                        return <MemoryLayout />;
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-6 flex items-center justify-between">
+                            <div>
+                                <h1 className="text-3xl font-bold" style={{ color: COLOR_MAP.primary }}>
+                                    1171 - static 关键字完整用法
+                                </h1>
+                                <p className="text-gray-400 mt-1">C 语言核心 · 步骤 {currentStep + 1} / {steps.length}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setIsMuted(!isMuted)}
+                                    className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-purple-600'} hover:opacity-80`}>
+                                    {isMuted ? '🔇 静音' : '🔊 语音'}
+                                </button>
+                                <button onClick={() => setIsPlaying(!isPlaying)}
+                                    className={`px-4 py-2 rounded ${isPlaying ? 'bg-purple-600' : 'bg-gray-600'} hover:opacity-80`}>
+                                    {isPlaying ? '⏸ 暂停' : '▶ 继续'}
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-3 gap-6">
+                            <div className="col-span-1 space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>代码示例</h3>
+                                    <pre className="text-xs font-mono text-gray-300 overflow-x-auto">
+{`// 局部 static
+void counter(void) {
+    static int count = 0;
+    count++;
+}
+
+// 文件 static
+static int privateVar;
+
+// 静态函数
+static void helper(void);
+
+// static const
+static const int LOOKUP[256];`}
+                                    </pre>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-lg font-bold mb-3" style={{ color: COLOR_MAP.text }}>关键点</h3>
+                                    <ul className="space-y-2 text-sm text-gray-300">
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">•</span>
+                                            <span>延长局部变量生命周期</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">•</span>
+                                            <span>限制全局变量可见性</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">•</span>
+                                            <span>实现私有函数</span>
+                                        </li>
+                                        <li className="flex items-start">
+                                            <span className="text-purple-400 mr-2">•</span>
+                                            <span>自动初始化为 0</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div className="col-span-1">
+                                <div className="bg-gray-800 rounded-lg p-6 h-full">
+                                    <h3 className="text-xl font-bold mb-4" style={{ color: COLOR_MAP.text }}>
+                                        {steps[currentStep].title}
+                                    </h3>
+                                    {renderContent()}
+                                </div>
+                            </div>
+
+                            <div className="col-span-1 space-y-4">
+                                <LocalStatic />
+                                <FileScopeStatic />
+                            </div>
+                        </div>
+
+                        <footer className="mt-8 flex justify-center gap-2">
+                            {steps.map((_, idx) => (
+                                <button key={idx} onClick={() => setCurrentStep(idx)}
+                                    className={`w-3 h-3 rounded-full transition-all ${idx === currentStep ? 'w-8' : ''}`}
+                                    style={{ backgroundColor: idx <= currentStep ? COLOR_MAP.primary : '#374151' }} />
+                            ))}
+                        </footer>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

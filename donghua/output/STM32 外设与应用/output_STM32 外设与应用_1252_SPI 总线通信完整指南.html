@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 SPI 总线通信完整指南 - SPI 协议与全双工通信可视化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // 8 个步骤 - 语音驱动自动播放
+        const STEPS = [
+            {
+                title: "SPI 基础概念",
+                code: `// SPI 总线特性
+// - 4 线制：SCK(时钟), MOSI(主出从入),
+//          MISO(主入从出), CS(片选)
+// - 主从架构：一个主设备，多个从设备
+// - 全双工：同时发送和接收
+// - 速率：最高 fPCLK/2 (STM32F103: 36MHz)
+
+// STM32 SPI 外设特性
+// - 3 个 SPI 接口 (SPI1/SPI2/SPI3)
+// - 主/从模式
+// - 8 位/16 位数据
+// - MSB/LSB 先行可选
+// - SPI/I2S 双模式
+
+// 工作模式 (CPOL/CPHA)
+// Mode 0: CPOL=0, CPHA=0 (最常用)
+// Mode 1: CPOL=0, CPHA=1
+// Mode 2: CPOL=1, CPHA=0
+// Mode 3: CPOL=1, CPHA=1`,
+                visualization: "spi-basic",
+                explanation: "SPI 是四线制同步串行总线，支持全双工通信。SCK 是时钟线，MOSI 发送数据，MISO 接收数据，CS 片选选择从设备。STM32 有 3 个 SPI 接口，SPI1 在 APB2(72MHz)，SPI2/3 在 APB1(36MHz)。"
+            },
+            {
+                title: "SPI 硬件配置",
+                code: `// SPI 初始化 (9Mbps 主模式)
+void SPI_Init(void) {
+    // 1. 使能时钟
+    RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+
+    // 2. GPIO 配置
+    // PA5: SPI1_SCK (复用推挽)
+    // PA6: SPI1_MISO (浮空输入)
+    // PA7: SPI1_MOSI (复用推挽)
+    GPIOA->CRL &= ~0x000FFF00;
+    GPIOA->CRL |= 0x00088800;
+
+    // 3. CS 引脚 (通用推挽)
+    GPIOA->CRL &= ~0x00F00000;
+    GPIOA->CRL |= 0x00300000;  // PA4 推挽
+
+    // 4. SPI 配置 (主模式，9Mbps)
+    SPI1->CR1 = SPI_CR1_MSTR | SPI_CR1_SSM | SPI_CR1_SSI;
+    SPI1->CR2 = 0;
+    // BR=010 → fPCLK/8 = 72M/8 = 9Mbps
+
+    // 5. 使能 SPI
+    SPI1->CR1 |= SPI_CR1_SPE;
+}`,
+                visualization: "spi-hardware",
+                explanation: "SPI 引脚配置：SCK 和 MOSI 为复用推挽输出，MISO 为浮空输入，CS 为通用推挽输出。波特率由 BR 位决定，可配置为 fPCLK/2 到 fPCLK/256。SSM 和 SSI 位启用软件片选管理。"
+            },
+            {
+                title: "SPI 数据收发",
+                code: `// SPI 发送/接收字节
+uint8_t SPI_Transfer(uint8_t txData) {
+    // 1. 选择从设备 (CS 拉低)
+    GPIOA->BRR = GPIO_BSRR_BS4;
+
+    // 2. 等待发送缓冲区空
+    while (!(SPI1->SR & SPI_SR_TXE));
+
+    // 3. 写入数据 (启动传输)
+    SPI1->DR = txData;
+
+    // 4. 等待接收缓冲区不空
+    while (!(SPI1->SR & SPI_SR_RXNE));
+
+    // 5. 读取数据
+    uint8_t rxData = SPI1->DR;
+
+    // 6. 等待传输完成
+    while (SPI1->SR & SPI_SR_BSY);
+
+    // 7. 释放从设备 (CS 拉高)
+    GPIOA->BSRR = GPIO_BSRR_BR4;
+
+    return rxData;  // 返回同时刻接收的数据
+}
+
+// 发送缓冲区
+void SPI_WriteBuffer(uint8_t *buf, uint16_t len) {
+    for (int i = 0; i < len; i++) {
+        SPI_Transfer(buf[i]);
+    }
+}`,
+                visualization: "spi-transfer",
+                explanation: "SPI 传输是同步的：写入 DR 寄存器启动传输，同时移位发送和接收。TXE 标志表示发送缓冲区空，RXNE 表示接收缓冲区不空，BSY 表示总线忙。传输完成后读取 DR 获取接收数据。"
+            },
+            {
+                title: "SPI 工作模式",
+                code: `// SPI 模式配置 (CPOL/CPHA)
+
+// Mode 0: CPOL=0, CPHA=0
+// - 空闲时 SCK 低电平
+// - 第 1 个边沿采样，第 2 个边沿移位
+void SPI_Mode0(void) {
+    SPI1->CR1 &= ~(SPI_CR1_CPOL | SPI_CR1_CPHA);
+}
+
+// Mode 1: CPOL=0, CPHA=1
+// - 空闲时 SCK 低电平
+// - 第 2 个边沿采样，第 1 个边沿移位
+void SPI_Mode1(void) {
+    SPI1->CR1 &= ~SPI_CR1_CPOL;
+    SPI1->CR1 |= SPI_CR1_CPHA;
+}
+
+// Mode 2: CPOL=1, CPHA=0
+void SPI_Mode2(void) {
+    SPI1->CR1 |= SPI_CR1_CPOL;
+    SPI1->CR1 &= ~SPI_CR1_CPHA;
+}
+
+// Mode 3: CPOL=1, CPHA=1
+void SPI_Mode3(void) {
+    SPI1->CR1 |= SPI_CR1_CPOL | SPI_CR1_CPHA;
+}
+
+// 数据顺序
+// SPI_CR1_LSBFIRST: LSB 先行 (默认 MSB)`,
+                visualization: "spi-modes",
+                explanation: "SPI 有 4 种工作模式，由 CPOL(时钟极性) 和 CPHA(时钟相位) 决定。Mode 0 最常用，空闲时钟低电平，上升沿采样。不同模式的从设备必须使用对应模式才能正确通信。"
+            },
+            {
+                title: "SPI DMA 传输",
+                code: `// SPI DMA 配置 (大数据传输)
+void SPI_DMA_Init(uint32_t txAddr, uint32_t rxAddr, uint16_t len) {
+    // 1. 使能 DMA 时钟
+    RCC->AHBENR |= RCC_AHBENR_DMA1EN;
+
+    // 2. 配置 TX DMA
+    DMA1_Channel3->CPAR = (uint32_t)&SPI1->DR;
+    DMA1_Channel3->CMAR = txAddr;
+    DMA1_Channel3->CNDTR = len;
+    DMA1_Channel3->CCR = DMA_CCR_DIR | DMA_CCR_MINC |
+                        DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 |
+                        DMA_CCR_PL_0;
+
+    // 3. 配置 RX DMA
+    DMA1_Channel2->CPAR = (uint32_t)&SPI1->DR;
+    DMA1_Channel2->CMAR = rxAddr;
+    DMA1_Channel2->CNDTR = len;
+    DMA1_Channel2->CCR = DMA_CCR_MINC | DMA_CCR_CIRC |
+                        DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0;
+
+    // 4. 使能 SPI DMA
+    SPI1->CR2 |= SPI_CR2_TXDMAEN | SPI_CR2_RXDMAEN;
+
+    // 5. 启动 DMA
+    DMA1_Channel3->CCR |= DMA_CCR_EN;
+    DMA1_Channel2->CCR |= DMA_CCR_EN;
+}
+
+// 等待 DMA 完成
+while (DMA1_Channel3->CNDTR > 0);`,
+                visualization: "spi-dma",
+                explanation: "DMA 可实现大数据量 SPI 传输而无需 CPU 干预。TX DMA 从内存读取数据写入 SPI_DR，RX DMA 从 SPI_DR 读取数据写入内存。循环模式适合连续采样，适合 ADC 等应用。"
+            },
+            {
+                title: "SPI 常用器件",
+                code: `// W25Qxx Flash 读写
+void W25QXX_Init(void) {
+    // CS 拉高
+    GPIO_SetBits(GPIOA, GPIO_Pin_4);
+}
+
+// 读取 Flash ID
+uint16_t W25QXX_ReadID(void) {
+    uint16_t temp;
+    GPIO_ResetBits(GPIOA, GPIO_Pin_4);
+    SPI_Transfer(0x90);  // 读 ID 命令
+    SPI_Transfer(0x00);
+    SPI_Transfer(0x00);
+    SPI_Transfer(0x00);
+    temp = SPI_Transfer(0xFF);
+    temp <<= 8;
+    temp |= SPI_Transfer(0xFF);
+    GPIO_SetBits(GPIOA, GPIO_Pin_4);
+    return temp;  // 例如：0xEF14 = W25Q80
+}
+
+// 写入使能
+void W25QXX_WriteEnable(void) {
+    GPIO_ResetBits(GPIOA, GPIO_Pin_4);
+    SPI_Transfer(0x06);
+    GPIO_SetBits(GPIOA, GPIO_Pin_4);
+}
+
+// 页编程 (256 字节)
+void W25QXX_WritePage(uint8_t *buf, uint32_t addr) {
+    W25QXX_WriteEnable();
+    GPIO_ResetBits(GPIOA, GPIO_Pin_4);
+    SPI_Transfer(0x02);  // 页编程
+    SPI_Transfer((addr >> 16) & 0xFF);
+    SPI_Transfer((addr >> 8) & 0xFF);
+    SPI_Transfer(addr & 0xFF);
+    for (int i = 0; i < 256; i++) {
+        SPI_Transfer(buf[i]);
+    }
+    GPIO_SetBits(GPIOA, GPIO_Pin_4);
+}`,
+                visualization: "spi-devices",
+                explanation: "W25Qxx 系列是常用 SPI Flash。读 ID 命令 0x90 可识别型号。写入前必须先发送写使能命令 0x06。页编程一次可写 256 字节，写入前需要先擦除 (扇区擦除 0x20)。"
+            },
+            {
+                title: "SPI 中断/DMA",
+                code: `// SPI 中断配置
+void SPI_EnableInterrupts(void) {
+    SPI1->CR2 |= SPI_CR2_TXEIE;  // 发送缓冲空中断
+    SPI1->CR2 |= SPI_CR2_RXNEIE; // 接收缓冲不空中断
+    SPI1->CR2 |= SPI_CR2_ERRIE;  // 错误中断
+    NVIC_EnableIRQ(SPI1_IRQn);
+}
+
+// SPI 中断处理
+void SPI1_IRQHandler(void) {
+    uint32_t sr = SPI1->SR;
+
+    // 发送中断
+    if (sr & SPI_SR_TXE) {
+        if (txIdx < txLen) {
+            SPI1->DR = txBuffer[txIdx++];
+        } else {
+            SPI1->CR2 &= ~SPI_CR2_TXEIE;  // 禁用中断
+        }
+    }
+
+    // 接收中断
+    if (sr & SPI_SR_RXNE) {
+        rxBuffer[rxIdx++] = SPI1->DR;
+    }
+
+    // 错误处理
+    if (sr & SPI_SR_OVR) {
+        uint32_t dr = SPI1->DR;  // 清除 OVR
+        SPI1->CR1 &= ~SPI_CR1_SPE;  // 禁用 SPI
+        SPI1->CR1 |= SPI_CR1_SPE;   // 重新使能
+    }
+}`,
+                visualization: "spi-interrupts",
+                explanation: "SPI 支持中断驱动传输，适合中小数据量。TXE 中断在发送缓冲区空时触发，RXNE 在接收缓冲区不空时触发。OVR 错误发生在未及时读取 DR 时，需要读 DR 清除标志。"
+            },
+            {
+                title: "SPI 多从机配置",
+                code: `// SPI 多从机管理
+
+// 硬件片选：每个从设备一个 CS 引脚
+#define CS_FLASH  GPIO_Pin_4   // PA4 - W25Qxx
+#define CS_LCD    GPIO_Pin_5   // PA5 - ST7789
+#define CS_SD     GPIO_Pin_6   // PA6 - SD 卡
+
+// 选择从设备
+void SPI_SelectDevice(uint8_t device) {
+    // 先释放所有 CS
+    GPIO_SetBits(GPIOA, CS_FLASH | CS_LCD | CS_SD);
+    Delay_us(1);
+
+    // 再选中目标
+    switch (device) {
+        case DEVICE_FLASH:
+            GPIO_ResetBits(GPIOA, CS_FLASH);
+            break;
+        case DEVICE_LCD:
+            GPIO_ResetBits(GPIOA, CS_LCD);
+            break;
+        case DEVICE_SD:
+            GPIO_ResetBits(GPIOA, CS_SD);
+            break;
+    }
+}
+
+// 注意：总线速度需匹配最慢从设备
+// SD 卡初始通信 ≤400KHz`,
+                visualization: "spi-multislave",
+                explanation: "SPI 多从机系统需要独立的 CS 引脚。切换从设备时先释放所有 CS，再选中目标，避免总线冲突。不同从设备可能要求不同速率，SD 卡初始化阶段需使用≤400KHz 低速。"
+            }
+        ];
+
+        // 颜色映射 - 橙黄色调
+        const COLOR_MAP = {
+            primary: '#f59e0b',    // amber-500
+            secondary: '#d97706',  // amber-600
+            accent: '#10b981',     // emerald-500
+            success: '#10b981',    // emerald-500
+            warning: '#f59e0b',    // amber-500
+            danger: '#ef4444',     // red-500
+            info: '#3b82f6',       // blue-500
+            sck: '#8b5cf6',        // SCK 紫色
+            mosi: '#06b6d4',       // MOSI 青色
+            miso: '#10b981',       // MISO 绿色
+            cs: '#f59e0b',         // CS 黄色
+            gradients: [
+                'from-amber-500 to-orange-500',
+                'from-emerald-500 to-teal-500',
+                'from-blue-500 to-indigo-500'
+            ]
+        };
+
+        // SPI 基础可视化
+        const SpiBasic = ({ step }) => {
+            const [sckState, setSckState] = useState(false);
+            const [mosiState, setMosiState] = useState(false);
+            const [misoState, setMisoState] = useState(false);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setSckState(prev => !prev);
+                    if (sckState) {
+                        setMosiState(Math.random() > 0.5);
+                        setMisoState(Math.random() > 0.5);
+                    }
+                }, 500);
+                return () => clearInterval(interval);
+            }, [sckState]);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        SPI 信号线
+                    </div>
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold">SCK:</span>
+                            <div className={`h-4 flex-1 rounded transition-all ${
+                                sckState ? 'bg-purple-500' : 'bg-gray-300'
+                            }`} />
+                            <span className="text-xs w-10">{sckState ? 'H' : 'L'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold">MOSI:</span>
+                            <div className={`h-4 flex-1 rounded transition-all ${
+                                mosiState ? 'bg-cyan-500' : 'bg-gray-300'
+                            }`} />
+                            <span className="text-xs w-10">{mosiState ? '1' : '0'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold">MISO:</span>
+                            <div className={`h-4 flex-1 rounded transition-all ${
+                                misoState ? 'bg-green-500' : 'bg-gray-300'
+                            }`} />
+                            <span className="text-xs w-10">{misoState ? '1' : '0'}</span>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-purple-50 p-2 rounded text-center">
+                            <div>📡 全双工</div>
+                            <div>同时收发</div>
+                        </div>
+                        <div className="bg-amber-50 p-2 rounded text-center">
+                            <div>🔌 多从机</div>
+                            <div>独立 CS</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // SPI 硬件可视化
+        const SpiHardware = ({ step }) => {
+            const [initialized, setInitialized] = useState(false);
+            const [speed, setSpeed] = useState(9);
+
+            useEffect(() => {
+                setInitialized(true);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className={`p-4 rounded-lg text-center transition-all ${
+                        initialized ? 'bg-green-100' : 'bg-gray-100'
+                    }`}>
+                        <div className="text-2xl mb-2">{initialized ? '✅' : '⏳'}</div>
+                        <div className="font-semibold">SPI 初始化</div>
+                        <div className="text-sm">主模式，{speed}Mbps</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs mb-2">引脚配置:</div>
+                        <div className="font-mono text-xs space-y-1">
+                            <div>PA5: SCK (复用推挽)</div>
+                            <div>PA6: MISO (浮空输入)</div>
+                            <div>PA7: MOSI (复用推挽)</div>
+                            <div>PA4: CS  (通用推挽)</div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                        {[2, 4, 8, 16].map(div => (
+                            <button
+                                key={div}
+                                onClick={() => setSpeed(72 / div)}
+                                className={`p-2 rounded text-xs ${
+                                    speed === 72 / div ? 'bg-amber-500 text-white' : 'bg-gray-200'
+                                }`}
+                            >
+                                /{div}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // SPI 传输可视化
+        const SpiTransfer = ({ step }) => {
+            const [phase, setPhase] = useState('idle');
+            const [txData, setTxData] = useState(0);
+            const [rxData, setRxData] = useState(0);
+
+            useEffect(() => {
+                const transfer = async () => {
+                    setPhase('cs_low');
+                    setTxData(Math.floor(Math.random() * 256));
+                    await sleep(500);
+                    for (let i = 0; i < 8; i++) {
+                        setPhase('clock');
+                        await sleep(200);
+                    }
+                    setPhase('cs_high');
+                    setRxData(Math.floor(Math.random() * 256));
+                    await sleep(1000);
+                    setPhase('idle');
+                };
+                transfer();
+                const interval = setInterval(transfer, 3000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            return (
+                <div className="space-y-4">
+                    <div className={`p-4 rounded-lg text-center ${
+                        phase === 'cs_low' || phase === 'clock' ? 'bg-amber-100' : 'bg-gray-100'
+                    }`}>
+                        <div className="text-2xl">
+                            {phase === 'idle' && '⏸️ 空闲'}
+                            {phase === 'cs_low' && '📍 CS 拉低'}
+                            {phase === 'clock' && '⏱️ 传输中'}
+                            {phase === 'cs_high' && '✅ 完成'}
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-cyan-50 p-3 rounded-lg text-center">
+                            <div className="text-xs">发送</div>
+                            <div className="font-mono text-lg">0x{txData.toString(16).padStart(2, '0')}</div>
+                        </div>
+                        <div className="bg-green-50 p-3 rounded-lg text-center">
+                            <div className="text-xs">接收</div>
+                            <div className="font-mono text-lg">0x{rxData.toString(16).padStart(2, '0')}</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // SPI 模式可视化
+        const SpiModes = ({ step }) => {
+            const [mode, setMode] = useState(0);
+            const [clockWave, setClockWave] = useState([]);
+
+            useEffect(() => {
+                const wave = [];
+                for (let i = 0; i < 16; i++) {
+                    const cp = mode & 1;
+                    const ph = mode & 2 ? 1 : 0;
+                    const val = ((i + ph) % 2) ^ cp;
+                    wave.push(val);
+                }
+                setClockWave(wave);
+            }, [mode]);
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-4 gap-2">
+                        {[0, 1, 2, 3].map(m => (
+                            <button
+                                key={m}
+                                onClick={() => setMode(m)}
+                                className={`p-2 rounded text-xs ${
+                                    mode === m ? 'bg-amber-500 text-white' : 'bg-gray-200'
+                                }`}
+                            >
+                                Mode {m}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs mb-2">CPOL={mode & 1}, CPHA={(mode >> 1) & 1}</div>
+                        <div className="flex space-x-1">
+                            {clockWave.map((val, i) => (
+                                <div
+                                    key={i}
+                                    className={`w-4 h-8 rounded ${
+                                        val ? 'bg-purple-500' : 'bg-gray-300'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        <div>• Mode 0: 最常用，上升沿采样</div>
+                        <div>• Mode 3: 某些 Flash 使用</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // SPI DMA 可视化
+        const SpiDma = ({ step }) => {
+            const [dmaProgress, setDmaProgress] = useState(0);
+            const [buffer, setBuffer] = useState(Array(16).fill(null));
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setDmaProgress(prev => {
+                        const next = (prev + 1) % 17;
+                        if (next > 0) {
+                            setBuffer(b => {
+                                const newB = [...b];
+                                newB[next - 1] = Math.floor(Math.random() * 256);
+                                return newB;
+                            });
+                        } else {
+                            setBuffer(Array(16).fill(null));
+                        }
+                        return next;
+                    });
+                }, 300);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        DMA 自动传输
+                    </div>
+                    <div className="flex justify-center space-x-1">
+                        {buffer.map((data, i) => (
+                            <div
+                                key={i}
+                                className={`w-8 h-12 rounded flex items-center justify-center text-xs font-mono ${
+                                    data !== null ? 'bg-amber-500 text-white' : 'bg-gray-200'
+                                }`}
+                            >
+                                {data !== null ? data : i}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="w-full bg-gray-200 rounded-full h-3">
+                            <div
+                                className="bg-amber-500 h-3 rounded-full transition-all"
+                                style={{ width: `${(dmaProgress / 16) * 100}%` }}
+                            />
+                        </div>
+                        <div className="text-xs text-center mt-1">
+                            {dmaProgress}/16 字节
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // SPI 器件可视化
+        const SpiDevices = ({ step }) => {
+            const [device, setDevice] = useState('W25Q80');
+            const [data, setData] = useState([]);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setData(prev => [Math.floor(Math.random() * 256), ...prev.slice(0, 7)]);
+                }, 1000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const devices = [
+                { name: 'W25Q80', type: 'Flash', icon: '📀' },
+                { name: 'W25Q128', type: 'Flash', icon: '📀' },
+                { name: 'ST7789', type: 'LCD', icon: '📱' },
+                { name: 'SD Card', type: '存储', icon: '💾' },
+                { name: 'ENC28J60', type: '以太网', icon: '🌐' }
+            ];
+
+            return (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-2">
+                        {devices.map((dev) => (
+                            <button
+                                key={dev.name}
+                                onClick={() => setDevice(dev.name)}
+                                className={`p-2 rounded text-left transition-all ${
+                                    device === dev.name
+                                        ? 'bg-amber-500 text-white'
+                                        : 'bg-gray-100'
+                                }`}
+                            >
+                                <div className="flex justify-between">
+                                    <span>{dev.icon} {dev.name}</span>
+                                    <span className="text-xs">{dev.type}</span>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs font-semibold mb-2">数据:</div>
+                        <div className="font-mono text-xs">
+                            {data.map((d, i) => <span key={i} className="inline-block w-8">0x{d.toString(16).padStart(2, '0')}</span>)}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // SPI 中断可视化
+        const SpiInterrupts = ({ step }) => {
+            const [events, setEvents] = useState([]);
+
+            useEffect(() => {
+                const eventTypes = ['TXE', 'RXNE', 'BSY', 'OVR', 'MODF'];
+                const interval = setInterval(() => {
+                    const newEvent = {
+                        type: eventTypes[Math.floor(Math.random() * eventTypes.length)],
+                        time: Date.now()
+                    };
+                    setEvents(prev => [newEvent, ...prev.slice(0, 4)]);
+                }, 1500);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        SPI 中断事件
+                    </div>
+                    <div className="space-y-2">
+                        {events.length === 0 ? (
+                            <div className="text-center text-gray-400 py-4">等待中断...</div>
+                        ) : (
+                            events.map((evt, idx) => (
+                                <div
+                                    key={idx}
+                                    className={`p-3 rounded-lg transition-all ${
+                                        idx === 0 ? 'bg-amber-100 border-2 border-amber-500' : 'bg-gray-100'
+                                    }`}
+                                >
+                                    <div className="flex justify-between items-center">
+                                        <span className="font-mono text-sm">{evt.type}</span>
+                                        <span className="text-xs text-gray-500">
+                                            {new Date(evt.time).toLocaleTimeString()}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        <div>• TXE: 发送缓冲区空</div>
+                        <div>• RXNE: 接收缓冲区不空</div>
+                        <div>• OVR: 溢出错误</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // SPI 多从机可视化
+        const SpiMultislave = ({ step }) => {
+            const [activeDevice, setActiveDevice] = useState(null);
+            const devices = ['FLASH', 'LCD', 'SD'];
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    const device = devices[Math.floor(Math.random() * devices.length)];
+                    setActiveDevice(device);
+                    setTimeout(() => setActiveDevice(null), 1500);
+                }, 2500);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        多从机片选
+                    </div>
+                    {devices.map((dev) => (
+                        <div
+                            key={dev}
+                            className={`p-3 rounded-lg transition-all ${
+                                activeDevice === dev ? 'bg-amber-100 border-2 border-amber-500' : 'bg-gray-100'
+                            }`}
+                        >
+                            <div className="flex justify-between items-center">
+                                <span className="font-semibold">CS_{dev}</span>
+                                {activeDevice === dev ? (
+                                    <span className="text-green-600 font-bold">✅ 选中</span>
+                                ) : (
+                                    <span className="text-gray-400">⏸️ 释放</span>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                    <div className="text-xs text-gray-500">
+                        <div>• 每次只选中一个从机</div>
+                        <div>• 切换时先释放所有 CS</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 主 App 组件
+        const App = () => {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                const voices = window.speechSynthesis.getVoices();
+                const xiaoXiao = voices.find(v => v.name.includes('XiaoXiao') || v.name.includes('zh-CN'));
+                if (xiaoXiao) utterance.voice = xiaoXiao;
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                window.speechSynthesis.speak(utterance);
+            }, [isMuted]);
+
+            useEffect(() => {
+                if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                speak(STEPS[currentStep].explanation);
+                return () => { if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current); };
+            }, [currentStep, speak]);
+
+            useEffect(() => {
+                const handleKeydown = (e) => {
+                    if (e.code === 'Space') { e.preventDefault(); setIsPlaying(prev => !prev); }
+                    else if (e.code === 'ArrowRight' && currentStep < STEPS.length - 1) setCurrentStep(prev => prev + 1);
+                    else if (e.code === 'ArrowLeft' && currentStep > 0) setCurrentStep(prev => prev - 1);
+                };
+                window.addEventListener('keydown', handleKeydown);
+                return () => window.removeEventListener('keydown', handleKeydown);
+            }, [currentStep]);
+
+            const renderVisualization = () => {
+                switch (STEPS[currentStep].visualization) {
+                    case 'spi-basic': return <SpiBasic step={STEPS[currentStep]} />;
+                    case 'spi-hardware': return <SpiHardware step={STEPS[currentStep]} />;
+                    case 'spi-transfer': return <SpiTransfer step={STEPS[currentStep]} />;
+                    case 'spi-modes': return <SpiModes step={STEPS[currentStep]} />;
+                    case 'spi-dma': return <SpiDma step={STEPS[currentStep]} />;
+                    case 'spi-devices': return <SpiDevices step={STEPS[currentStep]} />;
+                    case 'spi-interrupts': return <SpiInterrupts step={STEPS[currentStep]} />;
+                    case 'spi-multislave': return <SpiMultislave step={STEPS[currentStep]} />;
+                    default: return <div>可视化组件</div>;
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <h1 className="text-3xl font-bold text-center mb-6 bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent">
+                            STM32 SPI 总线通信完整指南
+                        </h1>
+                        <div className="flex justify-center mb-6">
+                            <div className="flex space-x-2">
+                                {STEPS.map((_, idx) => (
+                                    <button key={idx} onClick={() => setCurrentStep(idx)}
+                                        className={`w-3 h-3 rounded-full transition-all ${
+                                            idx === currentStep ? 'bg-amber-600 scale-125' :
+                                            idx < currentStep ? 'bg-amber-400' : 'bg-gray-300'
+                                        }`} />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-amber-600 flex items-center">
+                                    <span className="mr-2">💻</span>{STEPS[currentStep].title}
+                                </h2>
+                                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-orange-600 flex items-center">
+                                    <span className="mr-2">🎨</span>可视化演示
+                                </h2>
+                                <div className="h-96 overflow-auto">{renderVisualization()}</div>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-teal-600 flex items-center">
+                                    <span className="mr-2">📖</span>说明
+                                </h2>
+                                <p className="text-gray-700 leading-relaxed">{STEPS[currentStep].explanation}</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-center mt-6 space-x-4">
+                            <button onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0 ? 'bg-gray-200 text-gray-400' : 'bg-amber-600 text-white hover:bg-amber-700'
+                                }`}>⏮ 上一步</button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isPlaying ? 'bg-yellow-500 text-white' : 'bg-green-500 text-white'
+                                }`}>{isPlaying ? '⏸ 暂停' : '▶ 播放'}</button>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isMuted ? 'bg-red-500 text-white' : 'bg-amber-500 text-white'
+                                }`}>{isMuted ? '🔇 取消静音' : '🔊 静音'}</button>
+                            <button onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1 ? 'bg-gray-200 text-gray-400' : 'bg-amber-600 text-white hover:bg-amber-700'
+                                }`}>下一步 ⏭</button>
+                        </div>
+                        <div className="text-center mt-4 text-sm text-gray-500">快捷键：空格 播放/暂停 | ← → 切换步骤</div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

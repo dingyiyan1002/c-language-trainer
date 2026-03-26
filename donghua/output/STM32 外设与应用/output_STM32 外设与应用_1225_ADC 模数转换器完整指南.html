@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 ADC 模数转换器完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes sample { 0% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } 100% { transform: scaleY(0.3); } }
+        @keyframes convert { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+        @keyframes waveform { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-sample { animation: sample 1s ease-in-out infinite; }
+        .animate-convert { animation: convert 0.5s ease-in-out infinite; }
+        .animate-waveform { animation: waveform 2s linear infinite; }
+
+        .adc-channel { transition: all 0.3s ease; }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#f97316',
+            secondary: '#fb923c',
+            accent: '#fdba74',
+            highlight: '#ffedd5',
+            text: '#fff7ed',
+            bg: '#9a3412'
+        };
+
+        const STEPS = [
+            { title: "ADC 基础架构", subtitle: "SAR 逐次逼近原理" },
+            { title: "分辨率与精度", subtitle: "12 位/10 位/8 位/6 位" },
+            { title: "单次转换模式", subtitle: "单次触发转换" },
+            { title: "连续转换模式", subtitle: "自动连续采样" },
+            { title: "扫描模式", subtitle: "多通道自动扫描" },
+            { title: "外部触发", subtitle: "定时器/外部信号触发" },
+            { title: "DMA 传输", subtitle: "自动数据传输" },
+            { title: "温度传感器", subtitle: "内部温度/参考电压" }
+        ];
+
+        const ADC_CHANNELS = [
+            { channel: 0, pin: 'PA0', type: 'ADC1_IN0' },
+            { channel: 1, pin: 'PA1', type: 'ADC1_IN1' },
+            { channel: 2, pin: 'PA2', type: 'ADC1_IN2' },
+            { channel: 3, pin: 'PA3', type: 'ADC1_IN3' },
+            { channel: 4, pin: 'PA4', type: 'ADC1_IN4' },
+            { channel: 5, pin: 'PA5', type: 'ADC1_IN5' },
+            { channel: 6, pin: 'PA6', type: 'ADC1_IN6' },
+            { channel: 7, pin: 'PA7', type: 'ADC1_IN7' }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [selectedChannel, setSelectedChannel] = React.useState(0);
+            const [adcValue, setAdcValue] = React.useState(0);
+            const [adcVoltage, setAdcVoltage] = React.useState(0);
+            const [conversionMode, setConversionMode] = React.useState('single');
+            const [scanChannels, setScanChannels] = React.useState([0, 1, 2]);
+            const [samplingTime, setSamplingTime] = React.useState(56);
+            const [adcData, setAdcData] = React.useState([]);
+            const [isConverting, setIsConverting] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const simulateConversion = () => {
+                setIsConverting(true);
+                const interval = setInterval(() => {
+                    const value = Math.floor(Math.random() * 4096);
+                    setAdcValue(value);
+                    setAdcVoltage((value / 4095 * 3.3).toFixed(3));
+                    setAdcData(prev => [...prev.slice(-20), value]);
+                    if (conversionMode === 'continuous') {
+                        // Continuous mode keeps running
+                    } else {
+                        setIsConverting(false);
+                        clearInterval(interval);
+                    }
+                }, conversionMode === 'continuous' ? 100 : 500);
+
+                if (conversionMode !== 'continuous') {
+                    setTimeout(() => setIsConverting(false), 600);
+                }
+                return () => clearInterval(interval);
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    setAdcValue(0);
+                    setAdcVoltage(0);
+                    setTimeout(() => {
+                        const narration = [
+                            "ADC 是逐次逼近型 (SAR) 转换器。采样保持电路采集输入电压，内部 DAC 逐次比较逼近输入值，12 位精度需 12 次比较。转换时间 = 采样时间 + 转换时间 (12.5 周期)。",
+                            "STM32 ADC 支持可变分辨率：12 位 (4096 级，0.8mV)、10 位 (1024 级)、8 位 (256 级)、6 位 (64 级)。分辨率越高精度越高但转换越慢。根据应用需求选择。",
+                            "单次转换模式：设置 ADON 启动一次转换，EOC 标志表示转换完成，读取 DR 寄存器获取结果。适用于低频采样场景，如电池电压检测。",
+                            "连续转换模式：CONT 位使能后自动连续转换。每次 EOC 后自动启动下次转换。适用于高频采样，如音频采集、波形记录。",
+                            "扫描模式：配置多个通道后自动按顺序转换。SCAN 位使能，SQR 寄存器配置转换序列和通道数。适用于多传感器数据采集。",
+                            "外部触发：定时器 TRGO、外部中断等可触发转换。EXTEN 使能触发，EXTSEL 选择触发源。适用于精确定时采样，与 PWM 同步等。",
+                            "DMA 传输：转换完成自动传输数据到内存，无需 CPU 干预。DMA 请求由 EOC 产生。配置 DMA 通道，使能 ADC_DMA 位。适合高速多通道采集。",
+                            "内部温度传感器：连接到 ADC1_IN18。输出与温度成比例的电压，典型 2.5mV/°C。计算公式：温度 (°C)=(V25-Vsense)/Avg_Slope+25。还有内部参考电压 VREFINT。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            React.useEffect(() => {
+                if (isPlaying && conversionMode === 'continuous') {
+                    const interval = setInterval(() => {
+                        const value = Math.floor(Math.random() * 4096);
+                        setAdcValue(value);
+                        setAdcVoltage((value / 4095 * 3.3).toFixed(3));
+                        setAdcData(prev => [...prev.slice(-20), value]);
+                    }, 200);
+                    return () => clearInterval(interval);
+                }
+            }, [isPlaying, conversionMode]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-orange-900 to-red-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 ADC 模数转换器完整指南</h1>
+                            <p className="text-orange-200 text-lg">SAR 原理、多模式转换与温度传感器</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-orange-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-orange-700 text-orange-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-orange-500/30">
+                                <h3 className="text-xl font-bold text-orange-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-orange-300 overflow-x-auto">
+                                            <code>{`// ADC 架构 (SAR 逐次逼近)
+// 1. 采样保持：采集输入电压
+// 2. 逐次比较：与内部 DAC 比较
+// 3. 输出数字值：12 位 (0-4095)
+
+// 转换时间 = 采样时间 + 12.5 周期
+// 采样时间可选：3/15/28/56/84/112/144/480 周期
+// ADC 时钟最大 36MHz (72MHz/2)`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-orange-300 overflow-x-auto">
+                                            <code>{`// 分辨率配置
+void ADC_ResolutionConfig(void) {
+    // 12 位分辨率 (默认)
+    ADC1->CR1 &= ~ADC_CR1_RES;
+
+    // 10 位分辨率
+    // ADC1->CR1 |= ADC_CR1_RES_0;
+
+    // 8 位分辨率
+    // ADC1->CR1 |= ADC_CR1_RES_1;
+
+    // 6 位分辨率
+    // ADC1->CR1 |= ADC_CR1_RES;
+
+    // 分辨率 vs 精度 vs 速度
+    // 12 位：0.8mV, 慢 | 6 位：51mV, 快
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-orange-300 overflow-x-auto">
+                                            <code>{`// 单次转换模式
+void ADC_SingleConversion(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_ADC1EN;
+    RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+
+    // PA0 = 模拟输入 (ADC1_IN0)
+    GPIOA->MODER |= (0x3 << 0);  // 模拟模式
+
+    // 采样时间：通道 0, 56 周期
+    ADC1->SMPR2 &= ~(0x7 << 0);
+    ADC1->SMPR2 |= (0x3 << 0);
+
+    // 规则序列：只转换通道 0
+    ADC1->SQR3 = 0 << 0;
+    ADC1->SQR1 = 0;  // 1 个转换
+
+    // 单次转换，连续转换禁用
+    ADC1->CR1 &= ~ADC_CR1_SCAN;
+    ADC1->CR2 &= ~ADC_CR2_CONT;
+
+    ADC1->CR2 |= ADC_CR2_ADON;  // 启动 ADC
+    ADC1->CR2 |= ADC_CR2_SWSTART;  // 启动转换
+
+    // 等待 EOC
+    while (!(ADC1->SR & ADC_SR_EOC));
+
+    uint16_t value = ADC1->DR;  // 读取结果
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-orange-300 overflow-x-auto">
+                                            <code>{`// 连续转换模式
+void ADC_ContinuousMode(void) {
+    // 使能连续转换
+    ADC1->CR2 |= ADC_CR2_CONT;
+
+    ADC1->CR2 |= ADC_CR2_ADON;
+    ADC1->CR2 |= ADC_CR2_SWSTART;
+
+    // 持续转换...
+    // 读取数据
+    while (1) {
+        if (ADC1->SR & ADC_SR_EOC) {
+            value = ADC1->DR;  // 自动启动下次
+        }
+    }
+
+    // 停止：ADC1->CR2 &= ~ADC_CR2_ADON;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-orange-300 overflow-x-auto">
+                                            <code>{`// 扫描模式 (多通道)
+void ADC_ScanMode(void) {
+    // 使能扫描模式
+    ADC1->CR1 |= ADC_CR1_SCAN;
+
+    // 转换 3 个通道：0, 1, 2
+    ADC1->SQR1 = (2 << 20);  // 3 个转换
+    ADC1->SQR3 = (0 << 0) | (1 << 5) | (2 << 10);
+
+    // 使能 EOC 中断 (每个转换完成)
+    ADC1->CR1 |= ADC_CR1_EOCIE;
+    NVIC_EnableIRQ(ADC_IRQn);
+
+    ADC1->CR2 |= ADC_CR2_ADON | ADC_CR2_SWSTART;
+}
+
+void ADC_IRQHandler(void) {
+    if (ADC1->SR & ADC_SR_EOC) {
+        value = ADC1->DR;  // 读取当前通道
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-orange-300 overflow-x-auto">
+                                            <code>{`// 外部触发
+void ADC_ExternalTrigger(void) {
+    // 选择触发源：TIM2_TRGO
+    ADC1->CR2 &= ~ADC_CR2_EXTSEL;
+    ADC1->CR2 |= (0 << 24);  // TIM2
+
+    // 使能上升沿触发
+    ADC1->CR2 |= ADC_CR2_EXTEN_0;
+
+    // 定时器配置
+    TIM2->PSC = 71;  // 1MHz
+    TIM2->ARR = 999; // 1kHz 触发
+    TIM2->CR2 |= (2 << 4);  // TRGO=Update
+
+    TIM2->CR1 |= TIM_CR1_CEN;
+    ADC1->CR2 |= ADC_CR2_ADON;
+    // 无需 SWSTART，由定时器触发
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-orange-300 overflow-x-auto">
+                                            <code>{`// DMA 传输
+void ADC_DMA_Init(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
+
+    // DMA2_Stream0: ADC1
+    DMA2_Stream0->PAR = (uint32_t)&ADC1->DR;
+    DMA2_Stream0->M0AR = (uint32_t)adc_buffer;
+    DMA2_Stream0->NDTR = ADC_BUF_SIZE;
+
+    DMA2_Stream0->CR = DMA_SxCR_DIR_1 |  // 外设到内存
+                       DMA_SxCR_MINC |    // 内存递增
+                       DMA_SxCR_CIRC |    // 循环模式
+                       DMA_SxCR_EN;
+
+    // ADC 使能 DMA
+    ADC1->CR2 |= ADC_CR2_DMA;
+    ADC1->CR2 |= ADC_CR2_SWSTART;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-orange-300 overflow-x-auto">
+                                            <code>{`// 内部温度传感器
+void ADC_TempSensor_Init(void) {
+    // 使能温度传感器
+    ADC->CCR |= ADC_CCR_TSVREFE;
+
+    // 通道 18 (温度传感器)
+    ADC1->SQR3 = (18 << 0);
+    ADC1->SMPR1 = (0x7 << 24);  // 最长采样
+}
+
+float Get_Temperature(void) {
+    int32_t ts_value = adc_buffer[0];
+    float vsense = ts_value * 3.3 / 4095;
+    // 温度 = (V25 - Vsense) / Avg_Slope + 25
+    return (2.5 - vsense) / 0.0025 + 25;
+}`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={simulateConversion}
+                                            disabled={isConverting && conversionMode !== 'continuous'}
+                                            className="flex-1 bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg transition disabled:opacity-50"
+                                        >
+                                            ▶️ 开始转换
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setAdcValue(0);
+                                                setAdcVoltage(0);
+                                                setAdcData([]);
+                                                setIsConverting(false);
+                                            }}
+                                            className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            🔄 重置
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-orange-500/30">
+                                <h3 className="text-xl font-bold text-orange-400 mb-4">🔬 ADC 可视化</h3>
+                                <div className="space-y-4">
+                                    {/* 转换结果 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-orange-300 mb-3">转换结果</h4>
+                                        <div className="text-center">
+                                            <div className="text-5xl font-bold text-orange-400 font-mono">
+                                                {adcValue}
+                                            </div>
+                                            <div className="text-2xl text-orange-300 mt-2">
+                                                {adcVoltage} V
+                                            </div>
+                                            <div className="text-sm text-gray-400 mt-1">
+                                                分辨率：12 位 (0-3.3V)
+                                            </div>
+                                        </div>
+                                        <div className="w-full bg-gray-700 rounded-full h-6 mt-3">
+                                            <div
+                                                className="bg-gradient-to-r from-orange-500 to-yellow-500 h-6 rounded-full transition-all"
+                                                style={{ width: `${(adcValue / 4095) * 100}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+
+                                    {/* 通道选择 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-orange-300 mb-3">输入通道</h4>
+                                        <div className="grid grid-cols-4 gap-2">
+                                            {ADC_CHANNELS.map((ch, i) => (
+                                                <button
+                                                    key={i}
+                                                    onClick={() => setSelectedChannel(i)}
+                                                    className={`p-2 rounded text-xs transition ${
+                                                        selectedChannel === i
+                                                            ? 'bg-orange-600 text-white'
+                                                            : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                                                    }`}
+                                                >
+                                                    CH{i}<br/>{ch.pin}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* 波形显示 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-orange-300 mb-3">采样波形</h4>
+                                        <div className="h-24 bg-gray-900 rounded flex items-end gap-1 p-2 overflow-hidden">
+                                            {adcData.map((value, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="flex-1 bg-orange-500 rounded-t transition-all"
+                                                    style={{ height: `${(value / 4095) * 100}%` }}
+                                                ></div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* 模式选择 */}
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setConversionMode('single')}
+                                            className={`flex-1 py-2 rounded transition ${
+                                                conversionMode === 'single'
+                                                    ? 'bg-orange-600 text-white'
+                                                    : 'bg-gray-700 text-gray-400'
+                                            }`}
+                                        >
+                                            单次
+                                        </button>
+                                        <button
+                                            onClick={() => setConversionMode('continuous')}
+                                            className={`flex-1 py-2 rounded transition ${
+                                                conversionMode === 'continuous'
+                                                    ? 'bg-orange-600 text-white'
+                                                    : 'bg-gray-700 text-gray-400'
+                                            }`}
+                                        >
+                                            连续
+                                        </button>
+                                    </div>
+
+                                    {/* 转换状态 */}
+                                    <div className={`p-3 rounded-lg text-center transition-all ${
+                                        isConverting ? 'bg-green-800/50 border border-green-500' : 'bg-gray-800'
+                                    }`}>
+                                        <span className={`font-bold ${
+                                            isConverting ? 'text-green-400' : 'text-gray-500'
+                                        }`}>
+                                            {isConverting ? '🔄 转换中...' : '⏸️ 等待转换'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-orange-500/30">
+                                <h3 className="text-xl font-bold text-orange-400 mb-4">📖 配置指南</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    {currentStep === 0 && (
+                                        <div>
+                                            <h4 className="font-bold text-orange-300 mb-2">📌 SAR 原理</h4>
+                                            <p>逐次逼近型 ADC：采样保持→逐次比较→输出数字。内部 DAC 从 MSB 开始逐位比较，12 位需 12 次比较。转换时间 = 采样 +12.5 周期。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <div>
+                                            <h4 className="font-bold text-orange-300 mb-2">📌 分辨率配置</h4>
+                                            <p>CR1_RES 位控制：00=12 位 (0.8mV)、01=10 位、10=8 位、11=6 位 (51mV)。高分辨率适合精密测量，低分辨率适合高速采样。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <div>
+                                            <h4 className="font-bold text-orange-300 mb-2">📌 单次转换</h4>
+                                            <p>ADON 启动，SWSTART 触发单次转换，EOC 标志完成，读 DR 获取结果。适合低频采样，如电池检测、按键 ADC 读取。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <div>
+                                            <h4 className="font-bold text-orange-300 mb-2">📌 连续转换</h4>
+                                            <p>CONT=1 使能连续模式，EOC 后自动开始下次。适合高频采样，如音频、波形采集。注意及时读取 DR 避免数据丢失。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <div>
+                                            <h4 className="font-bold text-orange-300 mb-2">📌 扫描模式</h4>
+                                            <p>SCAN=1 使能，SQR 寄存器配置通道序列，自动按顺序转换。EOCIE 使能每个转换中断。适合多传感器同步采集。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <div>
+                                            <h4 className="font-bold text-orange-300 mb-2">📌 外部触发</h4>
+                                            <p>EXTSEL 选择触发源 (TIM_TRGO/EXTI)，EXTEN 选择边沿。无需软件触发，精确定时采样。常用于 PWM 同步、定时采集。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <div>
+                                            <h4 className="font-bold text-orange-300 mb-2">📌 DMA 传输</h4>
+                                            <p>DMA 自动搬运 DR 到内存，无需 CPU。循环模式实现连续缓冲。高速多通道采集必备，显著降低 CPU 负载。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <div>
+                                            <h4 className="font-bold text-orange-300 mb-2">📌 内部传感器</h4>
+                                            <p>温度传感器接 IN18，V25=2.5V(25°C 时)，斜率 2.5mV/°C。内部参考电压 VREFINT 接 IN17，典型 1.21V。用于校准和温度监测。</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-orange-600 hover:bg-orange-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-orange-500/30">
+                            <h2 className="text-2xl font-bold text-orange-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>指针与数组 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#ec4899 0%,#db2777 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#831843;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#7c3aed;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#fdf2f8,#fce7f3);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#f9a8d4;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#ec4899;box-shadow:0 0 20px rgba(236,72,153,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#831843;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .array-pointer-container{display:flex;flex-direction:column;gap:12px;margin:16px 0}
+    .array-row{display:flex;align-items:center;gap:8px}
+    .array-label{width:60px;font-size:12px;color:#64748b;font-weight:600}
+    .array-box{display:flex;gap:4px;flex:1}
+    .array-cell{flex:1;height:50px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:all 0.4s ease;border:3px solid transparent;position:relative}
+    .array-cell.pending{background:#f8fafc;border-color:#e2e8f0}
+    .array-cell.current{background:linear-gradient(135deg:#ec4899,#db2777);border-color:#be185d;color:white;transform:scale(1.05);box-shadow:0 4px 16px rgba(236,72,153,0.5)}
+    .array-cell.processed{background:#fce7f3;border-color:#ec4899;color:#9d174d}
+    .array-cell.pointer-target{background:linear-gradient(135deg:#f59e0b,#d97706);border-color:#b45309;color:white}
+    .cell-index{font-size:9px;opacity:0.8}
+    .cell-value{font-size:16px;font-weight:700;font-family:'Consolas',monospace}
+    .pointer-display{background:#1e293b;border-radius:12px;padding:16px;margin:16px 0}
+    .pointer-row{display:flex;align-items:center;gap:12px;padding:10px;background:#0f172a;border-radius:8px;margin-bottom:8px}
+    .pointer-label{font-size:12px;color:#94a3b8;width:80px}
+    .pointer-value{font-size:16px;font-weight:700;font-family:'Consolas',monospace;color:#22d3ee}
+    .pointer-arrow{color:#ec4899;font-size:18px}
+    .access-mode{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+    .access-card{background:white;border-radius:8px;padding:12px;text-align:center;border:2px solid#e2e8f0;transition:all 0.3s ease}
+    .access-card.active{border-color:#ec4899;background:linear-gradient(135deg:#fdf2f8,#fce7f3)}
+    .access-label{font-size:11px;color:#64748b;margin-bottom:4px}
+    .access-value{font-size:16px;font-weight:700;font-family:'Consolas',monospace;color:#ec4899}
+    .progress-bar{height:10px;background:#e2e8f0;border-radius:5px;overflow:hidden}
+    .progress-fill{height:100%;background:linear-gradient(135deg:#ec4899,#db2777);transition:width 0.4s ease}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#22d3ee;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 6;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#7c3aed',blue:'#3b82f6',pink:'#ec4899'};
+    const ARRAY_DATA = [10, 20, 30, 40, 50];
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'#include <stdint.h>',color:'#7c3aed'},
+      3:{step:1,text:'',color:'#94a3b8'},
+      4:{step:1,text:'int main(void) {',color:'#3b82f6'},
+      5:{step:2,text:'    uint8_t arr[] = {10, 20, 30, 40, 50};',color:'#3b82f6'},
+      6:{step:3,text:'    uint8_t *ptr = arr;',color:'#3b82f6'},
+      7:{step:4,text:'    printf("arr[0] = %d\\n", arr[0]);',color:'#eab308'},
+      8:{step:5,text:'    printf("*ptr = %d\\n", *ptr);',color:'#eab308'},
+      9:{step:5,text:'    printf("*(ptr+2) = %d\\n", *(ptr+2));',color:'#eab308'},
+      10:{step:5,text:'    for(uint8_t i=0; i<5; i++) printf("%d ", *(ptr+i));',color:'#eab308'},
+      11:{step:6,text:'    return 0;',color:'#3b82f6'},
+      12:{step:6,text:'}',color:'#94a3b8'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，包含标准头文件，定义 main 函数',
+      2:'定义数组 arr 包含 5 个元素：10、20、30、40、50，数组名 arr 是首元素地址',
+      3:'定义指针 ptr 指向数组 arr 的首地址，ptr 现在指向 arr[0]',
+      4:'使用数组下标访问 arr[0] 等于 10，这是第一种访问方式',
+      5:'使用指针访问：*ptr 等于 10，*(ptr+2) 等于 30，指针算术运算访问数组元素',
+      6:'用指针遍历数组输出所有元素：10 20 30 40 50，数组和指针可以互换使用'
+    };
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',chip:'M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z',link:'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [currentIndex,setCurrentIndex] = useState(-1);
+      const [processedIndices,setProcessedIndices] = useState([]);
+      const [ptrOffset,setPtrOffset] = useState(0);
+      const [accessMode,setAccessMode] = useState(null);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 12; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setCurrentIndex(-1);
+          setProcessedIndices([]);
+          setPtrOffset(0);
+          setAccessMode(null);
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setCurrentIndex(-1);
+        } else if(step === 3) {
+          setCurrentIndex(0);
+          setPtrOffset(0);
+        } else if(step === 4) {
+          setCurrentIndex(0);
+          setProcessedIndices([0]);
+          setAccessMode('array');
+          setTerminalLines(['arr[0] = 10']);
+        } else if(step === 5) {
+          setCurrentIndex(2);
+          setProcessedIndices([0,1,2]);
+          setAccessMode('pointer');
+          setTerminalLines(['arr[0] = 10','*ptr = 10','*(ptr+2) = 30','10 20 30 40 50']);
+        } else if(step === 6) {
+          setProcessedIndices([0,1,2,3,4]);
+          setTerminalLines(['arr[0] = 10','*ptr = 10','*(ptr+2) = 30','10 20 30 40 50']);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setCurrentIndex(-1);
+        setProcessedIndices([]);
+        setPtrOffset(0);
+        setAccessMode(null);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      const progress = processedIndices.length / 5;
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>指针与数组 - C 语言可视化</h1>
+            <p>指针算术 | 数组访问 | 地址运算</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.pink,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                pointer_array.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8,9,10,11,12].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.chip} size={22} />
+                指针访问数组元素
+              </div>
+              <div className={`var-card ${step >= 2 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">数组与指针</span>
+                  <span className="var-type">uint8_t[5]</span>
+                </div>
+                <div className="array-pointer-container">
+                  <div className="array-row">
+                    <span className="array-label">索引</span>
+                    <div className="array-box">
+                      {ARRAY_DATA.map((_, idx) => (
+                        <div key={idx} className={`array-cell ${processedIndices.includes(idx) ? 'processed' : idx === currentIndex ? 'current' : 'pending'}`}>
+                          <span className="cell-index">[{idx}]</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="array-row">
+                    <span className="array-label">值</span>
+                    <div className="array-box">
+                      {ARRAY_DATA.map((val, idx) => (
+                        <div key={idx} className={`array-cell ${processedIndices.includes(idx) ? 'processed' : idx === currentIndex ? 'current' : 'pending'}`}>
+                          <span className="cell-value">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="pointer-display">
+                  <div style={{color:'#94a3b8',fontSize:12,marginBottom:8}}>指针状态</div>
+                  <div className="pointer-row">
+                    <span className="pointer-label">ptr</span>
+                    <span className="pointer-value">{step >= 3 ? '0x1000' : '-'}</span>
+                    <span className="pointer-arrow">→</span>
+                    <span className="pointer-value">{step >= 3 ? `arr[${ptrOffset}]` : '-'}</span>
+                  </div>
+                  <div className="pointer-row">
+                    <span className="pointer-label">*ptr</span>
+                    <span className="pointer-value">{step >= 3 ? ARRAY_DATA[ptrOffset] : '-'}</span>
+                  </div>
+                  <div className="pointer-row">
+                    <span className="pointer-label">*(ptr+2)</span>
+                    <span className="pointer-value">{step >= 5 ? ARRAY_DATA[2] : '-'}</span>
+                  </div>
+                </div>
+                <div className="access-mode">
+                  <div className={`access-card ${accessMode === 'array' ? 'active' : ''}`}>
+                    <div className="access-label">数组下标</div>
+                    <div className="access-value">arr[i]</div>
+                  </div>
+                  <div className={`access-card ${accessMode === 'pointer' ? 'active' : ''}`}>
+                    <div className="access-label">指针运算</div>
+                    <div className="access-value">*(ptr+i)</div>
+                  </div>
+                </div>
+                <div style={{margin:'16px 0'}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>遍历进度</div>
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{width:`${progress * 100}%`}}></div>
+                  </div>
+                </div>
+              </div>
+              {step >= 4 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.pink}}>数组名即地址</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>数组名 arr 等于&amp;arr[0]</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>指针算术</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>ptr+i 指向第 i 个元素</p>
+              </div>
+              <div className={`explanation-card ${step >= 5 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>等价访问</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>arr[i] 等价于*(ptr+i)</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>应用场景</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>数组遍历、字符串操作</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

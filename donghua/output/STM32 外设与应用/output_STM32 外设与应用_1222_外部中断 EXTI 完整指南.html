@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 外部中断 EXTI 完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(20px); } }
+        @keyframes highlight { 0%, 100% { background-color: #f59e0b; } 50% { background-color: #fbbf24; } }
+        @keyframes interrupt { 0% { transform: scale(1); } 50% { transform: scale(1.3); } 100% { transform: scale(1); } }
+        @keyframes pending { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+        @keyframes edge { 0% { transform: translateY(0); } 50% { transform: translateY(-8px); } 100% { transform: translateY(0); } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s ease-in-out infinite; }
+        .animate-highlight { animation: highlight 2s ease-in-out infinite; }
+        .animate-interrupt { animation: interrupt 0.3s ease-in-out; }
+        .animate-pending { animation: pending 1s ease-in-out infinite; }
+        .animate-edge { animation: edge 0.5s ease-in-out; }
+
+        .exti-line { transition: all 0.3s ease; }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#f59e0b',
+            secondary: '#fbbf24',
+            accent: '#fcd34d',
+            highlight: '#fde68a',
+            text: '#fef3c7',
+            bg: '#92400e'
+        };
+
+        const STEPS = [
+            { title: "EXTI 控制器概述", subtitle: "23 条中断线结构" },
+            { title: "SYSCFG 配置", subtitle: "GPIO 到 EXTI 映射" },
+            { title: "触发边沿配置", subtitle: "上升沿/下降沿/双沿" },
+            { title: "NVIC 中断控制", subtitle: "使能、优先级、屏蔽" },
+            { title: "中断服务函数", subtitle: "ISR 编写与标志清除" },
+            { title: "按键中断应用", subtitle: "外部按键检测" },
+            { title: "多中断源管理", subtitle: "中断共享与优先级" },
+            { title: "低功耗唤醒", subtitle: "Stop/Standby 模式唤醒" }
+        ];
+
+        const EXTI_LINES = [
+            { line: 0, pins: ['PA0', 'PB0', 'PC0', 'PD0', 'PE0'], isr: 'EXTI0' },
+            { line: 1, pins: ['PA1', 'PB1', 'PC1', 'PD1', 'PE1'], isr: 'EXTI1' },
+            { line: 2, pins: ['PA2', 'PB2', 'PC2', 'PD2', 'PE2'], isr: 'EXTI2' },
+            { line: 3, pins: ['PA3', 'PB3', 'PC3', 'PD3', 'PE3'], isr: 'EXTI3' },
+            { line: 4, pins: ['PA4', 'PB4', 'PC4', 'PD4', 'PE4'], isr: 'EXTI4' },
+            { line: '5-9', pins: ['PA5-9', 'PB5-9', 'PC5-9'], isr: 'EXTI9_5' },
+            { line: '10-15', pins: ['PA10-15', 'PB10-15'], isr: 'EXTI15_10' },
+            { line: '16-22', pins: ['PVD', 'RTC', 'USB', 'ETH'], isr: '特殊' }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [extiConfig, setExtiConfig] = React.useState({});
+            const [pendingInterrupts, setPendingInterrupts] = React.useState([]);
+            const [activeIsr, setActiveIsr] = React.useState(null);
+            const [edgeTriggered, setEdgeTriggered] = React.useState(null);
+            const voiceEndTimerRef = React.useRef(null);
+
+            const configureExti = (line, port) => {
+                setExtiConfig({ line, port, enabled: true });
+            };
+
+            const triggerInterrupt = (line) => {
+                setEdgeTriggered(line);
+                setTimeout(() => {
+                    setPendingInterrupts([...pendingInterrupts, line]);
+                    setActiveIsr(`EXTI${line}`);
+                    setTimeout(() => {
+                        setPendingInterrupts(pendingInterrupts.filter(l => l !== line));
+                        setActiveIsr(null);
+                        setEdgeTriggered(null);
+                    }, 500);
+                }, 200);
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    setTimeout(() => {
+                        const narration = [
+                            "EXTI 控制器有 23 条中断线：线 0-15 对应 GPIO0-15，线 16-22 用于特殊事件 (PVD、RTC、USB 等)。同一编号的 GPIO (PA0/PB0/PC0) 共享一条中断线。",
+                            "SYSCFG 外设配置 GPIO 到 EXTI 的映射。EXTICR[0-3] 寄存器每条线用 4 位选择端口 (0=PA, 1=PB, 2=PC, 3=PD, 4=PE)。上电前需使能 SYSCFG 时钟。",
+                            "触发边沿由 RTSR(上升沿) 和 FTSR(下降沿) 寄存器控制。上升沿：低到高跳变；下降沿：高到低跳变；双沿：任意跳变。按键常用下降沿或双沿。",
+                            "NVIC 管理中断使能和优先级。EXTI0-4 有独立中断向量，EXTI5-9 和 EXTI10-15 分别共用。优先级用 SCB->IPR 配置，数值越小优先级越高。",
+                            "中断服务函数中首先读取 PR 寄存器确定触发源，然后写 1 清除标志位。PR 标志必须清除，否则中断会重复触发。ISR 应短小快速。",
+                            "按键中断应用：配置 GPIO 为上拉输入，SYSCFG 映射到 EXTI，下降沿触发。按下按键产生下降沿，触发中断。注意消抖处理。",
+                            "多中断源管理：同一 ISR 服务多条线时，读取 PR 判断具体源。优先级高的中断可打断优先级低的中断。临界区用 __disable_irq() 保护。",
+                            "低功耗唤醒：EXTI 可唤醒 Stop 和 Standby 模式。配置唤醒事件 (非中断)，使能 WUP 位。唤醒后系统时钟恢复，继续执行 WFI/WFE 后指令。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-amber-900 to-orange-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">STM32 外部中断 EXTI 完整指南</h1>
+                            <p className="text-amber-200 text-lg">中断映射、边沿配置与 ISR 处理</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-amber-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-amber-700 text-amber-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-amber-500/30">
+                                <h3 className="text-xl font-bold text-amber-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// EXTI 中断线映射
+// 线 0-15: 对应 GPIO Pin0-15
+// 线 16: PVD 输出
+// 线 17: RTC 闹钟
+// 线 18: USB OTG FS 唤醒
+// 线 19: 以太网唤醒
+// 线 20: RTC 时间戳
+// 线 21: RTC 唤醒
+// 线 22: 比较器
+
+// 注意：PA0/PB0/PC0/PD0/PE0 共用线 0
+// 同一时间只能选择一个端口的引脚`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// SYSCFG 配置 - GPIO 到 EXTI 映射
+void EXTI_Config(void) {
+    // 1. 使能时钟
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+
+    // 2. 配置 PA0 → EXTI0
+    // EXTICR[0]: 每 4 位控制一条线
+    SYSCFG->EXTICR[0] &= ~0xF;  // 清除位 0-3
+    SYSCFG->EXTICR[0] |= 0x0;   // 0=PortA
+
+    // 配置 PB1 → EXTI1
+    SYSCFG->EXTICR[0] &= ~(0xF << 4);
+    SYSCFG->EXTICR[0] |= (0x1 << 4);  // 1=PortB
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 触发边沿配置
+void EXTI_EdgeConfig(void) {
+    // 上升沿触发 (低→高)
+    EXTI->RTSR |= EXTI_RTSR_TR0;  // 线 0 上升沿
+    EXTI->FTSR &= ~EXTI_FTSR_TR0; // 禁用下降沿
+
+    // 下降沿触发 (高→低) - 按键常用
+    EXTI->RTSR &= ~EXTI_RTSR_TR1;
+    EXTI->FTSR |= EXTI_FTSR_TR1;  // 线 1 下降沿
+
+    // 双沿触发 (任意跳变)
+    EXTI->RTSR |= EXTI_RTSR_TR2;
+    EXTI->FTSR |= EXTI_FTSR_TR2;
+
+    // 软件触发 (测试用)
+    EXTI->SWIER |= EXTI_SWIER_SWIER0;
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// NVIC 中断配置
+void NVIC_Config(void) {
+    // 使能中断
+    NVIC_EnableIRQ(EXTI0_IRQn);
+    NVIC_EnableIRQ(EXTI1_IRQn);
+    NVIC_EnableIRQ(EXTI2_IRQn);
+    NVIC_EnableIRQ(EXTI3_IRQn);
+    NVIC_EnableIRQ(EXTI4_IRQn);
+    NVIC_EnableIRQ(EXTI9_5_IRQn);
+    NVIC_EnableIRQ(EXTI15_10_IRQn);
+
+    // 配置优先级 (0=最高，15=最低)
+    NVIC_SetPriority(EXTI0_IRQn, 0);  // 最高优先级
+    NVIC_SetPriority(EXTI1_IRQn, 1);
+
+    // 屏蔽中断
+    // NVIC_DisableIRQ(EXTI0_IRQn);
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 中断服务函数 (ISR)
+void EXTI0_IRQHandler(void) {
+    // 检查线 0 是否触发
+    if (EXTI->PR & EXTI_PR_PR0) {
+        // 清除标志位 (写 1 清除)
+        EXTI->PR = EXTI_PR_PR0;
+
+        // 处理中断逻辑
+        LED_Toggle();
+    }
+}
+
+void EXTI1_IRQHandler(void) {
+    if (EXTI->PR & EXTI_PR_PR1) {
+        EXTI->PR = EXTI_PR_PR1;  // 必须清除!
+        // 按键处理逻辑
+    }
+}
+
+// 重要：PR 标志不清除会导致中断重复触发`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 按键中断完整示例
+void KEY_EXTI_Init(void) {
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+
+    // PB0 上拉输入
+    GPIOB->MODER &= ~(0x3 << 0);
+    GPIOB->PUPDR |= (0x1 << 0);  // 上拉
+
+    // PB0 → EXTI0
+    SYSCFG->EXTICR[0] &= ~0xF;
+    SYSCFG->EXTICR[0] |= 0x1;  // 1=PortB
+
+    // 下降沿触发
+    EXTI->FTSR |= EXTI_FTSR_TR0;
+    EXTI->IMR |= EXTI_IMR_MR0;  // 使能掩码
+
+    NVIC_EnableIRQ(EXTI0_IRQn);
+    NVIC_SetPriority(EXTI0_IRQn, 1);
+}
+
+void EXTI0_IRQHandler(void) {
+    if (EXTI->PR & EXTI_PR_PR0) {
+        EXTI->PR = EXTI_PR_PR0;
+        key_pressed = 1;  // 设置标志
+    }
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 多中断源管理
+void EXTI9_5_IRQHandler(void) {
+    uint32_t pr = EXTI->PR & 0x03E0;  // 线 5-9
+
+    if (pr & EXTI_PR_PR5) {
+        EXTI->PR = EXTI_PR_PR5;
+        handle_line5();
+    }
+    if (pr & EXTI_PR_PR6) {
+        EXTI->PR = EXTI_PR_PR6;
+        handle_line6();
+    }
+    // ... 检查其他线
+}
+
+// 临界区保护
+__disable_irq();  // 关中断
+// 临界代码
+__enable_irq();  // 开中断`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-amber-300 overflow-x-auto">
+                                            <code>{`// 低功耗唤醒配置
+void LowPower_WakeupConfig(void) {
+    // 配置 EXTI 唤醒 (非中断)
+    EXTI->EMR |= EXTI_EMR_MR0;  // 使能事件掩码
+
+    // 下降沿唤醒
+    EXTI->FTSR |= EXTI_FTSR_TR0;
+
+    // 进入 Stop 模式
+    PWR->CR &= ~PWR_CR_PDDS;  // 低功耗模式
+    SCB->SCR |= SCB_SCR_SLEEPDEEP;
+    __WFI();  // 等待中断
+
+    // 唤醒后从这里继续执行
+    // 系统时钟已恢复
+}`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => triggerInterrupt(currentStep % 8)}
+                                            className="flex-1 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            ⚡ 触发中断
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setPendingInterrupts([]);
+                                                setActiveIsr(null);
+                                                setExtiConfig({});
+                                            }}
+                                            className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            🔄 重置
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-amber-500/30">
+                                <h3 className="text-xl font-bold text-amber-400 mb-4">🔬 EXTI 可视化</h3>
+                                <div className="space-y-4">
+                                    {/* 中断线映射 */}
+                                    <div className="bg-gray-800 rounded-lg p-3">
+                                        <h4 className="text-lg font-bold text-amber-300 mb-3">EXTI 中断线映射</h4>
+                                        <div className="space-y-1 text-xs">
+                                            {EXTI_LINES.map((item, i) => (
+                                                <div key={i} className="flex items-center justify-between p-1 bg-gray-700 rounded">
+                                                    <span className="text-amber-400 w-16">线{item.line}</span>
+                                                    <span className="text-gray-300 flex-1">{item.pins.join('/')}</span>
+                                                    <span className="text-gray-500 w-20">{item.isr}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* 中断状态 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-amber-300 mb-3">中断状态</h4>
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-300">挂起中断</span>
+                                                <div className="flex gap-1">
+                                                    {pendingInterrupts.map((line, i) => (
+                                                        <div key={i} className="w-6 h-6 bg-red-500 rounded text-white text-xs flex items-center justify-center animate-pending">
+                                                            {line}
+                                                        </div>
+                                                    ))}
+                                                    {pendingInterrupts.length === 0 && (
+                                                        <span className="text-gray-500">无</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-gray-300">活跃 ISR</span>
+                                                <span className={`font-bold ${activeIsr ? 'text-green-400' : 'text-gray-500'}`}>
+                                                    {activeIsr || '无'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 边沿触发可视化 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-amber-300 mb-3">边沿触发</h4>
+                                        <div className="flex items-center gap-4">
+                                            <div className={`flex-1 p-3 rounded text-center transition-all ${
+                                                edgeTriggered !== null ? 'bg-amber-600 animate-edge' : 'bg-gray-700'
+                                            }`}>
+                                                <div className="text-2xl">📈</div>
+                                                <div className="text-xs text-gray-300 mt-1">上升沿</div>
+                                            </div>
+                                            <div className={`flex-1 p-3 rounded text-center transition-all ${
+                                                edgeTriggered !== null ? 'bg-amber-600 animate-edge' : 'bg-gray-700'
+                                            }`}>
+                                                <div className="text-2xl">📉</div>
+                                                <div className="text-xs text-gray-300 mt-1">下降沿</div>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => triggerInterrupt(0)}
+                                            className="w-full mt-3 bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded transition"
+                                        >
+                                            触发线 0 中断
+                                        </button>
+                                    </div>
+
+                                    {/* 配置状态 */}
+                                    {extiConfig.enabled && (
+                                        <div className="bg-green-800/30 border border-green-500/50 rounded-lg p-3 animate-scaleIn">
+                                            <div className="text-sm text-green-300">
+                                                已配置：P{extiConfig.port} → EXTI{extiConfig.line}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-amber-500/30">
+                                <h3 className="text-xl font-bold text-amber-400 mb-4">📖 配置流程</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    {currentStep === 0 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 EXTI 架构</h4>
+                                            <p>23 条中断线：0-15 对应 GPIO，16-22 对应特殊事件。同一编号 GPIO 共享一线，通过 SYSCFG 选择端口。EXTI0-4 独立向量，5-9 和 10-15 共用向量。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 SYSCFG 映射</h4>
+                                            <p>EXTICR[0-3] 配置映射关系，每 4 位控制一条线。值 0=PA, 1=PB, 2=PC, 3=PD, 4=PE。使用前必须使能 SYSCFG 时钟 (RCC_APB2ENR)。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 边沿配置</h4>
+                                            <p>RTSR 控制上升沿，FTSR 控制下降沿。按键通常用下降沿 (按下触发) 或双沿 (按下和释放都触发)。SWIER 可软件触发中断用于测试。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 NVIC 配置</h4>
+                                            <p>NVIC_EnableIRQ 使能中断，SetPriority 配置优先级 (0 最高)。优先级决定抢占行为：高优先级可打断低优先级 ISR。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 ISR 编写</h4>
+                                            <p>读取 PR 寄存器判断触发源，写 1 清除标志。PR 标志必须清除否则重复触发。ISR 应短小，复杂处理交给主循环。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 按键应用</h4>
+                                            <p>GPIO 上拉输入，SYSCFG 映射，下降沿触发。按下时产生下降沿触发中断。消抖可在 ISR 设置标志，主循环延时后确认。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 多中断管理</h4>
+                                            <p>共用 ISR 需读取 PR 判断具体源。优先级高的可打断低的。临界区用__disable_irq() 保护，但尽量缩短时间。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <div>
+                                            <h4 className="font-bold text-amber-300 mb-2">📌 低功耗唤醒</h4>
+                                            <p>配置 EMR 使能事件 (非中断模式)，触发边沿唤醒 Stop/Standby。唤醒后系统时钟恢复，从 WFI 后继续执行。</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-amber-600 hover:bg-amber-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-amber-500/30">
+                            <h2 className="text-2xl font-bold text-amber-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

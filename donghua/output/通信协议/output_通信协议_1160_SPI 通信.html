@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1160 - SPI 通信协议 - 嵌入式 C 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+    @keyframes clockPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+    .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+    .animate-blink { animation: blink 0.5s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out forwards; }
+    .animate-scaleIn { animation: scaleIn 0.5s ease-out forwards; }
+    .animate-rotate { animation: rotate 2s linear infinite; }
+    .animate-flow { animation: flow 1s linear infinite; }
+    .animate-clockPulse { animation: clockPulse 0.5s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const COLOR_MAP = {
+      primary: '#8b5cf6',
+      secondary: '#a78bfa',
+      accent: '#c4b5fd',
+      bg: '#4c1d95',
+      text: '#ede9fe',
+      border: '#7c3aed'
+    };
+
+    const STEPS = [
+      { title: 'SPI 概述', voice: 'SPI 是 Serial Peripheral Interface 的缩写，由 Motorola 公司开发。它是同步全双工串行通信协议，使用四根线实现高速数据传输。' },
+      { title: 'SPI 物理层', voice: 'SPI 使用四根信号线：SCL 时钟线由主设备提供时钟，MOSI 主出从入数据线，MISO 主入从出数据线，CS 片选线低电平有效选择从设备。' },
+      { title: 'SPI 时钟模式', voice: 'SPI 有四种时钟模式由 CPOL 时钟极性和 CPHA 时钟相位决定。模式 0:CPOL=0 空闲低，CPHA=0 第一个边沿采样。模式 1:CPOL=0 空闲低，CPHA=1 第二个边沿采样。模式 2:CPOL=1 空闲高，CPHA=0 第一个边沿采样。模式 3:CPOL=1 空闲高，CPHA=1 第二个边沿采样。' },
+      { title: '数据传输', voice: 'SPI 数据传输基于移位寄存器。主设备发送时钟，数据从 MOSI 移入从设备，同时从 MISO 移出到主设备。每个时钟周期传输 1 位，一个字节需要 8 个时钟周期。' },
+      { title: '片选机制', voice: 'SPI 支持多从设备通过片选线 CS 或 NSS 控制。每个从设备需要独立的片选线。片选低电平有效，选中后从设备才响应。未选中的从设备 MISO 呈高阻态。' },
+      { title: '写操作流程', voice: 'SPI 写操作：主机拉低目标从机的片选线，发送 8 位时钟和数据到 MOSI，从机同时可发送数据到 MISO，传输完成后拉高片选线。' },
+      { title: '读操作流程', voice: 'SPI 读操作：拉低片选，主机发送时钟和 dummy 数据，从机将数据发送到 MISO，主机从 MISO 读取数据，传输完成拉高片选。' },
+      { title: 'HAL 库使用', voice: 'STM32 HAL 库提供 HAL_SPI_Transmit 发送、HAL_SPI_Receive 接收、HAL_SPI_TransmitReceive 全双工、HAL_SPI_Transmit_IT 中断发送、HAL_SPI_Transmit_DMA DMA 发送等函数。' }
+    ];
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [voiceStatus, setVoiceStatus] = useState('就绪');
+      const voiceEndTimerRef = useRef(null);
+
+      useEffect(() => {
+        if (!isPlaying) return;
+        const step = STEPS[currentStep];
+        setVoiceStatus('播放中...');
+
+        const utterance = new SpeechSynthesisUtterance(step.voice);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+
+        const voices = speechSynthesis.getVoices();
+        const xiaoxiao = voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('zh-CN'));
+        if (xiaoxiao) utterance.voice = xiaoxiao;
+
+        utterance.onend = () => {
+          setVoiceStatus('已完成');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            } else {
+              setIsPlaying(false);
+            }
+          }, 800);
+        };
+
+        utterance.onerror = () => {
+          setVoiceStatus('播放失败');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            }
+          }, 800);
+        };
+
+        speechSynthesis.speak(utterance);
+        return () => clearTimeout(voiceEndTimerRef.current);
+      }, [currentStep, isPlaying]);
+
+      const handlePlay = () => {
+        setCurrentStep(0);
+        setIsPlaying(true);
+        speechSynthesis.cancel();
+      };
+
+      const handlePause = () => {
+        setIsPlaying(false);
+        speechSynthesis.cancel();
+      };
+
+      const handleNext = () => {
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => prev + 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const handlePrev = () => {
+        if (currentStep > 0) {
+          setCurrentStep(prev => prev - 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const renderStepContent = () => {
+        switch(currentStep) {
+          case 0: return <Step0Overview />;
+          case 1: return <Step1PhysicalLayer />;
+          case 2: return <Step2ClockMode />;
+          case 3: return <Step3DataTransfer />;
+          case 4: return <Step4ChipSelect />;
+          case 5: return <Step5WriteFlow />;
+          case 6: return <Step6ReadFlow />;
+          case 7: return <Step7HALUsage />;
+          default: return <Step0Overview />;
+        }
+      };
+
+      return (
+        <div className="min-h-screen p-4" style={{ background: `linear-gradient(135deg, ${COLOR_MAP.bg} 0%, #0f172a 100%)` }}>
+          <div className="mb-4 flex items-center justify-between" style={{ backgroundColor: 'rgba(30, 41, 59, 0.8)', borderRadius: '12px', padding: '16px' }}>
+            <div>
+              <h1 className="text-2xl font-bold" style={{ color: COLOR_MAP.text }}>1160 - SPI 通信协议</h1>
+              <p className="text-sm" style={{ color: COLOR_MAP.accent }}>Embedded C - SPI Communication Protocol</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-sm" style={{ color: COLOR_MAP.accent }}>
+                {voiceStatus} | 步骤 {currentStep + 1}/{STEPS.length}
+              </div>
+              <button onClick={handlePrev} disabled={currentStep === 0} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>上一个</button>
+              {!isPlaying ? (
+                <button onClick={handlePlay} className="px-4 py-2 rounded" style={{ backgroundColor: '#10b981', color: 'white' }}>播放</button>
+              ) : (
+                <button onClick={handlePause} className="px-4 py-2 rounded" style={{ backgroundColor: '#f59e0b', color: 'white' }}>暂停</button>
+              )}
+              <button onClick={handleNext} disabled={currentStep === STEPS.length - 1} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>下一个</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 h-[calc(100vh-150px)]">
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>代码示例</div>
+              <pre className="p-4 text-sm overflow-auto h-full text-gray-100 font-mono">
+                <code>{renderStepContent()}</code>
+              </pre>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>可视化动画</div>
+              <div className="p-4 h-full overflow-auto">
+                {renderVisualization()}
+              </div>
+            </div>
+
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>解释说明</div>
+              <div className="p-4 space-y-3 h-full overflow-auto">
+                <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20` }}>
+                  <div className="font-bold mb-2" style={{ color: COLOR_MAP.text }}>{STEPS[currentStep].title}</div>
+                  <p style={{ color: COLOR_MAP.accent }}>{STEPS[currentStep].voice}</p>
+                </div>
+                {renderExplanation()}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function renderVisualization() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewViz />;
+        case 1: return <Step1PhysicalLayerViz />;
+        case 2: return <Step2ClockModeViz />;
+        case 3: return <Step3DataTransferViz />;
+        case 4: return <Step4ChipSelectViz />;
+        case 5: return <Step5WriteFlowViz />;
+        case 6: return <Step6ReadFlowViz />;
+        case 7: return <Step7HALUsageViz />;
+        default: return <Step0OverviewViz />;
+      }
+    }
+
+    function renderExplanation() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewExp />;
+        case 1: return <Step1PhysicalLayerExp />;
+        case 2: return <Step2ClockModeExp />;
+        case 3: return <Step3DataTransferExp />;
+        case 4: return <Step4ChipSelectExp />;
+        case 5: return <Step5WriteFlowExp />;
+        case 6: return <Step6ReadFlowExp />;
+        case 7: return <Step7HALUsageExp />;
+        default: return null;
+      }
+    }
+
+    function Step0Overview() {
+      return `/**
+ * SPI 通信协议 - 概述
+ * Serial Peripheral Interface
+ *
+ * 特点:
+ * - 同步串行通信
+ * - 全双工 (同时收发)
+ * - 高速传输 (可达 50+ Mbps)
+ * - 主从架构
+ */
+
+// 常见应用设备
+#define FLASH_W25QXX    // SPI Flash 存储器
+#define SD_CARD         // SD/TF 卡
+#define MPU6050         // 加速度计陀螺仪
+#define W5500           // 以太网芯片
+#define NRF24L01        // 2.4G 无线模块
+#define OLED_SSD1306    // OLED 显示屏 (4 线 SPI)
+
+// 速度模式
+// 标准 SPI: 最高 10 Mbps
+// 高速 SPI: 最高 50+ Mbps
+// Quad SPI: 4 线并行，速度翻倍
+
+// SPI 优势
+// 1. 全双工通信
+// 2. 高速传输
+// 3. 无应答协议 (简单)
+// 4. 支持多从设备`;
+    }
+
+    function Step0OverviewViz() {
+      return (
+        <div className="space-y-4">
+          <div className="text-center mb-4">
+            <div className="text-lg font-bold" style={{ color: COLOR_MAP.text }}>SPI 星型拓扑</div>
+          </div>
+          <div className="p-4 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="flex justify-center mb-4">
+              <div className="p-3 rounded text-center animate-pulse" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                <div className="font-bold">主设备 (MCU)</div>
+                <div className="text-xs mt-1">SPI1: SCK, MOSI, MISO</div>
+                <div className="text-xs">CS1, CS2, CS3...</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>从设备 1</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.accent }}>Flash CS1</div>
+              </div>
+              <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>从设备 2</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.accent }}>SD 卡 CS2</div>
+              </div>
+              <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+                <div className="font-bold text-xs" style={{ color: COLOR_MAP.text }}>从设备 3</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.accent }}>Sensor CS3</div>
+              </div>
+            </div>
+            <div className="mt-3 text-center text-xs" style={{ color: COLOR_MAP.accent }}>
+              SCK/MOSI/MISO 并联共享 · CS 独立控制
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step0OverviewExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>SPI 历史：</strong> 1980 年代由 Motorola 开发，现已成为事实上的标准同步串行接口。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>应用场景：</strong> Flash 存储器、SD 卡、无线模块 (NRF24L01)、以太网 (W5500)、传感器、显示屏等。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>速度优势：</strong> SPI 是全双工同步通信，时钟频率可达 50MHz 以上，远超 I2C 的 400kbps。</p>
+        </div>
+      );
+    }
+
+    function Step1PhysicalLayer() {
+      return `/**
+ * SPI 物理层接口
+ */
+
+// 四线接口定义
+// ┌─────────────────┐     ┌─────────────────┐
+// │   主设备 (MCU)  │     │   从设备 (Sensor)│
+// │                 │     │                 │
+// │  SCK  ────────→ │ SCK │  时钟 (主→从)   │
+// │  MOSI ────────→ │ SDI │  数据 (主→从)   │
+// │  MISO ←──────── │ SDO │  数据 (从→主)   │
+// │  CS   ────────→ │ CS  │  片选 (主→从)   │
+// │                 │     │                 │
+// └─────────────────┘     └─────────────────┘
+
+// 信号说明
+// SCK  (Serial Clock)   : 串行时钟，主设备产生
+// MOSI (Master Out Slave In): 主发从收
+// MISO (Master In Slave Out): 从发主收
+// CS   (Chip Select)    : 片选，低电平有效
+
+// 其他命名方式
+// SDO = MOSI (Serial Data Out)
+// SDI = MISO (Serial Data In)
+// DI  = MOSI (Data In)
+// DO  = MISO (Data Out)
+// NSS = CS   (Slave Select)`;
+    }
+
+    function Step1PhysicalLayerViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>SPI 四线连接</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `2px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>主设备</div>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>SCK</span>
+                  <span className="animate-flow" style={{ color: COLOR_MAP.text }}>→</span>
+                </div>
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>MOSI</span>
+                  <span className="animate-flow" style={{ color: COLOR_MAP.text }}>→</span>
+                </div>
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>MISO</span>
+                  <span className="animate-flow" style={{ color: COLOR_MAP.text }}>←</span>
+                </div>
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>CS</span>
+                  <span className="animate-blink" style={{ color: '#ef4444' }}>↓ (低有效)</span>
+                </div>
+              </div>
+            </div>
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `2px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>从设备</div>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>SCK</span>
+                  <span style={{ color: COLOR_MAP.text }}>时钟输入</span>
+                </div>
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>SDI</span>
+                  <span style={{ color: COLOR_MAP.text }}>数据输入</span>
+                </div>
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>SDO</span>
+                  <span style={{ color: COLOR_MAP.text }}>数据输出</span>
+                </div>
+                <div className="flex items-center justify-between" style={{ color: COLOR_MAP.accent }}>
+                  <span>CS</span>
+                  <span style={{ color: COLOR_MAP.text }}>片选输入</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs animate-pulse" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}` }}>
+            <span style={{ color: COLOR_MAP.text }}>全双工：同时发送和接收数据</span>
+          </div>
+        </div>
+      );
+    }
+
+    function Step1PhysicalLayerExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>SCK 时钟：</strong> 由主设备产生，频率决定传输速率。从设备在时钟边沿采样数据。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>MOSI/MISO：</strong> MOSI 用于主设备发送从设备接收，MISO 用于从设备发送主设备接收。两条线独立实现全双工。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>CS 片选：</strong> 低电平有效。未选中时从设备 MISO 呈高阻态，不干扰总线。多从设备需要多个 GPIO 控制片选。</p>
+        </div>
+      );
+    }
+
+    function Step2ClockMode() {
+      return `/**
+ * SPI 时钟模式
+ * 由 CPOL (时钟极性) 和 CPHA (时钟相位) 决定
+ */
+
+// CPOL (Clock Polarity) - 时钟极性
+// CPOL = 0 : 空闲时时钟为低电平
+// CPOL = 1 : 空闲时时钟为高电平
+
+// CPHA (Clock Phase) - 时钟相位
+// CPHA = 0 : 第一个边沿采样数据
+// CPHA = 1 : 第二个边沿采样数据
+
+// 四种模式
+// ┌──────┬──────┬─────────┬─────────┐
+// │ 模式 │ CPOL │  CPHA   │ 采样边沿 │
+// ├──────┼──────┼─────────┼─────────┤
+// │  0   │  0   │   0     │ 上升沿  │
+// │  1   │  0   │   1     │ 下降沿  │
+// │  2   │  1   │   0     │ 下降沿  │
+// │  3   │  1   │   1     │ 上升沿  │
+// └──────┴──────┴─────────┴─────────┘
+
+// 模式 0 (CPOL=0, CPHA=0) - 最常用
+// 空闲低电平，上升沿发送，下降沿采样
+
+// 模式 3 (CPOL=1, CPHA=1)
+// 空闲高电平，下降沿发送，上升沿采样
+
+// 关键：主从设备必须使用相同模式！`;
+    }
+
+    function Step2ClockModeViz() {
+      const [mode, setMode] = useState(0);
+
+      useEffect(() => {
+        const interval = setInterval(() => {
+          setMode(prev => (prev + 1) % 4);
+        }, 2000);
+        return () => clearInterval(interval);
+      }, []);
+
+      const modes = [
+        { cpol: 0, cpha: 0, name: '模式 0', sample: '上升沿' },
+        { cpol: 0, cpha: 1, name: '模式 1', sample: '下降沿' },
+        { cpol: 1, cpha: 0, name: '模式 2', sample: '下降沿' },
+        { cpol: 1, cpha: 1, name: '模式 3', sample: '上升沿' }
+      ];
+
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>四种时钟模式</div>
+          <div className="grid grid-cols-2 gap-2">
+            {modes.map((m, i) => (
+              <div
+                key={i}
+                className={`p-2 rounded text-center cursor-pointer transition-all ${i === mode ? 'animate-pulse' : ''}`}
+                onClick={() => setMode(i)}
+                style={{
+                  backgroundColor: i === mode ? COLOR_MAP.primary : `${COLOR_MAP.primary}20`,
+                  border: `2px solid ${i === mode ? COLOR_MAP.text : COLOR_MAP.border}`
+                }}
+              >
+                <div className="font-bold text-sm" style={{ color: COLOR_MAP.text }}>{m.name}</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.accent }}>CPOL={m.cpol} CPHA={m.cpha}</div>
+                <div className="text-xs" style={{ color: COLOR_MAP.secondary }}>{m.sample}采样</div>
+              </div>
+            ))}
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            当前：<span style={{ fontWeight: 'bold' }}>{modes[mode].name}</span> - {modes[mode].sample}采样数据
+          </div>
+        </div>
+      );
+    }
+
+    function Step2ClockModeExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>CPOL 极性：</strong> 决定时钟空闲状态。CPOL=0 空闲时 SCK 为低，CPOL=1 空闲时 SCK 为高。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>CPHA 相位：</strong> 决定采样时刻。CPHA=0 在第一个边沿 (空闲→活动) 采样，CPHA=1 在第二个边沿 (活动→空闲) 采样。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>常用模式：</strong> 模式 0 (CPOL=0,CPHA=0) 最常用，Flash、SD 卡等多用此模式。务必查阅从设备数据手册确认所需模式。</p>
+        </div>
+      );
+    }
+
+    function Step3DataTransfer() {
+      return `/**
+ * SPI 数据传输原理
+ * 基于移位寄存器的同步传输
+ */
+
+// 传输过程 (8 位数据)
+// 主设备                     从设备
+// ┌──────────────┐          ┌──────────────┐
+// │ 移位寄存器   │          │ 移位寄存器   │
+// │ [B7:B0]      │          │ [B7:B0]      │
+// └──────┬───────┘          └──────┬───────┘
+//        │ MOSI                    │
+// │      │ B7 ──────────────────→ │
+// │      │ B6 ──────────────────→ │
+// │      │ ... ─────────────────→ │
+// │      │ B0 ──────────────────→ │
+//        │                         │
+//        │ ←───────────────────── │
+//        │ ←───────────────────── │ MISO
+//        │ ←───────────────────── │
+//        │ ←───────────────────── │
+// ┌──────┴───────┐          ┌──────┴───────┐
+// │ 接收到从机数据│          │ 接收到主机数据│
+// └──────────────┘          └──────────────┘
+
+// 每个时钟周期:
+// 1. 主设备移位寄存器输出一位到 MOSI
+// 2. 从设备移位寄存器输出一位到 MISO
+// 3. 时钟边沿双方同时采样
+// 4. 移位寄存器左移/右移一位
+
+// 8 位数据 = 8 个时钟周期
+// 16 位数据 = 16 个时钟周期`;
+    }
+
+    function Step3DataTransferViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>数据交换过程</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="flex justify-between items-center mb-3">
+              <div className="p-2 rounded text-center" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>
+                <div className="font-bold text-xs">主设备</div>
+                <div className="text-xs mt-1 font-mono">0x55</div>
+              </div>
+              <div className="flex-1 mx-4 relative h-8">
+                <div className="absolute top-0 left-0 text-xs animate-flow" style={{ color: COLOR_MAP.accent }}>MOSI →</div>
+                <div className="absolute bottom-0 left-0 text-xs animate-flow" style={{ color: COLOR_MAP.secondary, animationDirection: 'reverse' }}>← MISO</div>
+              </div>
+              <div className="p-2 rounded text-center" style={{ backgroundColor: COLOR_MAP.secondary, color: 'white' }}>
+                <div className="font-bold text-xs">从设备</div>
+                <div className="text-xs mt-1 font-mono">0xAA</div>
+              </div>
+            </div>
+            <div className="text-center text-xs" style={{ color: COLOR_MAP.accent }}>
+              同时交换：主机发送 0x55，从机发送 0xAA
+            </div>
+          </div>
+          <div className="grid grid-cols-8 gap-1">
+            {['B7','B6','B5','B4','B3','B2','B1','B0'].map((bit, i) => (
+              <div key={i} className="p-2 rounded text-center animate-blink" style={{ backgroundColor: COLOR_MAP.primary, color: 'white', animationDelay: `${i * 50}ms` }}>
+                <div className="text-xs font-bold">{bit}</div>
+              </div>
+            ))}
+          </div>
+          <div className="text-center text-xs" style={{ color: COLOR_MAP.accent }}>
+            8 位数据需要 8 个时钟周期
+          </div>
+        </div>
+      );
+    }
+
+    function Step3DataTransferExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>移位寄存器：</strong> 主从设备各有一个 8 位移位寄存器，通过 MOSI 和 MISO 连接成环形。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>数据交换：</strong> 每个时钟周期，主设备移出一位到 MOSI，同时从 MISO 移入一位。从设备反之。8 个周期后完成字节交换。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>哑数据：</strong> 如果只需要单向传输，另一端发送 dummy 字节 (通常是 0x00 或 0xFF) 来产生时钟。</p>
+        </div>
+      );
+    }
+
+    function Step4ChipSelect() {
+      return `/**
+ * SPI 片选 (CS/NSS) 机制
+ */
+
+// 多从设备连接
+// ┌────────────┐
+// │   主设备   │
+// │   (MCU)   │
+// └────┬───────┘
+//      │ CS1, CS2, CS3
+//      ├──────┬──────┐
+//      │      │      │
+//   ┌──┴──┐ ┌─┴──┐ ┌─┴──┐
+//   │Slave1│ │S2  │ │ S3 │
+//   └──────┘ └────┘ └────┘
+
+// 片选时序
+// ────┐       ┌───────┐       ┌────
+// CS  │       │       │       │
+//     └───────┘       └───────┘
+//     ↑               ↑
+//   选中              释放
+
+// 片选规则
+// 1. CS 低电平选中从设备
+// 2. CS 高电平从设备释放 MISO (高阻态)
+// 3. 传输开始拉低 CS，结束拉高 CS
+// 4. 多从设备需要独立 CS 线
+
+// 软件片选 (推荐)
+// GPIO_ResetBits(GPIOA, CS_PIN);  // 选中
+// SPI_Transmit(data);
+// GPIO_SetBits(GPIOA, CS_PIN);    // 释放
+
+// 硬件片选
+// SPI 外设自动管理 NSS 引脚`;
+    }
+
+    function Step4ChipSelectViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>多从设备片选</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-12 text-xs font-bold" style={{ color: COLOR_MAP.text }}>CS1</div>
+                <div className="flex-1 flex gap-1">
+                  <div className="flex-1 p-1 rounded text-center animate-pulse" style={{ backgroundColor: '#22c55e', color: 'white' }}>选中</div>
+                  <div className="flex-1 p-1 rounded text-center" style={{ backgroundColor: '#ef4444', color: 'white' }}>释放</div>
+                  <div className="flex-1 p-1 rounded text-center" style={{ backgroundColor: '#ef4444', color: 'white' }}>释放</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-12 text-xs font-bold" style={{ color: COLOR_MAP.text }}>CS2</div>
+                <div className="flex-1 flex gap-1">
+                  <div className="flex-1 p-1 rounded text-center" style={{ backgroundColor: '#ef4444', color: 'white' }}>释放</div>
+                  <div className="flex-1 p-1 rounded text-center" style={{ backgroundColor: '#22c55e', color: 'white' }}>选中</div>
+                  <div className="flex-1 p-1 rounded text-center" style={{ backgroundColor: '#ef4444', color: 'white' }}>释放</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-12 text-xs font-bold" style={{ color: COLOR_MAP.text }}>CS3</div>
+                <div className="flex-1 flex gap-1">
+                  <div className="flex-1 p-1 rounded text-center" style={{ backgroundColor: '#ef4444', color: 'white' }}>释放</div>
+                  <div className="flex-1 p-1 rounded text-center" style={{ backgroundColor: '#ef4444', color: 'white' }}>释放</div>
+                  <div className="flex-1 p-1 rounded text-center" style={{ backgroundColor: '#22c55e', color: 'white' }}>选中</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs animate-blink" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            同一时刻只能有一个从设备被选中
+          </div>
+        </div>
+      );
+    }
+
+    function Step4ChipSelectExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>片选作用：</strong> CS 低电平选中从设备，使其 MISO 驱动总线。CS 高电平从设备 MISO 呈高阻态，不影响其他设备。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>软件片选：</strong> 用 GPIO 模拟 CS 信号，灵活可控。推荐方式，可精确控制传输时序。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>硬件片选：</strong> SPI 外设自动管理 NSS 引脚。多从设备时不够用，且可能产生错误。</p>
+        </div>
+      );
+    }
+
+    function Step5WriteFlow() {
+      return `/**
+ * SPI 写操作流程
+ */
+
+// 写时序 (主机发送数据到从机)
+// ┌────┐  ┌────────┐  ┌────────┐  ┌────┐
+// │ CS │  │ CMD+W  │  │ DATA   │  │ CS │
+// │ ↓  │  │ 0x02   │  │ 0x55   │  │ ↑  │
+// └────┘  └────────┘  └────────┘  └────┘
+//   选中    写命令     数据       释放
+
+void SPI_WriteByte(uint8_t cmd, uint8_t data) {
+    // 1. 拉低片选
+    HAL_GPIO_WritePin(GPIOA, CS_PIN, GPIO_PIN_RESET);
+
+    // 2. 发送命令/地址
+    HAL_SPI_Transmit(&hspi1, &cmd, 1, timeout);
+
+    // 3. 发送数据
+    HAL_SPI_Transmit(&hspi1, &data, 1, timeout);
+
+    // 4. 拉高片选
+    HAL_GPIO_WritePin(GPIOA, CS_PIN, GPIO_PIN_SET);
+}
+
+// Flash 页写 (W25QXX)
+// 1. 写使能 (0x06)
+// 2. 拉低 CS
+// 3. 发送页写命令 (0x02)
+// 4. 发送 24 位地址
+// 5. 发送数据 (最多 256 字节)
+// 6. 拉高 CS
+// 7. 等待写完成`;
+    }
+
+    function Step5WriteFlowViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>写操作时序</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>CS ↓</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: '#22c55e', color: 'white' }}>选中从机</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>CMD</div>
+                <div className="flex-1 p-1 rounded animate-pulse" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>0x02 (写使能)</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>ADDR</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: COLOR_MAP.secondary, color: 'white' }}>0x001234</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>DATA</div>
+                <div className="flex-1 p-1 rounded animate-blink" style={{ backgroundColor: COLOR_MAP.accent, color: '#0f172a' }}>0x55</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>CS ↑</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: '#ef4444', color: 'white' }}>释放从机</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `1px solid ${COLOR_MAP.border}`, color: COLOR_MAP.accent }}>
+            传输期间 CS 保持低电平
+          </div>
+        </div>
+      );
+    }
+
+    function Step5WriteFlowExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>写流程：</strong> 拉低 CS → 发送命令/地址 → 发送数据 → 拉高 CS。某些设备 (如 Flash) 需要先发送写使能命令。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>页写入：</strong> Flash 等器件支持页写，一次传输多个字节。W25QXX 页大小 256 字节，超过边界会回绕。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>写延迟：</strong> EEPROM/Flash 写入需要时间，完成后才能进行下次操作。需查询状态寄存器或延时等待。</p>
+        </div>
+      );
+    }
+
+    function Step6ReadFlow() {
+      return `/**
+ * SPI 读操作流程
+ */
+
+// 读时序 (主机从从机读取数据)
+// ┌────┐  ┌────────┐  ┌────────┐  ┌────┐
+// │ CS │  │ CMD+R  │  │DUMMY   │  │ CS │
+// │ ↓  │  │ 0x03   │  │ 0x00   │  │ ↑  │
+// └────┘  └────────┘  └────────┘  └────┘
+//   选中    读命令    哑数据     释放
+//              ↓           ↓
+//           (从机发送数据到 MISO)
+
+uint8_t SPI_ReadByte(uint8_t cmd, uint32_t addr) {
+    uint8_t txBuf[4] = {cmd, addr>>16, addr>>8, addr};
+    uint8_t rxBuf[1];
+
+    // 1. 拉低片选
+    HAL_GPIO_WritePin(GPIOA, CS_PIN, GPIO_PIN_RESET);
+
+    // 2. 发送读命令和地址
+    HAL_SPI_Transmit(&hspi1, txBuf, 4, timeout);
+
+    // 3. 发送 dummy 字节并读取数据
+    //    (全双工模式下同时收发)
+    HAL_SPI_TransmitReceive(&hspi1, &dummy, rxBuf, 1, timeout);
+
+    // 4. 拉高片选
+    HAL_GPIO_WritePin(GPIOA, CS_PIN, GPIO_PIN_SET);
+
+    return rxBuf[0];
+}`;
+    }
+
+    function Step6ReadFlowViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>读操作时序</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}10`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>CS ↓</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: '#22c55e', color: 'white' }}>选中从机</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>CMD</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>0x03 (读)</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>ADDR</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: COLOR_MAP.secondary, color: 'white' }}>0x001234</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>DUMMY</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: '#f59e0b', color: 'white' }}>0x00 (产生时钟)</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>MISO ←</div>
+                <div className="flex-1 p-1 rounded animate-pulse" style={{ backgroundColor: '#22c55e', color: 'white' }}>数据 0xAA</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-16 font-bold" style={{ color: COLOR_MAP.text }}>CS ↑</div>
+                <div className="flex-1 p-1 rounded" style={{ backgroundColor: '#ef4444', color: 'white' }}>释放从机</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            主机发送 dummy 字节产生时钟，从机在 MISO 上返回数据
+          </div>
+        </div>
+      );
+    }
+
+    function Step6ReadFlowExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>读流程：</strong> 拉低 CS → 发送读命令和地址 → 发送 dummy 字节 (同时读取 MISO) → 拉高 CS。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>哑数据：</strong> SPI 是全双工的，主机必须发送数据才能产生时钟。读操作时发送 dummy 字节 (通常 0x00) 来换取从机数据。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>连续读：</strong> 保持 CS 低电平继续发送 dummy 字节，可从递增地址连续读取多个字节。</p>
+        </div>
+      );
+    }
+
+    function Step7HALUsage() {
+      return `/**
+ * STM32 HAL 库 SPI 使用
+ */
+
+// 初始化 (由 CubeMX 生成)
+SPI_HandleTypeDef hspi1;
+
+void MX_SPI1_Init(void) {
+    hspi1.Instance = SPI1;
+    hspi1.Init.Mode = SPI_MODE_MASTER;
+    hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+    hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+    hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;   // CPOL=0
+    hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;       // CPHA=0
+    hspi1.Init.NSS = SPI_NSS_SOFT;               // 软件片选
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
+    hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+    hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+    hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+
+    if (HAL_SPI_Init(&hspi1) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+// 阻塞式 API
+HAL_SPI_Transmit(&hspi1, txData, size, timeout);      // 发送
+HAL_SPI_Receive(&hspi1, rxData, size, timeout);       // 接收
+HAL_SPI_TransmitReceive(&hspi1, txData, rxData, size, timeout); // 全双工
+
+// 中断方式
+HAL_SPI_Transmit_IT(&hspi1, txData, size);
+// 回调：HAL_SPI_TxCpltCallback()
+
+// DMA 方式 (大数据量推荐)
+HAL_SPI_Transmit_DMA(&hspi1, txData, size);
+HAL_SPI_Receive_DMA(&hspi1, rxData, size);`;
+    }
+
+    function Step7HALUsageViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>HAL SPI API</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>阻塞式</div>
+              <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>Transmit</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>Receive</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30` }}>TransmitReceive</div>
+              </div>
+            </div>
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}20`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>非阻塞式</div>
+              <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>_IT (中断)</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>_DMA (DMA)</div>
+                <div className="p-1 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30` }}>回调函数</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px solid ${COLOR_MAP.accent}` }}>
+            <div className="font-bold text-sm" style={{ color: COLOR_MAP.text }}>配置参数</div>
+            <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>CPOL/CPHA/ 波特率预分频/MSB 先行</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step7HALUsageExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>初始化：</strong> 配置模式、数据大小、时钟极性/相位、波特率预分频、MSB/LSB 先行等参数。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>阻塞式 API：</strong> Transmit/Receive/TransmitReceive 函数等待传输完成，适合小数据量或简单应用。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>DMA 方式：</strong> 大数据量传输推荐使用 DMA，不占用 CPU，传输完成后调用回调函数。</p>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

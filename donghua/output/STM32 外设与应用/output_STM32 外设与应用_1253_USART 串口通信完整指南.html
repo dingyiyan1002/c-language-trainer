@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 USART 串口通信完整指南 - UART 配置与数据收发可视化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // 8 个步骤 - 语音驱动自动播放
+        const STEPS = [
+            {
+                title: "USART 基础概念",
+                code: `// USART 串口特性
+// - 异步通信：无需时钟线
+// - 全双工：独立发送/接收
+// - 波特率：常见 9600/19200/115200
+// - 数据帧：起始位 +8 数据位 + 校验位 + 停止位
+
+// STM32 USART 外设
+// - USART1/2/3: 支持同步/异步
+// - UART4/5: 仅异步 (F103 大容量)
+// - 最高波特率：4.5Mbps
+
+// 物理层
+// - TTL 电平：0=0V, 1=3.3V
+// - RS232: 需要 MAX3232 转换
+// - 接线：TX→RX, RX→TX, GND 共地`,
+                visualization: "usart-basic",
+                explanation: "USART 是通用同步异步收发器，支持全双工异步通信。数据以帧为单位传输，包含起始位、数据位、可选校验位和停止位。STM32F103 至少有 2 个 USART，USART1 在 APB2(72MHz)，USART2/3 在 APB1(36MHz)。"
+            },
+            {
+                title: "USART 初始化",
+                code: `// USART 初始化 (115200 8N1)
+void USART_Init(void) {
+    // 1. 使能时钟
+    RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+
+    // 2. GPIO 配置
+    // PA9: USART1_TX (复用推挽)
+    // PA10: USART1_RX (浮空输入)
+    GPIOA->CRH &= ~0x00000FF0;
+    GPIOA->CRH |= 0x00000880;
+
+    // 3. USART 配置 (115200 @72MHz)
+    // BRR = 72000000 / (16 * 115200) = 39.0625
+    USART1->BRR = 0x0271;  // 39.0625
+
+    // 4. 控制寄存器
+    USART1->CR1 = USART_CR1_TE | USART_CR1_RE |  // 发送/接收使能
+                  USART_CR1_UE;                   // USART 使能
+
+    // 5. 使能中断 (可选)
+    USART1->CR1 |= USART_CR1_RXNEIE;
+    NVIC_EnableIRQ(USART1_IRQn);
+}`,
+                visualization: "usart-init",
+                explanation: "USART 初始化需要配置波特率寄存器 BRR、使能发送/接收、设置数据位/停止位。波特率由 APB 时钟和 BRR 决定。115200@72MHz 时 BRR=0x0271。RXNE 中断在接收数据可用时触发。"
+            },
+            {
+                title: "数据发送",
+                code: `// 发送单个字节
+void USART_SendByte(uint8_t data) {
+    // 等待发送缓冲区空
+    while (!(USART1->SR & USART_SR_TXE));
+    // 写入数据
+    USART1->DR = data;
+    // 等待发送完成
+    while (!(USART1->SR & USART_SR_TC));
+}
+
+// 发送字符串
+void USART_SendString(char *str) {
+    while (*str) {
+        USART_SendByte(*str++);
+    }
+}
+
+// 发送缓冲区 (带超时)
+int USART_SendBuffer(uint8_t *buf, uint16_t len, uint32_t timeout) {
+    uint32_t start = millis();
+    for (int i = 0; i < len; i++) {
+        while (!(USART1->SR & USART_SR_TXE)) {
+            if (millis() - start > timeout) return -1;
+        }
+        USART1->DR = buf[i];
+    }
+    while (!(USART1->SR & USART_SR_TC));
+    return 0;
+}
+
+// printf 重定向 (GCC)
+int _write(int fd, char *ptr, int len) {
+    USART_SendBuffer((uint8_t*)ptr, len, 1000);
+    return len;
+}`,
+                visualization: "usart-transmit",
+                explanation: "发送数据前需检查 TXE(发送缓冲区空) 标志。写入 DR 后数据自动发送，TC(发送完成) 标志在最后一位发送完毕后置位。字符串发送可配合 printf 重定向实现格式化输出。"
+            },
+            {
+                title: "数据接收",
+                code: `// 轮询接收
+uint8_t USART_RecvByte(void) {
+    // 等待接收缓冲区不空
+    while (!(USART1->SR & USART_SR_RXNE));
+    // 读取数据
+    return USART1->DR;
+}
+
+// 中断接收 (环形缓冲区)
+#define RX_BUF_SIZE 128
+volatile uint8_t rxBuf[RX_BUF_SIZE];
+volatile uint16_t rxHead = 0, rxTail = 0;
+
+void USART1_IRQHandler(void) {
+    if (USART1->SR & USART_SR_RXNE) {
+        uint8_t data = USART1->DR;
+        uint16_t next = (rxHead + 1) % RX_BUF_SIZE;
+        if (next != rxTail) {  // 缓冲区未满
+            rxBuf[rxHead] = data;
+            rxHead = next;
+        }
+    }
+}
+
+// 读取接收数据
+int USART_Read(uint8_t *buf, int len) {
+    int count = 0;
+    while (count < len && rxTail != rxHead) {
+        buf[count++] = rxBuf[rxTail];
+        rxTail = (rxTail + 1) % RX_BUF_SIZE;
+    }
+    return count;
+}`,
+                visualization: "usart-receive",
+                explanation: "接收可轮询或中断方式。轮询简单但占用 CPU。中断配合环形缓冲区效率高，适合大数据量。RXNE 标志在接收到完整字节后 set，读 DR 自动清除。"
+            },
+            {
+                title: "波特率配置",
+                code: `// 波特率计算
+// BRR = fCK / ( oversampling * baudrate )
+// oversampling = 16 (默认) 或 8 (OVER8=1)
+
+// 常见波特率配置表 (@72MHz, oversampling=16)
+// 9600:    BRR = 72000000/(16*9600) = 468.75 = 0x01D5
+// 19200:   BRR = 72000000/(16*19200) = 234.375 = 0x00EA
+// 38400:   BRR = 72000000/(16*38400) = 117.1875 = 0x0075
+// 57600:   BRR = 72000000/(16*57600) = 78.125 = 0x004E
+// 115200:  BRR = 72000000/(16*115200) = 39.0625 = 0x0271
+// 256000:  BRR = 72000000/(16*256000) = 17.578 = 0x0012
+// 921600:  BRR = 72000000/(16*921600) = 4.883 = 0x0005
+
+// 波特率误差应 < 2%
+// 实际波特率 = fCK / (16 * BRR)
+
+void USART_SetBaudrate(uint32_t baud) {
+    uint32_t brr = (72000000 + baud * 8) / (baud * 16);
+    USART1->BRR = brr;
+}`,
+                visualization: "usart-baudrate",
+                explanation: "波特率由系统时钟和 BRR 寄存器决定。BRR 整数部分在 bits[15:4]，小数部分在 bits[3:0]。误差应小于 2% 以保证可靠通信。高速率时需考虑时钟精度和信号完整性。"
+            },
+            {
+                title: "USART DMA 传输",
+                code: `// USART DMA 配置 (发送)
+void USART_DMA_Init(uint32_t memAddr, uint16_t len) {
+    // 1. 使能 DMA 时钟
+    RCC->AHBENR |= RCC_AHBENR_DMA1EN;
+
+    // 2. 配置 DMA 通道
+    DMA1_Channel4->CPAR = (uint32_t)&USART1->DR;
+    DMA1_Channel4->CMAR = memAddr;
+    DMA1_Channel4->CNDTR = len;
+    DMA1_Channel4->CCR = DMA_CCR_DIR |      // 从内存到外设
+                        DMA_CCR_MINC |       // 内存地址递增
+                        DMA_CCR_PSIZE_0 |    // 外设 8 位
+                        DMA_CCR_MSIZE_0 |    // 内存 8 位
+                        DMA_CCR_PL_1;        // 高优先级
+
+    // 3. 使能 USART DMA
+    USART1->CR3 |= USART_CR3_DMAT;
+
+    // 4. 启动 DMA
+    DMA1_Channel4->CCR |= DMA_CCR_EN;
+}
+
+// 等待 DMA 完成
+while (DMA1_Channel4->CNDTR > 0);
+DMA1_Channel4->CCR &= ~DMA_CCR_EN;`,
+                visualization: "usart-dma",
+                explanation: "DMA 可实现大数据量 USART 发送而无需 CPU 干预。DMA 通道 4 用于 USART1_TX，自动从内存读取数据写入 DR。适合大量日志输出或固件升级场景。"
+            },
+            {
+                title: "硬件流控制",
+                code: `// 硬件流控制 (RTS/CTS)
+// RTS: 请求发送 (输出)
+// CTS: 清除发送 (输入)
+
+void USART_FlowControl_Init(void) {
+    // 1. GPIO 配置
+    // PA11: USART1_CTS (输入)
+    // PA12: USART1_RTS (复用推挽)
+    GPIOA->CRH &= ~0x00FF0000;
+    GPIOA->CRH |= 0x00880000;
+
+    // 2. 使能流控制
+    USART1->CR3 |= USART_CR3_RTSE | USART_CR3_CTSE;
+
+    // 3. 使能 CTS 中断
+    USART1->CR3 |= USART_CR3_CTSIE;
+}
+
+// 软件流控制 (XON/XOFF)
+// XON (0x11): 恢复发送
+// XOFF (0x13): 暂停发送
+
+void USART_SendChar(char c) {
+    if (c == '\n') USART_SendByte('\r');  // 添加 CR
+    USART_SendByte(c);
+}`,
+                visualization: "usart-flow",
+                explanation: "硬件流控制使用 RTS/CTS 信号防止缓冲区溢出。RTS 输出指示接收方准备就绪，CTS 输入允许发送方发送。软件流控制使用 XON/XOFF 字符，适用于三线制连接。"
+            },
+            {
+                title: "应用实例",
+                code: `// 实例 1: 串口调试输出
+void Debug_Printf(const char *fmt, ...) {
+    char buf[128];
+    va_list args;
+    va_start(args, fmt);
+    vsprintf(buf, fmt, args);
+    va_end(args);
+    USART_SendString(buf);
+}
+
+// 实例 2: 命令解析
+char cmdBuf[64];
+uint8_t cmdIdx = 0;
+
+void ProcessCommand(char *cmd) {
+    if (strcmp(cmd, "help") == 0) {
+        USART_SendString("Commands: help, status, reset\\n");
+    } else if (strcmp(cmd, "status") == 0) {
+        USART_SendString("System OK\\n");
+    }
+}
+
+void USART_ProcessRx(void) {
+    static char buf[64];
+    static uint8_t idx = 0;
+
+    while (USART_Available()) {
+        char c = USART_RecvByte();
+        if (c == '\\n') {
+            buf[idx] = 0;
+            ProcessCommand(buf);
+            idx = 0;
+        } else if (idx < 63) {
+            buf[idx++] = c;
+        }
+    }
+}`,
+                visualization: "usart-apps",
+                explanation: "USART 常用于调试输出、命令解析、设备通信。配合 printf 重定向可方便打印调试信息。命令解析器可接收文本命令并响应。环形缓冲区+ 中断适合实时接收。"
+            }
+        ];
+
+        // 颜色映射 - 蓝色调
+        const COLOR_MAP = {
+            primary: '#2563eb',    // blue-600
+            secondary: '#3b82f6',  // blue-500
+            accent: '#06b6d4',     // cyan-500
+            success: '#10b981',    // emerald-500
+            warning: '#f59e0b',    // amber-500
+            danger: '#ef4444',     // red-500
+            info: '#8b5cf6',       // violet-500
+            tx: '#10b981',         // TX 绿色
+            rx: '#ef4444',         // RX 红色
+            gradients: [
+                'from-blue-600 to-cyan-600',
+                'from-emerald-500 to-teal-500',
+                'from-violet-500 to-purple-500'
+            ]
+        };
+
+        // USART 基础可视化
+        const UsartBasic = ({ step }) => {
+            const [txState, setTxState] = useState(false);
+            const [rxState, setRxState] = useState(false);
+            const [bitStream, setBitStream] = useState('');
+
+            useEffect(() => {
+                const transmit = async () => {
+                    const data = Math.floor(Math.random() * 256);
+                    const bits = '0' + data.toString(2).padStart(8, '0').split('').reverse().join('') + '1';
+                    setBitStream(bits);
+                    for (let i = 0; i < bits.length; i++) {
+                        setTxState(bits[i] === '1');
+                        setRxState(bits[i] === '1');
+                        await sleep(200);
+                    }
+                    setBitStream('');
+                    await sleep(1000);
+                };
+                transmit();
+                const interval = setInterval(transmit, 3000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        UART 数据帧
+                    </div>
+                    <div className="flex justify-center items-center space-x-4">
+                        <div className="text-center">
+                            <div className="text-2xl mb-2">📤</div>
+                            <div className="text-xs">TX</div>
+                            <div className={`w-4 h-4 rounded mt-1 ${txState ? 'bg-green-500' : 'bg-gray-300'}`} />
+                        </div>
+                        <div className="text-2xl">→</div>
+                        <div className="text-center">
+                            <div className="text-2xl mb-2">📥</div>
+                            <div className="text-xs">RX</div>
+                            <div className={`w-4 h-4 rounded mt-1 ${rxState ? 'bg-red-500' : 'bg-gray-300'}`} />
+                        </div>
+                    </div>
+                    {bitStream && (
+                        <div className="flex justify-center space-x-1">
+                            {bitStream.split('').map((bit, idx) => (
+                                <div
+                                    key={idx}
+                                    className={`w-6 h-8 flex items-center justify-center text-xs font-mono rounded ${
+                                        idx === 0 ? 'bg-blue-100' :
+                                        idx === 10 ? 'bg-purple-100' :
+                                        bit === '1' ? 'bg-green-100' : 'bg-gray-100'
+                                    }`}
+                                >
+                                    {idx === 0 ? 'S' : idx === 10 ? 'P' : bit}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <div className="text-xs text-gray-500 text-center">
+                        起始位 +8 数据位 + 停止位
+                    </div>
+                </div>
+            );
+        };
+
+        // USART 初始化可视化
+        const UsartInit = ({ step }) => {
+            const [initialized, setInitialized] = useState(false);
+            const [baudrate, setBaudrate] = useState(115200);
+
+            useEffect(() => {
+                setInitialized(true);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className={`p-4 rounded-lg text-center transition-all ${
+                        initialized ? 'bg-green-100' : 'bg-gray-100'
+                    }`}>
+                        <div className="text-2xl mb-2">{initialized ? '✅' : '⏳'}</div>
+                        <div className="font-semibold">USART 初始化完成</div>
+                        <div className="text-sm">{baudrate} 8N1</div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                        {[9600, 19200, 115200].map(b => (
+                            <button
+                                key={b}
+                                onClick={() => setBaudrate(b)}
+                                className={`p-2 rounded text-xs ${
+                                    baudrate === b ? 'bg-blue-500 text-white' : 'bg-gray-200'
+                                }`}
+                            >
+                                {b >= 1000 ? `${b/1000}K` : b}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs font-mono">
+                            <div>PA9: TX (复用推挽)</div>
+                            <div>PA10: RX (浮空输入)</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // USART 发送可视化
+        const UsartTransmit = ({ step }) => {
+            const [txBuffer, setTxBuffer] = useState([]);
+            const [sending, setSending] = useState(false);
+
+            useEffect(() => {
+                const send = async () => {
+                    const char = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+                    setTxBuffer(prev => [...prev, char]);
+                    setSending(true);
+                    await sleep(500);
+                    setSending(false);
+                    await sleep(500);
+                    setTxBuffer(prev => prev.slice(1));
+                };
+                send();
+                const interval = setInterval(send, 1500);
+                return () => clearInterval(interval);
+            }, []);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        发送过程
+                    </div>
+                    <div className={`p-4 rounded-lg text-center ${
+                        sending ? 'bg-blue-100' : 'bg-gray-100'
+                    }`}>
+                        <div className="text-2xl">{sending ? '📤 发送中...' : '⏸️ 等待'}</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="text-xs mb-2">TX 缓冲区:</div>
+                        <div className="flex flex-wrap gap-1">
+                            {txBuffer.map((c, i) => (
+                                <div key={i} className="w-8 h-8 bg-blue-500 text-white rounded flex items-center justify-center font-mono text-sm">
+                                    {c}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // USART 接收可视化
+        const UsartReceive = ({ step }) => {
+            const [rxBuffer, setRxBuffer] = useState([]);
+            const [head, setHead] = useState(0);
+            const [tail, setTail] = useState(0);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    if (rxBuffer.length < 16) {
+                        const char = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+                        setRxBuffer(prev => [...prev, char]);
+                        setHead(prev => (prev + 1) % 32);
+                    }
+                }, 800);
+                return () => clearInterval(interval);
+            }, [rxBuffer]);
+
+            const readData = () => {
+                if (rxBuffer.length > 0) {
+                    setRxBuffer(prev => prev.slice(1));
+                    setTail(prev => (prev + 1) % 32);
+                }
+            };
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        环形缓冲区 (32 字节)
+                    </div>
+                    <div className="flex flex-wrap gap-1 justify-center">
+                        {Array(16).fill(0).map((_, i) => (
+                            <div
+                                key={i}
+                                className={`w-8 h-8 rounded flex items-center justify-center font-mono text-sm ${
+                                    i < rxBuffer.length ? 'bg-green-500 text-white' : 'bg-gray-200'
+                                }`}
+                            >
+                                {rxBuffer[i] || i}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="text-center text-xs">
+                        Head: {head}, Tail: {tail}, 数据：{rxBuffer.length} 字节
+                    </div>
+                    <button
+                        onClick={readData}
+                        className="w-full py-2 bg-blue-500 text-white rounded text-sm"
+                    >
+                        读取数据
+                    </button>
+                </div>
+            );
+        };
+
+        // USART 波特率可视化
+        const UsartBaudrate = ({ step }) => {
+            const [baudrates, setBaudrates] = useState([
+                { rate: 9600, brr: 0x01D5, error: 0.02 },
+                { rate: 19200, brr: 0x00EA, error: 0.03 },
+                { rate: 115200, brr: 0x0271, error: 0.01 },
+                { rate: 921600, brr: 0x0005, error: 1.5 }
+            ]);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        波特率配置表 (@72MHz)
+                    </div>
+                    {baudrates.map((item) => (
+                        <div
+                            key={item.rate}
+                            className="flex justify-between items-center p-3 bg-gray-50 rounded-lg"
+                        >
+                            <div>
+                                <div className="font-semibold">{item.rate >= 1000 ? `${item.rate/1000}K` : item.rate}</div>
+                                <div className="text-xs text-gray-500">误差：{item.error}%</div>
+                            </div>
+                            <div className="font-mono text-sm">
+                                BRR: 0x{item.brr.toString(16).padStart(4, '0').toUpperCase()}
+                            </div>
+                        </div>
+                    ))}
+                    <div className="text-xs text-gray-500">
+                        <div>• 误差应 {'<'} 2%</div>
+                        <div>• 高速率需考虑时钟精度</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // USART DMA 可视化
+        const UsartDma = ({ step }) => {
+            const [dmaProgress, setDmaProgress] = useState(0);
+            const [transferred, setTransferred] = useState(0);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setDmaProgress(prev => {
+                        if (prev >= 64) {
+                            setTransferred(0);
+                            return 0;
+                        }
+                        setTransferred(t => t + 1);
+                        return prev + 1;
+                    });
+                }, 100);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        DMA 自动发送
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="w-full bg-gray-200 rounded-full h-4 mb-2">
+                            <div
+                                className="bg-blue-500 h-4 rounded-full transition-all"
+                                style={{ width: `${(dmaProgress / 64) * 100}%` }}
+                            />
+                        </div>
+                        <div className="text-sm text-center">
+                            {dmaProgress} / 64 字节
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-center">
+                        <div className="bg-blue-50 p-3 rounded-lg">
+                            <div className="text-xs">DMA 通道</div>
+                            <div className="font-bold">DMA1 Ch4</div>
+                        </div>
+                        <div className="bg-green-50 p-3 rounded-lg">
+                            <div className="text-xs">已发送</div>
+                            <div className="font-bold">{transferred}</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // USART 流控制可视化
+        const UsartFlow = ({ step }) => {
+            const [rtsState, setRtsState] = useState(true);
+            const [ctsState, setCtsState] = useState(true);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setRtsState(Math.random() > 0.3);
+                    setCtsState(Math.random() > 0.3);
+                }, 2000);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        硬件流控制
+                    </div>
+                    <div className="space-y-3">
+                        <div className={`p-3 rounded-lg transition-all ${
+                            rtsState ? 'bg-green-100' : 'bg-red-100'
+                        }`}>
+                            <div className="flex justify-between items-center">
+                                <span className="font-semibold">RTS (请求发送)</span>
+                                <span>{rtsState ? '✅ 就绪' : '🚫 暂停'}</span>
+                            </div>
+                        </div>
+                        <div className={`p-3 rounded-lg transition-all ${
+                            ctsState ? 'bg-green-100' : 'bg-red-100'
+                        }`}>
+                            <div className="flex justify-between items-center">
+                                <span className="font-semibold">CTS (清除发送)</span>
+                                <span>{ctsState ? '✅ 允许' : '🚫 禁止'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        <div>• RTS: 接收方就绪指示</div>
+                        <div>• CTS: 发送方允许控制</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // USART 应用可视化
+        const UsartApps = ({ step }) => {
+            const [output, setOutput] = useState([]);
+            const [cmdInput, setCmdInput] = useState('');
+
+            useEffect(() => {
+                const messages = [
+                    'System initialized',
+                    'Temperature: 25.6°C',
+                    'Voltage: 3.3V',
+                    'Status: OK'
+                ];
+                const interval = setInterval(() => {
+                    const msg = messages[Math.floor(Math.random() * messages.length)];
+                    setOutput(prev => [...prev.slice(-9), `[DEBUG] ${msg}`]);
+                }, 1500);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="space-y-4">
+                    <div className="text-center text-sm font-semibold">
+                        串口调试输出
+                    </div>
+                    <div className="bg-gray-900 rounded-lg p-3 h-48 overflow-auto font-mono text-xs text-green-400">
+                        {output.map((line, i) => (
+                            <div key={i}>{line}</div>
+                        ))}
+                    </div>
+                    <div className="flex">
+                        <input
+                            type="text"
+                            value={cmdInput}
+                            onChange={(e) => setCmdInput(e.target.value)}
+                            placeholder="输入命令..."
+                            className="flex-1 border rounded-l-lg px-3 py-2 text-sm"
+                        />
+                        <button className="bg-blue-500 text-white px-4 py-2 rounded-r-lg text-sm">
+                            发送
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // 主 App 组件
+        const App = () => {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                const voices = window.speechSynthesis.getVoices();
+                const xiaoXiao = voices.find(v => v.name.includes('XiaoXiao') || v.name.includes('zh-CN'));
+                if (xiaoXiao) utterance.voice = xiaoXiao;
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            else { setIsPlaying(false); return prev; }
+                        });
+                    }, 800);
+                };
+                window.speechSynthesis.speak(utterance);
+            }, [isMuted]);
+
+            useEffect(() => {
+                if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                speak(STEPS[currentStep].explanation);
+                return () => { if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current); };
+            }, [currentStep, speak]);
+
+            useEffect(() => {
+                const handleKeydown = (e) => {
+                    if (e.code === 'Space') { e.preventDefault(); setIsPlaying(prev => !prev); }
+                    else if (e.code === 'ArrowRight' && currentStep < STEPS.length - 1) setCurrentStep(prev => prev + 1);
+                    else if (e.code === 'ArrowLeft' && currentStep > 0) setCurrentStep(prev => prev - 1);
+                };
+                window.addEventListener('keydown', handleKeydown);
+                return () => window.removeEventListener('keydown', handleKeydown);
+            }, [currentStep]);
+
+            const renderVisualization = () => {
+                switch (STEPS[currentStep].visualization) {
+                    case 'usart-basic': return <UsartBasic step={STEPS[currentStep]} />;
+                    case 'usart-init': return <UsartInit step={STEPS[currentStep]} />;
+                    case 'usart-transmit': return <UsartTransmit step={STEPS[currentStep]} />;
+                    case 'usart-receive': return <UsartReceive step={STEPS[currentStep]} />;
+                    case 'usart-baudrate': return <UsartBaudrate step={STEPS[currentStep]} />;
+                    case 'usart-dma': return <UsartDma step={STEPS[currentStep]} />;
+                    case 'usart-flow': return <UsartFlow step={STEPS[currentStep]} />;
+                    case 'usart-apps': return <UsartApps step={STEPS[currentStep]} />;
+                    default: return <div>可视化组件</div>;
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <h1 className="text-3xl font-bold text-center mb-6 bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                            STM32 USART 串口通信完整指南
+                        </h1>
+                        <div className="flex justify-center mb-6">
+                            <div className="flex space-x-2">
+                                {STEPS.map((_, idx) => (
+                                    <button key={idx} onClick={() => setCurrentStep(idx)}
+                                        className={`w-3 h-3 rounded-full transition-all ${
+                                            idx === currentStep ? 'bg-blue-600 scale-125' :
+                                            idx < currentStep ? 'bg-blue-400' : 'bg-gray-300'
+                                        }`} />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-blue-600 flex items-center">
+                                    <span className="mr-2">💻</span>{STEPS[currentStep].title}
+                                </h2>
+                                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-cyan-600 flex items-center">
+                                    <span className="mr-2">🎨</span>可视化演示
+                                </h2>
+                                <div className="h-96 overflow-auto">{renderVisualization()}</div>
+                            </div>
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <h2 className="text-xl font-bold mb-4 text-emerald-600 flex items-center">
+                                    <span className="mr-2">📖</span>说明
+                                </h2>
+                                <p className="text-gray-700 leading-relaxed">{STEPS[currentStep].explanation}</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-center mt-6 space-x-4">
+                            <button onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0 ? 'bg-gray-200 text-gray-400' : 'bg-blue-600 text-white hover:bg-blue-700'
+                                }`}>⏮ 上一步</button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isPlaying ? 'bg-yellow-500 text-white' : 'bg-green-500 text-white'
+                                }`}>{isPlaying ? '⏸ 暂停' : '▶ 播放'}</button>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    isMuted ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'
+                                }`}>{isMuted ? '🔇 取消静音' : '🔊 静音'}</button>
+                            <button onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1 ? 'bg-gray-200 text-gray-400' : 'bg-blue-600 text-white hover:bg-blue-700'
+                                }`}>下一步 ⏭</button>
+                        </div>
+                        <div className="text-center mt-4 text-sm text-gray-500">快捷键：空格 播放/暂停 | ← → 切换步骤</div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

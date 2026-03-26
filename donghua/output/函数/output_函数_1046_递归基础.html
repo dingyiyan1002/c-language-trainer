@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>递归基础 - 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#f43f5e 0%,#e11d48 100%);min-height:100vh}
+    .app-container{padding:20px;max-width:1400px;margin:0 auto}
+    .header{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .header h1{color:#881337;font-size:28px;font-weight:700;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:14px}
+    .main-grid{display:grid;grid-template-columns:380px 1fr 300px;gap:20px}
+    .panel{background:rgba(255,255,255,0.95);border-radius:16px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)}
+    .panel-title{color:#7c3aed;font-weight:700;font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+    .code-container{background:#1e293b;border-radius:12px;padding:16px;font-family:'Consolas','Monaco',monospace;font-size:13px;line-height:1.8;max-height:450px;overflow-y:auto}
+    .code-line{padding:2px 8px;border-radius:6px;transition:all 0.3s ease}
+    .code-line.active{background:rgba(255,255,0,0.2);box-shadow:0 0 10px rgba(255,255,0,0.3)}
+    .code-line.executed{opacity:1}
+    .code-line.pending{opacity:0.5}
+    .line-num{color:#64748b;margin-right:12px;user-select:none;width:24px;display:inline-block;text-align:right}
+    .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{padding:10px 20px;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.3s ease;display:flex;align-items:center;gap:8px;font-size:14px}
+    .btn-play{background:linear-gradient(135deg,#22c55e,#16a34a);color:white}
+    .btn-pause{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+    .btn-restart{background:linear-gradient(135deg,#f59e0b,#d97706);color:white}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+    .var-card{background:linear-gradient(135deg:#ffe4e6,#fecdd3);border-radius:12px;padding:16px;margin-bottom:12px;border:2px solid#fda4af;transition:all 0.3s ease}
+    .var-card.highlight{border-color:#f43f5e;box-shadow:0 0 20px rgba(244,63,94,0.4);transform:scale(1.02)}
+    .var-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .var-name{color:#881337;font-weight:700;font-size:15px}
+    .var-type{color:#64748b;font-size:12px;background:#fff;padding:4px 10px;border-radius:20px}
+    .recursion-tree{display:flex;flex-direction:column;align-items:center;gap:12px;margin:16px 0;padding:20px;background:#fff1f2;border-radius:12px}
+    .tree-node{padding:12px 20px;border-radius:12px;font-weight:700;font-size:13px;transition:all 0.4s ease;min-width:120px;text-align:center;border:3px solid transparent}
+    .tree-node.pending{background:#f1f5f9;color:#64748b}
+    .tree-node.active{background:linear-gradient(135deg:#f43f5e,#e11d48);color:white;transform:scale(1.05);box-shadow:0 8px 24px rgba(244,63,94,0.4)}
+    .tree-node.computing{background:linear-gradient(135deg:#fde68a,#fcd34d);color:#92400e;border-color:#f59e0b}
+    .tree-node.returning{background:linear-gradient(135deg:#d1fae5,#a7f3d0);color:#065f46;border-color:#22c55e}
+    .tree-node.complete{background:linear-gradient(135deg:#dbeafe,#bfdbfe);color:#1e40af;border-color:#3b82f6}
+    .tree-connector{width:2px;height:20px;background:#e5e7eb}
+    .tree-connector.active{background:linear-gradient(180deg,#f43f5e,#e11d48)}
+    .stack-container{display:flex;flex-direction:column;gap:8px;margin:16px 0}
+    .stack-frame{padding:12px;background:white;border-radius:8px;border-left:4px solid#e5e7eb;transition:all 0.4s ease}
+    .stack-frame.pending{opacity:0.5}
+    .stack-frame.active{border-left-color:#f43f5e;background:linear-gradient(135deg:#ffe4e6,#fecdd3)}
+    .stack-frame.returning{border-left-color:#22c55e;background:linear-gradient(135deg:#d1fae5,#a7f3d0)}
+    .stack-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+    .stack-function{font-size:12px;font-weight:700;color:#1e293b;font-family:'Consolas',monospace}
+    .stack-status{font-size:10px;padding:2px 6px;border-radius:4px;background:#e5e7eb}
+    .stack-status.active{background:#f43f5e;color:white}
+    .stack-status.returning{background:#22c55e;color:white}
+    .stack-params{font-size:11px;color:#64748b;font-family:'Consolas',monospace}
+    .factorial-display{background:#1e293b;border-radius:12px;padding:16px;margin:16px 0;text-align:center}
+    .factorial-label{color:#94a3b8;font-size:12px;margin-bottom:8px}
+    .factorial-expression{font-size:20px;font-weight:700;color:#f43f5e;font-family:'Consolas',monospace;margin-bottom:8px}
+    .factorial-result{font-size:32px;font-weight:700;color:#22d3ee;font-family:'Consolas',monospace}
+    .step-indicator{display:flex;justify-content:center;gap:8px;margin:16px 0}
+    .step-dot{width:10px;height:10px;border-radius:50%;background:#e5e7eb;transition:all 0.3s ease}
+    .step-dot.active{background:#f43f5e;transform:scale(1.2)}
+    .step-dot.done{background:#22c55e}
+    .terminal{background:#0f172a;border-radius:12px;padding:16px;font-family:'Consolas',monospace;font-size:12px;color:#22d3ee;min-height:80px}
+    .terminal-line{margin-bottom:4px}
+    .cursor{display:inline-block;width:8px;height:18px;background:#22d3ee;animation:blink 1s infinite;vertical-align:middle}
+    @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+    .explanation-card{background:linear-gradient(135deg:#fef3c7,#fde68a);border-radius:12px;padding:16px;margin-bottom:12px;border-left:4px solid#f59e0b}
+    .explanation-card.active{border-left-color:#22c55e;animation:slideIn 0.5s ease}
+    @keyframes slideIn{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+    .voice-status{display:flex;align-items:center;gap:8px;color:#647480;font-size:13px}
+    .voice-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;transition:all 0.3s ease}
+    .voice-dot.active{background:#22c55e;animation:pulse 0.6s infinite}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const{useState,useEffect,useCallback,useRef} = React;
+    const MAX_STEPS = 8;
+    const COLOR_MAP = {green:'#22c55e',red:'#ef4444',yellow:'#f59e0b',purple:'#8b5cf6',blue:'#3b82f6',pink:'#f43f5e'};
+    const LINE_MAP = {
+      1:{step:1,text:'#include <stdio.h>',color:'#7c3aed'},
+      2:{step:1,text:'#include <stdint.h>',color:'#7c3aed'},
+      3:{step:1,text:'',color:'#94a3b8'},
+      4:{step:1,text:'uint32_t factorial(uint32_t n) {',color:'#3b82f6'},
+      5:{step:2,text:'    if (n <= 1) return 1;',color:'#eab308'},
+      6:{step:3,text:'    return n * factorial(n - 1);',color:'#3b82f6'},
+      7:{step:3,text:'}',color:'#94a3b8'},
+      8:{step:4,text:'int main(void) {',color:'#3b82f6'},
+      9:{step:4,text:'    uint32_t result = factorial(5);',color:'#3b82f6'},
+      10:{step:5,text:'    printf("5! = %u\\n", result);',color:'#eab308'},
+      11:{step:6,text:'    return 0;',color:'#3b82f6'},
+      12:{step:6,text:'}',color:'#94a3b8'}
+    };
+    const VOICE_TEXT_MAP = {
+      1:'程序开始，定义 factorial 递归函数，计算 n 的阶乘',
+      2:'检查基准条件，如果 n 小于等于 1，返回 1，这是递归的终止条件',
+      3:'递归调用，返回 n 乘以 factorial(n-1)，不断深入直到基准条件',
+      4:'main 函数调用 factorial(5)，开始递归计算 5 的阶乘',
+      5:'递归展开：factorial(5) = 5 * factorial(4)，继续深入',
+      6:'递归返回：1*2*3*4*5 = 120，逐层返回结果',
+      7:'所有递归调用完成，result 接收到最终结果 120',
+      8:'打印 5! = 120，程序结束，递归是函数调用自身的编程技巧'
+    };
+    const I = {play:'M8 5v14l11-7z',pause:'M6 19h4V5H6v14zm8-14v14h4V5h-4z',restart:'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8z',speaker:'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z',code:'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',chip:'M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z',tree:'M12 2L8 6H4v4l4 4v6h4v-6l4-4V6h-4L12 2z'};
+    const Icon = ({path,size=20,color='currentColor'}) => (<svg width={size} height={size} viewBox="0 0 24 24" fill={color}><path d={path}/></svg>);
+    function App() {
+      const [step,setStep] = useState(1);
+      const [isPlaying,setIsPlaying] = useState(false);
+      const [activeLine,setActiveLine] = useState(1);
+      const [terminalLines,setTerminalLines] = useState([]);
+      const [callStack,setCallStack] = useState([{n:5,status:'calling'}]);
+      const [treeNodes,setTreeNodes] = useState([{n:5,status:'pending',depth:0}]);
+      const [currentResult,setCurrentResult] = useState(null);
+      const [finalResult,setFinalResult] = useState(null);
+      const [isVoicePlaying,setIsVoicePlaying] = useState(false);
+      const voiceEndTimerRef = useRef(null);
+      const [voiceRate,setVoiceRate] = useState(0.95);
+      const playVoice = useCallback(() => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        const text = VOICE_TEXT_MAP[step] || "";
+        if(!text) {
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 1500);
+          return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = voiceRate;
+        utterance.onend = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        utterance.onerror = () => {
+          setIsVoicePlaying(false);
+          voiceEndTimerRef.current = setTimeout(() => {
+            setStep(p => Math.min(MAX_STEPS, p + 1));
+          }, 800);
+        };
+        const voices = window.speechSynthesis.getVoices();
+        const voice = voices.find(v => v.name.includes('Xiaoxiao')) || voices.find(v => v.lang.startsWith('zh-CN')) || null;
+        if(voice) utterance.voice = voice;
+        window.speechSynthesis.speak(utterance);
+        setIsVoicePlaying(true);
+      }, [step, voiceRate, MAX_STEPS]);
+      useEffect(() => {
+        if(isPlaying && step < MAX_STEPS) {
+          playVoice();
+        }
+      }, [isPlaying, step, playVoice, MAX_STEPS]);
+      useEffect(() => {
+        let foundLine = 1;
+        for(let line = 1; line <= 12; line++) {
+          if(LINE_MAP[line] && LINE_MAP[line].step === step) {
+            foundLine = line;
+            break;
+          }
+        }
+        setActiveLine(foundLine);
+        if(step === 1) {
+          setCallStack([{n:5,status:'calling'}]);
+          setTreeNodes([{n:5,status:'pending',depth:0}]);
+          setCurrentResult(null);
+          setFinalResult(null);
+          setTerminalLines([]);
+        } else if(step === 2) {
+          setCallStack([{n:5,status:'calling'},{n:4,status:'calling'}]);
+          setTreeNodes([{n:5,status:'active',depth:0},{n:4,status:'pending',depth:1}]);
+        } else if(step === 3) {
+          setCallStack([{n:5,status:'calling'},{n:4,status:'calling'},{n:3,status:'calling'},{n:2,status:'calling'},{n:1,status:'calling'}]);
+          setTreeNodes([{n:5,status:'active',depth:0},{n:4,status:'active',depth:1},{n:3,status:'active',depth:2},{n:2,status:'active',depth:3},{n:1,status:'active',depth:4}]);
+        } else if(step === 4) {
+          setCallStack([{n:5,status:'calling'},{n:4,status:'calling'},{n:3,status:'calling'},{n:2,status:'calling'},{n:1,status:'returning',result:1}]);
+          setTreeNodes(prev => prev.map(node => node.n === 1 ? {...node,status:'returning',result:1} : node));
+          setCurrentResult(1);
+        } else if(step === 5) {
+          setCallStack([{n:5,status:'calling'},{n:4,status:'calling'},{n:3,status:'calling'},{n:2,status:'returning',result:2}]);
+          setTreeNodes(prev => prev.map(node => node.n === 2 ? {...node,status:'returning',result:2} : node));
+          setCurrentResult(2);
+        } else if(step === 6) {
+          setCallStack([{n:5,status:'returning',result:120}]);
+          setTreeNodes(prev => prev.map(node => [3,4].includes(node.n) ? {...node,status:'returning'} : node));
+          setCurrentResult(120);
+        } else if(step === 7) {
+          setFinalResult(120);
+          setCallStack([]);
+          setTreeNodes(prev => prev.map(node => ({...node,status:'complete'})));
+        } else if(step === 8) {
+          setTerminalLines(['5! = 120']);
+        }
+      }, [step]);
+      const renderCodeLine = (lineNum) => {
+        const lineInfo = LINE_MAP[lineNum];
+        const isActive = lineNum === activeLine;
+        const isExecuted = lineInfo && lineInfo.step <= step;
+        return (
+          <div key={lineNum} className={`code-line ${isActive ? 'active' : ''} ${isExecuted ? 'executed' : 'pending'}`} style={{background:isActive ? 'rgba(255,255,0,0.15)' : 'transparent'}}>
+            <span className="line-num">{String(lineNum).padStart(2,' ')}</span>
+            <span style={{color:lineInfo?.color || '#e2e8f0'}}>{lineInfo?.text || ''}</span>
+          </div>
+        );
+      };
+      const handleRestart = () => {
+        window.speechSynthesis.cancel();
+        if(voiceEndTimerRef.current) {
+          clearTimeout(voiceEndTimerRef.current);
+        }
+        setStep(1);
+        setActiveLine(1);
+        setCallStack([{n:5,status:'calling'}]);
+        setTreeNodes([{n:5,status:'pending',depth:0}]);
+        setCurrentResult(null);
+        setFinalResult(null);
+        setTerminalLines([]);
+        setIsPlaying(true);
+      };
+      return (
+        <div className="app-container">
+          <div className="header">
+            <h1>递归基础 - C 语言可视化</h1>
+            <p>函数调用自身 | 基准条件 | 递归展开</p>
+          </div>
+          <div className="controls" style={{marginBottom:20,background:'rgba(255,255,255,0.95)',padding:16,borderRadius:16}}>
+            <button className="btn btn-restart" onClick={handleRestart}>
+              <Icon path={I.restart} size={18} /> 重新开始
+            </button>
+            <button className="btn btn-play" onClick={() => setIsPlaying(true)} disabled={isPlaying || step >= MAX_STEPS}>
+              <Icon path={I.play} size={18} /> 播放
+            </button>
+            <button className="btn btn-pause" onClick={() => {setIsPlaying(false);window.speechSynthesis.cancel();}} disabled={!isPlaying}>
+              <Icon path={I.pause} size={18} /> 暂停
+            </button>
+            <div style={{background:COLOR_MAP.pink,color:'white',padding:'10px 20px',borderRadius:10,fontWeight:700}}>步骤：{step} / {MAX_STEPS}</div>
+            <div className="voice-status">
+              <span>语音:</span>
+              <div className={`voice-dot ${isVoicePlaying ? 'active' : ''}`}></div>
+              <span>{isVoicePlaying ? '播放中...' : '就绪'}</span>
+            </div>
+          </div>
+          <div className="main-grid">
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.code} size={22} />
+                recursion_factorial.c
+              </div>
+              <div className="code-container">
+                {[1,2,3,4,5,6,7,8,9,10,11,12].map(n => renderCodeLine(n))}
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Icon path={I.tree} size={22} />
+                递归调用树
+              </div>
+              <div className={`var-card ${step >= 1 ? 'highlight' : ''}`}>
+                <div className="var-header">
+                  <span className="var-name">factorial(5)</span>
+                  <span className="var-type">Recursion Tree</span>
+                </div>
+                <div className="recursion-tree">
+                  <div className={`tree-node ${treeNodes.find(n=>n.n===5)?.status || 'pending'}`}>
+                    factorial(5)
+                  </div>
+                  <div className={`tree-connector ${step >= 2 ? 'active' : ''}`}></div>
+                  <div className={`tree-node ${treeNodes.find(n=>n.n===4)?.status || 'pending'}`}>
+                    factorial(4)
+                  </div>
+                  <div className={`tree-connector ${step >= 3 ? 'active' : ''}`}></div>
+                  <div className={`tree-node ${treeNodes.find(n=>n.n===3)?.status || 'pending'}`}>
+                    factorial(3)
+                  </div>
+                  <div className={`tree-connector ${step >= 3 ? 'active' : ''}`}></div>
+                  <div className={`tree-node ${treeNodes.find(n=>n.n===2)?.status || 'pending'}`}>
+                    factorial(2)
+                  </div>
+                  <div className={`tree-connector ${step >= 3 ? 'active' : ''}`}></div>
+                  <div className={`tree-node ${treeNodes.find(n=>n.n===1)?.status || 'pending'}`}>
+                    factorial(1) = 1
+                  </div>
+                </div>
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>调用栈</div>
+                  <div className="stack-container">
+                    {callStack.map((frame, idx) => (
+                      <div key={idx} className={`stack-frame ${frame.status === 'returning' ? 'returning' : 'active'}`}>
+                        <div className="stack-header">
+                          <span className="stack-function">factorial({frame.n})</span>
+                          <span className={`stack-status ${frame.status}`}>{frame.status === 'returning' ? '↩️' : '📞'} {frame.status}</span>
+                        </div>
+                        <div className="stack-params">{frame.result ? `result: ${frame.result}` : 'computing...'}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="factorial-display">
+                  <div className="factorial-label">计算过程</div>
+                  <div className="factorial-expression">
+                    {step >= 3 ? '5 × 4 × 3 × 2 × 1' : step >= 1 ? `factorial(${5})` : '-'}
+                  </div>
+                  <div className="factorial-result">
+                    {finalResult || currentResult || '-'}
+                  </div>
+                </div>
+                <div className="step-indicator">
+                  {[1,2,3,4,5].map(n => (
+                    <div key={n} className={`step-dot ${step > n ? 'done' : step === n ? 'active' : ''}`}></div>
+                  ))}
+                </div>
+              </div>
+              {step >= 8 && (
+                <div style={{marginTop:20}}>
+                  <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>终端输出</div>
+                  <div className="terminal">
+                    {terminalLines.map((line, idx) => (
+                      <div key={idx} className="terminal-line">{line}</div>
+                    ))}
+                    <span className="cursor"></span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <span style={{fontSize:20}}>💡</span>
+                解释说明
+              </div>
+              <div className={`explanation-card ${step >= 1 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.pink}}>递归定义</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>函数调用自身来解决问题</p>
+              </div>
+              <div className={`explanation-card ${step >= 2 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.blue}}>基准条件</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>终止递归的条件，防止无限循环</p>
+              </div>
+              <div className={`explanation-card ${step >= 3 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.yellow}}>递归展开</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>不断深入直到基准条件</p>
+              </div>
+              <div className={`explanation-card ${step >= 6 ? 'active' : ''}`}>
+                <strong style={{color:COLOR_MAP.green}}>返回计算</strong>
+                <p style={{marginTop:8,color:'#78350f'}}>逐层返回并计算结果</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1209 - RTC 实时时钟完整指南 - 嵌入式 C 语言可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(6, 182, 212, 0.2); } 50% { background-color: rgba(6, 182, 212, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes danger { 0%, 100% { background-color: rgba(239, 68, 68, 0.3); } 50% { background-color: rgba(239, 68, 68, 0.6); } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes tick { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        @keyframes rotateSecond { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes dateChange { 0%, 100% { background-color: rgba(168, 85, 247, 0.3); } 50% { background-color: rgba(168, 85, 247, 0.6); } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .flow { animation: flow 2s infinite; }
+        .highlight { animation: highlight 2s infinite; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .countdown { animation: countdown 0.3s ease-out; }
+        .danger { animation: danger 1s infinite; }
+        .reset { animation: reset 1s linear; }
+        .tick { animation: tick 1s ease-in-out; }
+        .rotateSecond { animation: rotateSecond 60s linear infinite; }
+        .dateChange { animation: dateChange 2s infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // 颜色主题：青色/蓝色渐变 (RTC 时钟)
+        const COLOR_MAP = {
+            primary: '#06b6d4',
+            secondary: '#0ea5e9',
+            accent: '#22d3ee',
+            highlight: '#67e8f9',
+            danger: '#ef4444',
+            success: '#10b981'
+        };
+
+        const STEPS = [
+            {
+                title: "RTC 实时时钟基础",
+                code: `// RTC - Real-Time Clock
+// 实时时钟用于保持精确的日期和时间
+
+// STM32 RTC 特性:
+// - 32 位计数器或日历模式
+// - LSE(32.768kHz) 外部晶振
+// - LSI(内部低速时钟) 备用
+// - HSE 分频备用
+// - 电池备份域 (VBAT 引脚)
+// - 断电后继续运行
+
+// RTC 时钟源选择:
+// 1. LSE - 外部 32.768kHz 晶振 (最精确)
+// 2. LSI - 内部低速时钟 (~32kHz)
+// 3. HSE/32 - 外部高速时钟分频
+
+// 应用领域:
+// - 数据记录时间戳
+// - 定时唤醒系统
+// - 闹钟/日程提醒
+// - 看门狗超时基准`,
+                description: "RTC 是独立的定时器，用于保持精确的日期和时间。STM32 的 RTC 模块支持三种时钟源：LSE(外部 32.768kHz 晶振，精度最高)、LSI(内部低速时钟，精度较低)、HSE 分频 (外部高速时钟分频)。RTC 由 VBAT 引脚供电，即使主电源断电也能继续运行。RTC 可用于时间戳、定时唤醒、闹钟等应用。",
+                highlight: "RTC 需要 VBAT 电池备份，否则断电后时间会丢失"
+            },
+            {
+                title: "RTC 寄存器配置 (日历模式)",
+                code: `// RTC 关键寄存器:
+// RTC_TR    - 时间寄存器 (BCD 码)
+// RTC_DR    - 日期寄存器 (BCD 码)
+// RTC_CR    - 控制寄存器
+// RTC_PRER  - 预分频寄存器
+// RTC_WUTR  - 唤醒定时器寄存器
+// RTC_ALRMAR - 闹钟 A 寄存器
+
+// RTC 初始化 (日历模式)
+void RTC_Init(void) {
+    // 1. 启用备份域时钟
+    RCC->BDCR |= RCC_BDCR_BDRST;
+    RCC->BDCR &= ~RCC_BDCR_BDRST;
+
+    // 2. 选择 LSE 时钟源
+    RCC->BDCR |= RCC_BDCR_LSEON;
+    while(!(RCC->BDCR & RCC_BDCR_LSERDY));
+    RCC->BDCR |= RCC_BDCR_RTCSEL_LSE;
+    RCC->BDCR |= RCC_BDCR_RTCEN;
+
+    // 3. 解锁 RTC 写保护
+    RTC->WPR = 0xCA;
+    RTC->WPR = 0x53;
+
+    // 4. 进入初始化模式
+    RTC->ISR |= RTC_ISR_INIT;
+    while(!(RTC->ISR & RTC_ISR_INITF));
+
+    // 5. 配置预分频 (LSE=32.768kHz, RTC=1Hz)
+    RTC->PRER = (77 << 16) | (255 << 0);  // 32768/(78×256)=1Hz
+}`,
+                description: "RTC 配置步骤：启用备份域时钟→选择 LSE 时钟源→解锁写保护 (写入 0xCA→0x53)→进入初始化模式→配置预分频器。预分频器将 32.768kHz 分频为 1Hz 的 RTC 时钟。STM32F4/F7 使用两级分频 (异步 + 同步)，STM32F1 只有一级分频。配置完成后需要退出初始化模式。",
+                highlight: "RTC 寄存器有写保护，必须先写 0xCA→0x53 解锁"
+            },
+            {
+                title: "设置日期和时间",
+                code: `// BCD 码转换宏
+#define RTC_ByteToBcd2(Value) (((Value) / 10) << 4 | ((Value) % 10))
+#define RTC_Bcd2ToByte(Value) (((Value) >> 4) * 10 + ((Value) & 0x0F))
+
+// 设置日期和时间
+void RTC_SetDateTime(uint16_t year, uint8_t month, uint8_t day,
+                     uint8_t hour, uint8_t minute, uint8_t second) {
+    // 进入初始化模式
+    RTC->ISR |= RTC_ISR_INIT;
+    while(!(RTC->ISR & RTC_ISR_INITF));
+
+    // 设置时间 (BCD 格式)
+    RTC->TR = RTC_ByteToBcd2(second) |
+              (RTC_ByteToBcd2(minute) << 8) |
+              (RTC_ByteToBcd2(hour) << 16);
+
+    // 设置日期 (BCD 格式)
+    RTC->DR = RTC_ByteToBcd2(day) |
+              (RTC_ByteToBcd2(month) << 8) |
+              ((year - 2000) << 16);  // 年份偏移
+
+    // 退出初始化模式
+    RTC->ISR &= ~RTC_ISR_INIT;
+
+    // 等待同步
+    while(!(RTC->ISR & RTC_ISR_RSF));
+}
+
+// 使用示例：设置为 2024 年 1 月 15 日 12:30:00
+RTC_SetDateTime(2024, 1, 15, 12, 30, 0);`,
+                description: "RTC 使用 BCD 码 (二 - 十进制编码) 存储日期时间，每个字节的高 4 位表示十位，低 4 位表示个位。设置时间前需要进入初始化模式，设置完成后退出并等待同步。年份通常存储相对于 2000 的偏移值 (0-99 表示 2000-2099 年)。BCD 转换宏用于十进制和 BCD 码之间的转换。",
+                highlight: "RTC 使用 BCD 码存储，不是普通二进制，必须转换"
+            },
+            {
+                title: "读取日期和时间",
+                code: `// 读取日期和时间
+typedef struct {
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
+    uint8_t weekday;
+} RTC_DateTime;
+
+void RTC_GetDateTime(RTC_DateTime *dt) {
+    // 等待同步
+    while(!(RTC->ISR & RTC_ISR_RSF));
+
+    // 读取时间
+    uint32_t tr = RTC->TR;
+    dt->second = RTC_Bcd2ToByte(tr & 0x7F);
+    dt->minute = RTC_Bcd2ToByte((tr >> 8) & 0x7F);
+    dt->hour = RTC_Bcd2ToByte((tr >> 16) & 0x3F);
+
+    // 读取日期
+    uint32_t dr = RTC->DR;
+    dt->day = RTC_Bcd2ToByte(dr & 0xFF);
+    dt->month = RTC_Bcd2ToByte((dr >> 8) & 0x1F);
+    dt->year = RTC_Bcd2ToByte((dr >> 16) & 0xFF) + 2000;
+    dt->weekday = (dr >> 13) & 0x07;
+}
+
+// 格式化为字符串
+void RTC_FormatDateTime(char *buf, RTC_DateTime *dt) {
+    sprintf(buf, "%04d-%02d-%02d %02d:%02d:%02d",
+            dt->year, dt->month, dt->day,
+            dt->hour, dt->minute, dt->second);
+}
+// 输出：2024-01-15 12:30:00`,
+                description: "读取 RTC 前先等待 RSF 标志位置位 (寄存器同步)。读取 TR 和 DR 寄存器后，将 BCD 码转换为十进制格式。weekday 字段表示星期几 (1= 星期一，7= 星期日)。RTC_FormatDateTime 函数将时间格式化为字符串，便于显示或日志记录。读取操作不需要进入初始化模式。",
+                highlight: "读取前必须等待 RSF 标志，否则可能读到不一致的数据"
+            },
+            {
+                title: "RTC 闹钟功能",
+                code: `// 配置闹钟 A
+void RTC_SetAlarmA(uint8_t hour, uint8_t minute, uint8_t second) {
+    // 禁用闹钟
+    RTC->CR &= ~RTC_CR_ALRAE;
+    while(RTC->CR & RTC_CR_ALRAE);
+
+    // 清除闹钟标志
+    RTC->ISR &= ~RTC_ISR_ALRAF;
+
+    // 设置闹钟时间 (掩码模式)
+    RTC->ALRMAR = RTC_ByteToBcd2(second) |
+                  (RTC_ByteToBcd2(minute) << 8) |
+                  (RTC_ByteToBcd2(hour) << 16) |
+                  (0 << 24);  // 日期匹配
+
+    // 配置：匹配所有字段 (精确时间)
+    RTC->ALRMAR &= ~(RTC_ALRMAR_MSK4 | RTC_ALRMAR_MSK3 |
+                     RTC_ALRMAR_MSK2 | RTC_ALRMAR_MSK1);
+
+    // 启用闹钟
+    RTC->CR |= RTC_CR_ALRAE;
+
+    // 启用闹钟中断
+    RTC->CR |= RTC_CR_ALRAIE;
+}
+
+// 闹钟中断服务程序
+void RTC_Alarm_IRQHandler(void) {
+    if(RTC->ISR & RTC_ISR_ALRAF) {
+        RTC->ISR &= ~RTC_ISR_ALRAF;  // 清除标志
+        // 执行闹钟操作：唤醒系统、触发事件等
+    }
+}`,
+                description: "RTC 闹钟用于在指定时间触发事件。闹钟 A 可以配置为匹配秒、分、时、日期中的任意组合。掩码位 (MSKx) 为 1 表示忽略该字段，为 0 表示必须匹配。闹钟触发时设置 ALRAF 标志并可触发中断。闹钟可用于定时唤醒、日程提醒、周期性任务等应用。",
+                highlight: "闹钟中断必须清除 ALRAF 标志，否则会持续触发"
+            },
+            {
+                title: "RTC 唤醒定时器",
+                code: `// 唤醒定时器 (Wake-up Timer)
+// 用于低功耗模式下定时唤醒
+
+void RTC_WakeupInit(uint16_t timeout) {
+    // 禁用唤醒定时器
+    RTC->CR &= ~RTC_CR_WUTE;
+    while(RTC->CR & RTC_CR_WUTE);
+
+    // 选择时钟源：RTC/16 (2048Hz)
+    RTC->CR &= ~RTC_CR_WUCKSEL;
+    RTC->CR |= RTC_CR_WUCKSEL_2;  // RTCCLK/16
+
+    // 设置超时值
+    RTC->WUTR = timeout;  // 唤醒时间 = timeout / 2048 秒
+
+    // 清除标志
+    RTC->ISR &= ~RTC_ISR_WUTF;
+
+    // 启用唤醒定时器和中断
+    RTC->CR |= RTC_CR_WUTE;
+    RTC->CR |= RTC_CR_WUTIE;
+}
+
+// 唤醒中断服务程序
+void RTC_WKUP_IRQHandler(void) {
+    if(RTC->ISR & RTC_ISR_WUTF) {
+        RTC->ISR &= ~RTC_ISR_WUTF;  // 清除标志
+        // 系统唤醒后执行操作
+        // 重新配置唤醒定时器 (如果需要周期性唤醒)
+    }
+}
+
+// 使用示例：每 1 秒唤醒一次
+RTC_WakeupInit(2048);  // 2048/2048 = 1 秒`,
+                description: "唤醒定时器用于低功耗应用中周期性唤醒系统。可选择 RTCCLK、RTCCLK/2、RTCCLK/4、RTCCLK/8、RTCCLK/16 作为时钟源。设置 WUTR 寄存器决定超时时间。唤醒定时器在 Stop 和 Standby 模式下仍然工作，是低功耗应用的理想选择。超时时间 = WUTR / 时钟源频率。",
+                highlight: "唤醒定时器可在 Stop/Standby 模式下工作，适合低功耗应用"
+            },
+            {
+                title: "RTC 备份寄存器",
+                code: `// RTC 备份寄存器 (Backup Registers)
+// 位于备份域，断电后数据不丢失 (VBAT 供电)
+// STM32F4: 20 个 32 位寄存器 (BKUPR0-19)
+
+// 写入备份寄存器
+void RTC_WriteBackup(uint8_t reg, uint32_t value) {
+    // 解锁备份域写保护
+    PWR->CR |= PWR_CR_DBP;  // 允许访问备份域
+
+    // 写入数据
+    RTC->BKUPR[reg] = value;
+
+    // 锁定备份域
+    PWR->CR &= ~PWR_CR_DBP;
+}
+
+// 读取备份寄存器
+uint32_t RTC_ReadBackup(uint8_t reg) {
+    return RTC->BKUPR[reg];
+}
+
+// 应用示例：存储启动计数
+void UpdateBootCount(void) {
+    uint32_t count = RTC_ReadBackup(0);
+    RTC_WriteBackup(0, count + 1);
+}
+
+// 存储 RTC 校准值
+void SaveCalibration(int32_t calib) {
+    RTC_WriteBackup(1, *(uint32_t*)&calib);
+}
+
+// 注意：备份寄存器内容在 VBAT 断电后丢失`,
+                description: "RTC 备份寄存器位于备份域，由 VBAT 供电，可在主电源断电后保持数据。用于存储配置参数、校准值、启动计数等需要掉电保存的小数据。访问备份寄存器前需要先解锁备份域 (设置 PWR_CR_DBP 位)。备份寄存器容量有限 (通常 20-80 字节)，不适合存储大量数据。",
+                highlight: "备份寄存器需要 VBAT 电池，否则断电后数据丢失"
+            },
+            {
+                title: "RTC 校准与精度调整",
+                code: `// RTC 校准 - 补偿晶振误差
+
+// 粗校准 (Coarse Calibration)
+void RTC_CoarseCalib(int8_t ppm) {
+    // ppm: 需要补偿的 ppm 值 (-511~+511)
+    RTC->CALIBR = (ppm < 0) ? (-ppm) | (1 << 7) : ppm;
+}
+
+// 精细校准 (Fine Calibration, STM32F4+)
+void RTC_FineCalib(int16_t ppm) {
+    // 启用精细校准模式
+    RTC->ISR |= RTC_ISR_RECALPF;
+    while(RTC->ISR & RTC_ISR_RECALPF);
+
+    // 设置校准值 (每个周期增减 0.954ppm)
+    RTC->CALR = (ppm & 0x1FF);
+
+    // 校准周期：32 秒
+}
+
+// 测量 LSE 频率 (使用定时器捕获)
+uint32_t MeasureLSE(void) {
+    // 使用 TIM 捕获 LSE 输出
+    // 计算实际频率
+    return TIM_GetCaptureValue();
+}
+
+// 自动校准流程
+void RTC_AutoCalib(void) {
+    uint32_t freq = MeasureLSE();
+    int32_t error = freq - 32768;  // 计算误差
+    int16_t ppm = (error * 1000000) / 32768;
+    RTC_FineCalib(ppm);
+}
+
+// 典型精度:
+// LSE 晶振：±20ppm (约±1.7 秒/天)
+// 校准后：±1ppm (约±0.08 秒/天)`,
+                description: "RTC 精度取决于时钟源。LSE 晶振典型误差±20ppm(每天误差约 1.7 秒)。校准通过增减 RTC 计数来补偿误差。粗校准范围大但精度低，精细校准精度高 (0.954ppm/步)。自动校准流程：测量实际频率→计算误差→应用校准值。校准后精度可达±1ppm(每天误差约 0.08 秒)。",
+                highlight: "未校准的 RTC 每天可能误差数秒，校准后可达 ppm 级精度"
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [showCode, setShowCode] = useState(true);
+            const [currentTime, setCurrentTime] = useState({ h: 12, m: 30, s: 0 });
+            const voiceEndTimerRef = useRef(null);
+
+            // 模拟时间走动
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    if (isPlaying) {
+                        setCurrentTime(prev => {
+                            let { h, m, s } = prev;
+                            s++;
+                            if (s >= 60) { s = 0; m++; }
+                            if (m >= 60) { m = 0; h++; }
+                            if (h >= 24) { h = 0; }
+                            return { h, m, s };
+                        });
+                    }
+                }, 1000);
+                return () => clearInterval(interval);
+            }, [isPlaying]);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v =>
+                        v.lang === 'zh-CN' ||
+                        v.lang === 'zh-CN-XiaoxiaoNeural' ||
+                        v.lang.includes('Chinese')
+                    );
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.description + "。" + step.highlight);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep]);
+
+            // RTC 时钟可视化
+            const RTCClock = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-cyan-400 mb-3">RTC 时钟显示</h3>
+
+                        {/* 模拟时钟 */}
+                        <div className="relative w-32 h-32 mx-auto mb-4">
+                            <div className="absolute inset-0 rounded-full border-4 border-cyan-500"></div>
+                            {/* 刻度 */}
+                            {[...Array(12)].map((_, i) => (
+                                <div key={i}
+                                    className="absolute w-0.5 h-2 bg-cyan-500"
+                                    style={{
+                                        left: '50%',
+                                        top: '50%',
+                                        transform: `rotate(${i * 30}deg) translateY(-58px)`
+                                    }}
+                                ></div>
+                            ))}
+                            {/* 时针 */}
+                            <div className="absolute w-1 h-8 bg-white origin-bottom"
+                                style={{
+                                    left: '50%',
+                                    top: '50%',
+                                    transform: `rotate(${currentTime.h * 30 + currentTime.m / 2}deg) translateY(-100%)`
+                                }}
+                            ></div>
+                            {/* 分针 */}
+                            <div className="absolute w-0.5 h-12 bg-gray-300 origin-bottom"
+                                style={{
+                                    left: '50%',
+                                    top: '50%',
+                                    transform: `rotate(${currentTime.m * 6}deg) translateY(-100%)`
+                                }}
+                            ></div>
+                            {/* 秒针 */}
+                            <div className="absolute w-0.5 h-14 bg-red-500 origin-bottom rotateSecond"
+                                style={{ left: '50%', top: '50%' }}
+                            ></div>
+                            {/* 中心点 */}
+                            <div className="absolute w-2 h-2 bg-cyan-500 rounded-full"
+                                style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
+                            ></div>
+                        </div>
+
+                        {/* 数字时间 */}
+                        <div className="text-center">
+                            <div className="text-2xl font-mono text-cyan-400">
+                                {String(currentTime.h).padStart(2, '0')}:
+                                {String(currentTime.m).padStart(2, '0')}:
+                                <span className={isPlaying ? 'blink' : ''}>
+                                    {String(currentTime.s).padStart(2, '0')}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // 日期显示
+            const DateDisplay = () => {
+                const date = { year: 2024, month: 1, day: 15, weekday: '一' };
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-blue-400 mb-3">日期显示</h3>
+                        <div className={`p-3 rounded text-center ${currentStep >= 2 ? 'dateChange' : ''}`}>
+                            <div className="text-3xl font-bold text-white mb-1">
+                                {date.year}-{String(date.month).padStart(2, '0')}-{String(date.day).padStart(2, '0')}
+                            </div>
+                            <div className="text-gray-400">星期{date.weekday}</div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // 闹钟设置可视化
+            const AlarmVisual = () => {
+                const alarm = { h: 8, m: 0, s: 0 };
+                const isAlarmSet = currentStep >= 4;
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-3">闹钟 A 设置</h3>
+                        <div className={`p-3 rounded text-center border-2 ${
+                            isAlarmSet ? 'border-purple-500 bg-purple-900/30' : 'border-gray-600'
+                        }`}>
+                            <div className="text-xl font-mono text-purple-300">
+                                {String(alarm.h).padStart(2, '0')}:
+                                {String(alarm.m).padStart(2, '0')}:
+                                {String(alarm.s).padStart(2, '0')}
+                            </div>
+                            <div className="text-xs text-gray-400 mt-1">
+                                {isAlarmSet ? '✓ 已启用' : '○ 未设置'}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // 备份寄存器可视化
+            const BackupRegisters = () => {
+                const registers = [
+                    { reg: 0, name: '启动计数', value: 42 },
+                    { reg: 1, name: '校准值', value: '-15 ppm' },
+                    { reg: 2, name: '用户数据', value: '0x12345678' },
+                    { reg: 3, name: '配置标志', value: '0x00000001' }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-3">备份寄存器</h3>
+                        <div className="space-y-1">
+                            {registers.map((r) => (
+                                <div key={r.reg} className="flex justify-between text-xs p-1 bg-gray-700 rounded">
+                                    <span className="text-gray-400">BKP{r.reg}</span>
+                                    <span>{r.name}</span>
+                                    <span className="text-green-400 font-mono">{r.value}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-500">
+                            ⚠️ VBAT 断电后数据丢失
+                        </div>
+                    </div>
+                );
+            };
+
+            // 精度对比
+            const AccuracyComparison = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-orange-400 mb-3">RTC 精度对比</h3>
+                        <div className="space-y-3">
+                            <div>
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span>未校准 LSE</span>
+                                    <span className="text-yellow-400">±20ppm</span>
+                                </div>
+                                <div className="text-xs text-gray-400">≈ ±1.7 秒/天</div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span>粗校准后</span>
+                                    <span className="text-blue-400">±5ppm</span>
+                                </div>
+                                <div className="text-xs text-gray-400">≈ ±0.4 秒/天</div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span>精细校准后</span>
+                                    <span className="text-green-400">±1ppm</span>
+                                </div>
+                                <div className="text-xs text-gray-400">≈ ±0.08 秒/天</div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    {/* 头部 */}
+                    <div className="max-w-7xl mx-auto mb-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-cyan-400">
+                                1209 - RTC 实时时钟完整指南
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">
+                                    {isPlaying ? '暂停' : '播放'}
+                                </button>
+                                <button onClick={() => setShowCode(!showCode)} className="px-3 py-1 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                    {showCode ? '隐藏代码' : '显示代码'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div className="flex gap-1 mb-4">
+                            {STEPS.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentStep(i)}
+                                    className={`flex-1 h-2 rounded transition-all ${
+                                        i === currentStep ? 'bg-cyan-500 scale-110' :
+                                        i < currentStep ? 'bg-cyan-700' : 'bg-gray-600'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 主内容区 - 三列布局 */}
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* 左列：代码 */}
+                        {showCode && (
+                            <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                                <h2 className="text-sm font-bold text-cyan-400 mb-2">
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap bg-gray-900 p-3 rounded">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        )}
+
+                        {/* 中列：可视化动画 */}
+                        <div className={`${showCode ? 'col-span-1' : 'col-span-2'} space-y-4`}>
+                            <RTCClock />
+                            <div className="grid grid-cols-2 gap-4">
+                                <DateDisplay />
+                                {currentStep >= 4 ? <AlarmVisual /> : <BackupRegisters />}
+                            </div>
+                        </div>
+
+                        {/* 右列：说明 */}
+                        <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                            <h3 className="text-sm font-bold text-blue-400 mb-2">说明</h3>
+                            <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                                {STEPS[currentStep].description}
+                            </p>
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2">
+                                <p className="text-xs text-yellow-300">
+                                    <span className="font-bold">💡 重点:</span> {STEPS[currentStep].highlight}
+                                </p>
+                            </div>
+
+                            {/* 导航按钮 */}
+                            <div className="flex gap-2 mt-4">
+                                <button
+                                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                                    disabled={currentStep === 0}
+                                    className="flex-1 py-2 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 text-xs"
+                                >
+                                    ← 上一步
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+                                    disabled={currentStep === STEPS.length - 1}
+                                    className="flex-1 py-2 bg-cyan-600 rounded hover:bg-cyan-500 disabled:opacity-50 text-xs"
+                                >
+                                    下一步 →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部摘要 */}
+                    <div className="max-w-7xl mx-auto mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-cyan-400 mb-2">RTC 实时时钟核心要点</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-cyan-400 font-bold">VBAT 备份</span>
+                                <p className="text-gray-400 mt-1">断电后继续运行</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-blue-400 font-bold">BCD 格式</span>
+                                <p className="text-gray-400 mt-1">时间日期用 BCD 码</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-purple-400 font-bold">闹钟唤醒</span>
+                                <p className="text-gray-400 mt-1">定时触发事件</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-green-400 font-bold">校准补偿</span>
+                                <p className="text-gray-400 mt-1">ppm 级精度调整</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

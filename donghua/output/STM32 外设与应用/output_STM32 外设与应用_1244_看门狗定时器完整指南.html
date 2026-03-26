@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 看门狗定时器完整指南 - IWDG/WWDG Watchdog</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes countdown { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        @keyframes timeout { 0%, 100% { background-color: #ef4444; } 50% { background-color: #fca5a5; } }
+        @keyframes kick { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+        .countdown-anim { animation: countdown 1s ease-in-out infinite; }
+        .timeout-anim { animation: timeout 0.5s ease-in-out infinite; }
+        .kick-anim { animation: kick 0.3s ease-out; }
+        .active-step { background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#f97316', primaryLight: '#fb923c', primaryDark: '#ea580c',
+            secondary: '#ef4444', success: '#22c55e', warning: '#f59e0b',
+            iwdg: '#f97316', wwdg: '#8b5cf6', reset: '#ef4444', kick: '#22c55e',
+            gradient: 'from-orange-500 via-orange-600 to-red-500'
+        };
+
+        const STEPS = [
+            {
+                title: '看门狗基础',
+                voice: '看门狗是独立定时器，用于检测程序跑飞。STM32 有两个看门狗：独立看门狗 IWDG 由 LSI 驱动，窗口看门狗 WWDG 由 APB1 驱动。超时未喂狗则产生系统复位。',
+                highlights: ['看门狗', 'IWDG', 'WWDG', '超时复位', '程序跑飞']
+            },
+            {
+                title: 'IWDG 原理',
+                voice: '独立看门狗使用内部 LSI 时钟，频率约 40 千赫兹，独立于主时钟。即使主时钟故障，IWDG 仍能工作。配置预分频器和重装载值设置超时时间。',
+                highlights: ['LSI 时钟', '40kHz', '独立运行', '预分频', '重装载']
+            },
+            {
+                title: 'WWDG 原理',
+                voice: '窗口看门狗由 APB1 时钟驱动，有早期唤醒中断。必须在窗口范围内喂狗，过早或过晚都会复位。适合检测程序执行时序异常。',
+                highlights: ['APB1 时钟', '窗口范围', '过早复位', '过晚复位', '早期唤醒']
+            },
+            {
+                title: 'IWDG 配置',
+                voice: 'IWDG 配置三步：写入密钥解锁，配置预分频和重装载值，启动看门狗。预分频 1 到 256 分频，重装载值 12 位 0 到 4095。',
+                highlights: ['密钥解锁', '预分频', '重装载值', '启动', '4095']
+            },
+            {
+                title: 'WWDG 配置',
+                voice: 'WWDG 配置窗口值、计数器值、预分频。计数器从最大值递减，必须在窗口值以下、最小值以上喂狗。超时时间为 T 乘以 4096 再乘以 2 的预分频次方。',
+                highlights: ['窗口值', '计数器', '预分频', '喂狗窗口', '超时公式']
+            },
+            {
+                title: '喂狗操作',
+                voice: '喂狗即重置计数器值。IWDG 写入 0xAAAA 重载计数器。WWDG 写入新的计数器值。必须在超时前喂狗，否则系统复位。',
+                highlights: ['重载计数', '0xAAAA', '窗口内喂狗', '超时前', '系统复位']
+            },
+            {
+                title: '调试模式',
+                voice: '调试时看门狗会导致问题。IWDG 可配置DBG 模式暂停计数。WWDG 可配置在单步调试时冻结。避免调试时频繁复位。',
+                highlights: ['DBG 模式', '暂停计数', '冻结', '单步调试', '避免复位']
+            },
+            {
+                title: '应用实例',
+                voice: '实际应用：主循环喂狗检测死机，关键任务独立喂狗检测任务卡死，通信超时检测，电机堵转保护。合理设置超时时间避免误触发。',
+                highlights: ['主循环', '任务检测', '通信超时', '堵转保护', '超时设置']
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [showIwdg, setShowIwdg] = React.useState(true);
+            const [iwdgCounter, setIwdgCounter] = React.useState(255);
+            const [iwdgPrescaler, setIwdgPrescaler] = React.useState(4);
+            const [iwdgRunning, setIwdgRunning] = React.useState(false);
+            const [iwdgTimeout, setIwdgTimeout] = React.useState(false);
+            const [wwdgCounter, setWwdgCounter] = React.useState(63);
+            const [wwdgWindow, setWwdgWindow] = React.useState(63);
+            const [wwdgRunning, setWwdgRunning] = React.useState(false);
+            const [wwdgTimeout, setWwdgTimeout] = React.useState(false);
+            const [wwdgEarlyKick, setWwdgEarlyKick] = React.useState(false);
+            const [kickAnim, setKickAnim] = React.useState(false);
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                const utterance = new SpeechSynthesisUtterance(STEPS[currentStep].voice);
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang.includes('zh-CN') && v.name.includes('Xiaoxiao'))
+                    || voices.find(v => v.lang.includes('zh-CN'))
+                    || voices.find(v => v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                if (isPlaying) speechSynthesis.speak(utterance);
+
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying]);
+
+            // IWDG 计数器递减
+            React.useEffect(() => {
+                if (!iwdgRunning) return;
+                const interval = setInterval(() => {
+                    setIwdgCounter(prev => {
+                        if (prev <= 0) {
+                            setIwdgTimeout(true);
+                            setIwdgRunning(false);
+                            return 0;
+                        }
+                        return prev - 1;
+                    });
+                }, 100 * iwdgPrescaler);
+                return () => clearInterval(interval);
+            }, [iwdgRunning, iwdgPrescaler]);
+
+            // WWDG 计数器递减
+            React.useEffect(() => {
+                if (!wwdgRunning) return;
+                const interval = setInterval(() => {
+                    setWwdgCounter(prev => {
+                        if (prev <= 0) {
+                            setWwdgTimeout(true);
+                            setWwdgRunning(false);
+                            return 0;
+                        }
+                        return prev - 1;
+                    });
+                }, 100);
+                return () => clearInterval(interval);
+            }, [wwdgRunning]);
+
+            const handlePlay = () => setIsPlaying(true);
+            const handlePause = () => {
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+            const handleRestart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+            };
+            const handleStepClick = (index) => {
+                setCurrentStep(index);
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+
+            const kickIwdg = () => {
+                setIwdgCounter(255);
+                setIwdgTimeout(false);
+                setKickAnim(true);
+                setTimeout(() => setKickAnim(false), 300);
+            };
+
+            const kickWwdg = () => {
+                if (wwdgCounter > wwdgWindow) {
+                    setWwdgEarlyKick(true);
+                    setTimeout(() => setWwdgEarlyKick(false), 500);
+                    return;
+                }
+                setWwdgCounter(63);
+                setWwdgTimeout(false);
+                setKickAnim(true);
+                setTimeout(() => setKickAnim(false), 300);
+            };
+
+            const startIwdg = () => {
+                setIwdgRunning(true);
+                setIwdgTimeout(false);
+            };
+
+            const startWwdg = () => {
+                setWwdgRunning(true);
+                setWwdgTimeout(false);
+            };
+
+            const calculateIwdgTimeout = () => {
+                const lsiFreq = 40000;
+                const timeout = (iwdgPrescaler * (iwdgCounter + 1)) / lsiFreq;
+                return timeout.toFixed(3);
+            };
+
+            const renderContent = () => {
+                switch (currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-orange-400">STM32 看门狗规格</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">独立看门狗</div>
+                                            <div className="text-2xl font-bold text-orange-400">IWDG</div>
+                                            <div className="text-xs text-gray-400">LSI 时钟 40kHz</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">窗口看门狗</div>
+                                            <div className="text-2xl font-bold text-purple-400">WWDG</div>
+                                            <div className="text-xs text-gray-400">APB1 时钟</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">超时复位</div>
+                                            <div className="text-2xl font-bold text-red-400">系统复位</div>
+                                            <div className="text-xs text-gray-400">检测跑飞</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">喂狗操作</div>
+                                            <div className="text-2xl font-bold text-green-400">重载计数</div>
+                                            <div className="text-xs text-gray-400">防止超时</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-orange-900 to-purple-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">看门狗主要功能:</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 检测程序跑飞或死锁</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 自动复位恢复系统</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 独立时钟源 (IWDG)</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 窗口喂狗检测 (WWDG)</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 早期唤醒中断</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-orange-400">IWDG 独立看门狗</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="flex items-center justify-center gap-4">
+                                            <div className="bg-orange-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">LSI</div>
+                                                <div className="font-bold text-orange-400">40kHz</div>
+                                            </div>
+                                            <div className="text-orange-400">→</div>
+                                            <div className="bg-purple-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">预分频</div>
+                                                <div className="font-bold text-purple-400">/4~/256</div>
+                                            </div>
+                                            <div className="text-purple-400">→</div>
+                                            <div className="bg-blue-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">计数器</div>
+                                                <div className="font-bold text-blue-400">12 位</div>
+                                            </div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-red-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">超时</div>
+                                                <div className="font-bold text-red-400">复位</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-orange-400 mb-1">独立时钟源</div>
+                                            <div className="text-xs text-gray-400">LSI 内部低速时钟，不受主时钟影响</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-purple-400 mb-1">预分频器</div>
+                                            <div className="text-xs text-gray-400">4/8/16/32/64/128/256 可选</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-blue-400 mb-1">12 位计数器</div>
+                                            <div className="text-xs text-gray-400">0-4095 可配置重装载值</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-orange-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-orange-400">⏱️ 超时时间计算</h4>
+                                    <div className="font-mono text-sm bg-gray-900 rounded p-3">
+                                        Timeout = (Prescaler × Reload) / 40000
+                                    </div>
+                                    <div className="mt-2 text-xs text-gray-300">
+                                        例：预分频 64，重载值 1000 → 超时 = (64×1000)/40000 = 1.6 秒
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 2:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">WWDG 窗口看门狗</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="flex items-center justify-center gap-4">
+                                            <div className="bg-purple-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">APB1</div>
+                                                <div className="font-bold text-purple-400">PCLK1</div>
+                                            </div>
+                                            <div className="text-purple-400">→</div>
+                                            <div className="bg-blue-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">预分频</div>
+                                                <div className="font-bold text-blue-400">/8~/4096</div>
+                                            </div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-green-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">窗口值</div>
+                                                <div className="font-bold text-green-400">0-63</div>
+                                            </div>
+                                            <div className="text-green-400">→</div>
+                                            <div className="bg-red-900 rounded p-3 text-center">
+                                                <div className="text-xs text-gray-400">复位</div>
+                                                <div className="font-bold text-red-400">⚠️</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-gradient-to-r from-red-900 to-green-900 rounded-lg p-4">
+                                        <h4 className="font-bold mb-2">⚠️ 喂狗窗口规则</h4>
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-red-400">✗</span>
+                                                <span>计数器 &gt; 窗口值：过早喂狗，系统复位</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-green-400">✓</span>
+                                                <span>窗口值 ≥ 计数器 &gt; 0x40：正确喂狗</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-red-400">✗</span>
+                                                <span>计数器 ≤ 0x40：过晚喂狗，系统复位</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-purple-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-purple-400">📊 超时时间公式</h4>
+                                    <div className="font-mono text-xs bg-gray-900 rounded p-3">
+                                        Twwdg = (4096 × 2^WDGTB × (T[5:0] + 1)) / PCLK1
+                                    </div>
+                                    <div className="mt-2 text-xs text-gray-300">
+                                        WDGTB: 预分频 (0-3)，T[5:0]: 计数器值
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 3:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-orange-400">IWDG 配置步骤</h3>
+                                    <div className="space-y-3">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-orange-400">1. 写入密钥解锁</span>
+                                                <span className="text-xs font-mono text-gray-400">IWDG→KR = 0x5555</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">解锁配置寄存器，允许修改预分频和重装载值</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-blue-400">2. 配置预分频</span>
+                                                <span className="text-xs font-mono text-gray-400">IWDG→PR = 0-6</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">0=/4, 1=/8, 2=/16, 3=/32, 4=/64, 5=/128, 6=/256</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-green-400">3. 配置重装载值</span>
+                                                <span className="text-xs font-mono text-gray-400">IWDG→RLR = 0-4095</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">12 位计数器重装载值</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-red-400">4. 启动看门狗</span>
+                                                <span className="text-xs font-mono text-gray-400">IWDG→KR = 0xCCCC</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">启动后不可停止，只能喂狗或复位</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-red-900 rounded-lg p-4 border-2 border-red-500">
+                                    <h4 className="font-bold mb-2 text-red-400">⚠️ 重要提醒</h4>
+                                    <p className="text-sm text-gray-300">IWDG 一旦启动就无法停止，只能不断喂狗或等待复位。确保在启动前配置好所有参数。</p>
+                                </div>
+                            </div>
+                        );
+                    case 4:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">WWDG 配置步骤</h3>
+                                    <div className="space-y-3">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-purple-400">1. 配置窗口值</span>
+                                                <span className="text-xs font-mono text-gray-400">WWDG→CFR[6:0]</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">喂狗上限，计数器必须低于此值才能喂狗</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-blue-400">2. 配置预分频</span>
+                                                <span className="text-xs font-mono text-gray-400">WWDG→CFR[9:8]</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">0=/1, 1=/2, 2=/4, 3=/8</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-green-400">3. 使能早期唤醒</span>
+                                                <span className="text-xs font-mono text-gray-400">WWDG→CFR[9]</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">计数器减到 0x40 时产生中断</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="font-bold text-red-400">4. 启动看门狗</span>
+                                                <span className="text-xs font-mono text-gray-400">WWDG→CR[7]</span>
+                                            </div>
+                                            <div className="text-xs text-gray-400">设置 WDGA 位启动，计数器从 0x7F 开始递减</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-purple-900 to-green-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">🪟 窗口值设置技巧</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 窗口值 = 63：无上限限制</li>
+                                        <li>• 窗口值 = 48：留出 25% 余量</li>
+                                        <li>• 窗口值 = 32：留出 50% 余量</li>
+                                        <li>• 根据任务周期调整</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 5:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-orange-400">喂狗操作对比</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-orange-900 rounded p-4">
+                                            <h4 className="font-bold text-orange-400 mb-3">IWDG 喂狗</h4>
+                                            <div className="text-xs font-mono text-gray-300 mb-2">写入 0xAAAA 到 KR 寄存器</div>
+                                            <div className="bg-gray-900 rounded p-2 text-xs">
+                                                <code>IWDG→KR = 0xAAAA;</code>
+                                            </div>
+                                            <div className="mt-2 text-xs text-gray-400">计数器立即重载为 RLR 值</div>
+                                        </div>
+                                        <div className="bg-purple-900 rounded p-4">
+                                            <h4 className="font-bold text-purple-400 mb-3">WWDG 喂狗</h4>
+                                            <div className="text-xs font-mono text-gray-300 mb-2">写入新值到 CR 寄存器</div>
+                                            <div className="bg-gray-900 rounded p-2 text-xs">
+                                                <code>WWDG→CR = 0x7F;</code>
+                                            </div>
+                                            <div className="mt-2 text-xs text-gray-400">必须在窗口范围内写入</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-red-400">喂狗时机</h3>
+                                    <div className="space-y-2">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-green-400 mb-1">✓ 主循环喂狗</div>
+                                            <div className="text-xs text-gray-400">while(1) 循环每次迭代喂一次</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-blue-400 mb-1">✓ 任务完成喂狗</div>
+                                            <div className="text-xs text-gray-400">每个关键任务完成后喂狗</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-orange-400 mb-1">⚠️ 避免频繁喂狗</div>
+                                            <div className="text-xs text-gray-400">太频繁无法检测程序卡死</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    case 6:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-orange-400">调试模式配置</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <h4 className="font-bold text-orange-400 mb-2">IWDG DBG 模式</h4>
+                                            <div className="text-xs text-gray-400 mb-2">DBG 模式下暂停计数</div>
+                                            <div className="text-xs font-mono bg-gray-800 rounded p-2">
+                                                DBG→IWDG_STOP = 1;<br/>
+                                                DBG→IWDG_STANDBY = 1;
+                                            </div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <h4 className="font-bold text-purple-400 mb-2">WWDG 冻结</h4>
+                                            <div className="text-xs text-gray-400 mb-2">单步调试时冻结计数器</div>
+                                            <div className="text-xs font-mono bg-gray-800 rounded p-2">
+                                                DBG→WWDG_STOP = 1;
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-blue-400">🔧 调试技巧</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 开发阶段暂时禁用看门狗</li>
+                                        <li>• 使用条件编译区分调试/发布</li>
+                                        <li>• 调试时增大超时时间</li>
+                                        <li>• 使用 SWO 输出喂狗日志</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 7:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-orange-400">STM32 代码实现</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// IWDG 初始化
+void IWDG_Init(void) {
+    // 1. 解锁配置
+    IWDG->KR = 0x5555;
+
+    // 2. 设置预分频 /64
+    IWDG->PR = 4;
+
+    // 3. 设置重装载值 1000
+    IWDG->RLR = 1000;
+
+    // 4. 等待寄存器同步
+    while (IWDG->SR);
+
+    // 5. 启动看门狗
+    IWDG->KR = 0xCCCC;
+}
+
+// 喂狗函数
+void IWDG_Feed(void) {
+    IWDG->KR = 0xAAAA;
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">WWDG 示例</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// WWDG 初始化
+void WWDG_Init(void) {
+    // 1. 使能时钟
+    RCC->APB1ENR |= RCC_APB1ENR_WWDGEN;
+
+    // 2. 配置窗口值 48，预分频/8
+    WWDG->CFR = 48 | (1 << 7);  // 窗口 48，预分频/8
+
+    // 3. 使能早期唤醒中断
+    WWDG->CFR |= WWDG_CFR_EWI;
+
+    // 4. 启动看门狗，计数器 0x7F
+    WWDG->CR = WWDG_CR_WDGA | 0x7F;
+}
+
+// 喂狗函数 (必须在窗口内)
+void WWDG_Feed(void) {
+    WWDG->CR = 0x7F;  // 重载计数器
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-green-900 to-orange-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">🔧 应用建议</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• IWDG: 系统级保护，检测死机</li>
+                                        <li>• WWDG: 任务级监控，检测时序</li>
+                                        <li>• 双看门狗：关键系统双重保护</li>
+                                        <li>• 超时时间：留 20-50% 余量</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-4">
+                            <h1 className="text-2xl font-bold bg-gradient-to-r from-orange-400 via-orange-500 to-red-400 bg-clip-text text-transparent">
+                                STM32 看门狗定时器完整指南
+                            </h1>
+                            <p className="text-sm text-gray-400">IWDG 独立看门狗 · WWDG 窗口看门狗 · 超时复位 · 喂狗操作</p>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 justify-center">
+                            {!isPlaying ? (
+                                <button onClick={handlePlay} className="px-4 py-2 bg-green-600 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                                    <span>▶</span> 播放
+                                </button>
+                            ) : (
+                                <button onClick={handlePause} className="px-4 py-2 bg-yellow-600 rounded-lg hover:bg-yellow-700 transition-colors flex items-center gap-2">
+                                    <span>⏸</span> 暂停
+                                </button>
+                            )}
+                            <button onClick={handleRestart} className="px-4 py-2 bg-orange-600 rounded-lg hover:bg-orange-700 transition-colors flex items-center gap-2">
+                                <span>🔄</span> 重新开始
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 overflow-x-auto justify-center">
+                            {STEPS.map((step, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => handleStepClick(index)}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                                        index === currentStep
+                                            ? `bg-gradient-to-r ${COLOR_MAP.gradient} text-white shadow-lg`
+                                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                    }`}
+                                >
+                                    {index + 1}. {step.title}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">代码区</h3>
+                                <div className="bg-gray-900 rounded p-3 font-mono text-xs overflow-x-auto">
+                                    <pre className="text-green-400">{`// 看门狗操作函数
+void IWDG_Init(void);
+void IWDG_Feed(void);
+void WWDG_Init(void);
+void WWDG_Feed(void);
+uint8_t IWDG_IsTimeout(void);`}</pre>
+                                </div>
+                                <div className="mt-4">
+                                    <div className="text-xs text-gray-400 mb-2">当前状态:</div>
+                                    <div className={`text-center py-3 rounded font-bold ${iwdgTimeout || wwdgTimeout ? 'bg-red-600 animate-pulse' : iwdgRunning || wwdgRunning ? 'bg-green-600' : 'bg-gray-700'}`}>
+                                        {iwdgTimeout ? 'IWDG 超时复位!' : wwdgTimeout ? 'WWDG 超时复位!' : iwdgRunning || wwdgRunning ? '看门狗运行中' : '已停止'}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">可视化区</h3>
+                                <div className="space-y-4">
+                                    {/* IWDG */}
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <span className="text-xs text-gray-400">独立看门狗 IWDG</span>
+                                            <span className={`text-xs px-2 py-1 rounded ${iwdgRunning ? 'bg-green-600' : 'bg-gray-600'}`}>
+                                                {iwdgRunning ? '运行中' : '已停止'}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center mb-3">
+                                            <span className="text-sm">计数器:</span>
+                                            <div className={`text-2xl font-bold ${kickAnim ? 'kick-anim' : ''} ${iwdgCounter <= 10 ? 'text-red-400' : 'text-orange-400'}`}>
+                                                {iwdgCounter}
+                                            </div>
+                                        </div>
+                                        <div className="h-4 bg-gray-800 rounded-full overflow-hidden mb-3">
+                                            <div
+                                                className={`h-full transition-all ${iwdgCounter <= 10 ? 'bg-red-600' : 'bg-gradient-to-r from-orange-600 to-yellow-600'}`}
+                                                style={{ width: `${(iwdgCounter / 255) * 100}%` }}
+                                            ></div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                onClick={kickIwdg}
+                                                disabled={!iwdgRunning}
+                                                className="bg-green-600 rounded py-2 text-sm font-bold hover:bg-green-700 disabled:opacity-50"
+                                            >
+                                                喂狗 (0xAAAA)
+                                            </button>
+                                            <button
+                                                onClick={startIwdg}
+                                                disabled={iwdgRunning}
+                                                className="bg-orange-600 rounded py-2 text-sm font-bold hover:bg-orange-700 disabled:opacity-50"
+                                            >
+                                                启动 IWDG
+                                            </button>
+                                        </div>
+                                        <div className="mt-2 text-xs text-gray-400">
+                                            超时时间：{calculateIwdgTimeout()}s (预分频={iwdgPrescaler})
+                                        </div>
+                                    </div>
+
+                                    {/* WWDG */}
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <span className="text-xs text-gray-400">窗口看门狗 WWDG</span>
+                                            <span className={`text-xs px-2 py-1 rounded ${wwdgRunning ? 'bg-purple-600' : 'bg-gray-600'}`}>
+                                                {wwdgRunning ? '运行中' : '已停止'}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center mb-3">
+                                            <span className="text-sm">计数器:</span>
+                                            <div className={`text-2xl font-bold ${wwdgEarlyKick ? 'text-red-400' : wwdgCounter <= 10 ? 'text-red-400' : 'text-purple-400'}`}>
+                                                {wwdgCounter} {wwdgEarlyKick && '(过早!)'}
+                                            </div>
+                                        </div>
+                                        <div className="h-4 bg-gray-800 rounded-full overflow-hidden mb-3 relative">
+                                            <div
+                                                className="h-full bg-gradient-to-r from-purple-600 to-blue-600 transition-all"
+                                                style={{ width: `${(wwdgCounter / 63) * 100}%` }}
+                                            ></div>
+                                            <div
+                                                className="absolute top-0 h-full w-0.5 bg-yellow-500"
+                                                style={{ left: `${(wwdgWindow / 63) * 100}%` }}
+                                            ></div>
+                                        </div>
+                                        <div className="text-xs text-gray-400 mb-2">
+                                            窗口值：{wwdgWindow} (喂狗上限)
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                onClick={kickWwdg}
+                                                disabled={!wwdgRunning}
+                                                className="bg-green-600 rounded py-2 text-sm font-bold hover:bg-green-700 disabled:opacity-50"
+                                            >
+                                                喂狗
+                                            </button>
+                                            <button
+                                                onClick={startWwdg}
+                                                disabled={wwdgRunning}
+                                                className="bg-purple-600 rounded py-2 text-sm font-bold hover:bg-purple-700 disabled:opacity-50"
+                                            >
+                                                启动 WWDG
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">说明区</h3>
+                                <div className="space-y-4">
+                                    <div className="bg-gradient-to-r from-orange-900 to-red-900 rounded-lg p-3">
+                                        <div className="font-bold text-orange-400 mb-2">步骤 {currentStep + 1}: {STEPS[currentStep].title}</div>
+                                        <div className="text-xs text-gray-300">{STEPS[currentStep].voice}</div>
+                                    </div>
+                                    {renderContent()}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="text-center mt-4 text-xs text-gray-500">
+                            STM32 看门狗定时器完整指南 | IWDG + WWDG | 超时复位 | 遵循 SKILL.md v3.0 标准
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

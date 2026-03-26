@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1207 - CRC 循环冗余校验完整指南 - 嵌入式 C 语言可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { transform: translateY(0); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0); } }
+        @keyframes highlight { 0%, 100% { background-color: rgba(99, 102, 241, 0.2); } 50% { background-color: rgba(99, 102, 241, 0.5); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes countdown { from { transform: scale(1.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes danger { 0%, 100% { background-color: rgba(239, 68, 68, 0.3); } 50% { background-color: rgba(239, 68, 68, 0.6); } }
+        @keyframes reset { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes shift { 0% { transform: translateX(0); } 100% { transform: translateX(-20px); } }
+        @keyframes xor { 0%, 100% { background-color: rgba(168, 85, 247, 0.3); } 50% { background-color: rgba(168, 85, 247, 0.8); } }
+        @keyframes calculate { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.5s ease-out; }
+        .flow { animation: flow 2s infinite; }
+        .highlight { animation: highlight 2s infinite; }
+        .fadeIn { animation: fadeIn 0.5s ease-out; }
+        .countdown { animation: countdown 0.3s ease-out; }
+        .danger { animation: danger 1s infinite; }
+        .reset { animation: reset 1s linear; }
+        .shift { animation: shift 1s linear infinite; }
+        .xor { animation: xor 0.5s infinite; }
+        .calculate { animation: calculate 1s infinite; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // 颜色主题：靛蓝色/紫色渐变 (CRC 校验)
+        const COLOR_MAP = {
+            primary: '#6366f1',
+            secondary: '#8b5cf6',
+            accent: '#a5b4fc',
+            highlight: '#c7d2fe',
+            danger: '#ef4444',
+            success: '#10b981'
+        };
+
+        const STEPS = [
+            {
+                title: "CRC 循环冗余校验基础",
+                code: `// CRC - Cyclic Redundancy Check
+// 循环冗余校验是一种错误检测码
+
+// CRC 工作原理:
+// 1. 将数据视为多项式系数 (二进制)
+// 2. 用生成多项式进行模 2 除法
+// 3. 余数即为 CRC 校验值
+
+// 常用 CRC 标准:
+// CRC-8   : 多项式 0x07,   用于 CAN 总线
+// CRC-16  : 多项式 0x8005, 用于 Modbus
+// CRC-32  : 多项式 0x04C11DB7, 用于 Ethernet/ZIP
+// CRC-CCITT: 多项式 0x1021, 用于 XMODEM
+
+// STM32 硬件 CRC 单元:
+// - 支持 CRC-32 (以太网标准)
+// - 可配置输入/输出反转
+// - 最高 32 位数据宽度
+// - 单周期计算 (4 个 HCLK 周期)`,
+                description: "CRC 是一种基于多项式除法的错误检测码，广泛应用于数据通信和存储系统。STM32 内置硬件 CRC 计算单元，支持标准的 CRC-32 算法 (多项式 0x04C11DB7)。硬件 CRC 比软件查表快 10 倍以上，且占用极少的 CPU 资源。CRC 可以检测所有单比特错误、双比特错误和奇数个错误。",
+                highlight: "硬件 CRC 计算仅需 4 个时钟周期，比软件实现快 10 倍+"
+            },
+            {
+                title: "CRC 寄存器配置",
+                code: `// CRC 关键寄存器:
+// CRC_DR    - 数据寄存器 (32 位)
+// CRC_IDR   - 独立数据寄存器 (8 位)
+// CRC_CR    - 控制寄存器
+// CRC_INIT  - 初始值寄存器
+// CRC_POL   - 多项式寄存器 (部分型号)
+
+// 复位 CRC 外设 (加载初始值 0xFFFFFFFF)
+CRC->CR |= CRC_CR_RESET;
+
+// 配置输入数据反转 (按字节反转)
+CRC->CR &= ~CRC_CR_REV_IN;
+CRC->CR |= CRC_CR_REV_IN_0;  // 输入按字节反转
+
+// 配置输出数据反转
+CRC->CR |= CRC_CR_REV_OUT;   // 输出按位反转
+
+// 设置初始值 (默认 0xFFFFFFFF)
+CRC->INIT = 0xFFFFFFFF;
+
+// 可选初始值 (某些协议使用 0x00000000)
+CRC->INIT = 0x00000000;`,
+                description: "CRC 外设包含数据寄存器 DR(用于写入数据和读取结果)、控制寄存器 CR(配置反转和复位)、初始值寄存器 INIT。STM32F7/F4/H7 系列还支持可编程多项式。输入/输出反转用于兼容不同协议的位序要求。复位 CRC 外设会自动加载 INIT 寄存器的初始值。",
+                highlight: "不同协议需要不同的初始值和反转配置，需查阅协议规范"
+            },
+            {
+                title: "CRC-32 计算示例",
+                code: `// CRC-32 计算 (以太网/ZIP 标准)
+// 多项式：0x04C11DB7
+// 初始值：0xFFFFFFFF
+// 输入反转：按字节
+// 输出反转：是
+// 最终异或：0xFFFFFFFF
+
+#include <stdint.h>
+
+uint32_t CRC32_Calculate(uint8_t *data, uint32_t length) {
+    // 1. 复位 CRC 单元
+    CRC->CR |= CRC_CR_RESET;
+
+    // 2. 写入数据 (按 32 位写入最快)
+    uint32_t wordLen = length / 4;
+    for(uint32_t i = 0; i < wordLen; i++) {
+        CRC->DR = *(uint32_t*)(data + i*4);
+    }
+
+    // 3. 处理剩余字节
+    uint32_t remainder = length % 4;
+    for(uint32_t i = 0; i < remainder; i++) {
+        *(__IO uint8_t*)&CRC->DR = data[wordLen*4 + i];
+    }
+
+    // 4. 读取结果 (已自动完成最终异或)
+    return CRC->DR;
+}
+
+// 使用示例
+uint8_t buffer[] = "Hello, World!";
+uint32_t crc = CRC32_Calculate(buffer, sizeof(buffer));
+// 结果：0xEC4AC3D0`,
+                description: "CRC-32 计算流程：复位 CRC 单元→按 32 位写入数据 (最快)→处理剩余字节→读取结果。为了提高效率，应尽量按 32 位对齐写入数据。对于非 4 倍数的数据长度，剩余字节需按 8 位写入 IDR 寄存器。STM32 硬件自动处理最终异或操作，直接读取 DR 即可得到标准 CRC-32 结果。",
+                highlight: "按 32 位写入比按字节写入快 4 倍，应尽量对齐数据"
+            },
+            {
+                title: "CRC-16 Modbus 协议配置",
+                code: `// CRC-16 Modbus 协议
+// 多项式：0x8005 (简化 0xA001)
+// 初始值：0xFFFF
+// 输入反转：按字节
+// 输出反转：是
+// 最终异或：0x0000
+
+// STM32 CRC 配置 (需要软件后处理)
+uint16_t CRC16_Modbus(uint8_t *data, uint32_t length) {
+    // STM32 硬件 CRC-32，需要软件适配 CRC-16
+    // 或使用软件查表法
+
+    uint16_t crc = 0xFFFF;
+    for(uint32_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for(uint8_t j = 0; j < 8; j++) {
+            if(crc & 0x0001)
+                crc = (crc >> 1) ^ 0xA001;
+            else
+                crc >>= 1;
+        }
+    }
+    return crc;
+}
+
+// STM32G4/H7 支持可编程多项式
+void CRC16_Init(void) {
+    CRC->INIT = 0xFFFF;       // 初始值
+    CRC->POL = 0xA001;        // 多项式
+    CRC->CR |= CRC_CR_POLYSIZE_0;  // 16 位多项式
+    CRC->CR |= CRC_CR_REV_IN_0;    // 输入反转
+    CRC->CR |= CRC_CR_REV_OUT;     // 输出反转
+}`,
+                description: "CRC-16 Modbus 广泛用于工业通信协议。STM32F1/F4 等早期型号只有固定 CRC-32，需要用软件实现 CRC-16。STM32G4/H7 等新型号支持可编程多项式，可直接硬件计算 CRC-16。软件查表法每次计算需要 length×8 次移位操作，而硬件实现只需 4 个时钟周期。",
+                highlight: "新型号 STM32 支持可编程多项式，可硬件计算 CRC-16/8"
+            },
+            {
+                title: "固件校验应用",
+                code: `// 固件完整性校验
+// 在 Bootloader 中验证应用程序
+
+typedef struct {
+    uint32_t firmwareSize;
+    uint32_t crc32;
+    uint8_t version[16];
+    uint8_t reserved[12];
+} Firmware_Header;
+
+#define APP_ADDRESS 0x08004000
+#define HEADER_PTR  ((Firmware_Header*)APP_ADDRESS)
+
+// 校验固件
+int Verify_Firmware(void) {
+    uint32_t size = HEADER_PTR->firmwareSize;
+    uint32_t expected_crc = HEADER_PTR->crc32;
+
+    // 计算固件 CRC (跳过 CRC 字段本身)
+    CRC->CR |= CRC_CR_RESET;
+
+    // 写入固件数据
+    uint32_t *fw_ptr = (uint32_t*)(APP_ADDRESS + sizeof(Firmware_Header));
+    uint32_t data_len = size - sizeof(Firmware_Header);
+
+    for(uint32_t i = 0; i < data_len / 4; i++) {
+        CRC->DR = fw_ptr[i];
+    }
+
+    uint32_t calculated_crc = CRC->DR;
+
+    return (calculated_crc == expected_crc) ? 1 : 0;
+}
+
+// 生产时计算并烧录 CRC 值
+// 运行时 Bootloader 验证 CRC 通过后跳转执行`,
+                description: "CRC 广泛用于固件完整性校验。在固件头部存储 CRC 值，Bootloader 启动时重新计算 CRC 并与存储值比较。如果 CRC 不匹配，说明固件损坏或被篡改，应进入安全模式或等待重新烧录。生产烧录时先计算 CRC 并写入头部，然后烧录完整固件。",
+                highlight: "Bootloader 必须验证 CRC 后才能跳转，防止运行损坏的固件"
+            },
+            {
+                title: "通信数据校验",
+                code: `// 通信帧 CRC 校验
+// 例如 RS485/Modbus 通信
+
+typedef struct {
+    uint8_t  addr;
+    uint8_t  func;
+    uint8_t  data[256];
+    uint16_t crc16;
+} Modbus_Frame;
+
+// 发送帧
+void Modbus_Send(Modbus_Frame *frame, uint8_t dataLen) {
+    // 计算 CRC
+    frame->crc16 = CRC16_Modbus((uint8_t*)frame, dataLen);
+
+    // 发送整个帧 (包含 CRC)
+    UART_Transmit((uint8_t*)frame, dataLen + 2);
+}
+
+// 接收帧
+int Modbus_Receive(Modbus_Frame *frame) {
+    // 接收完整帧
+    int len = UART_Receive((uint8_t*)frame, sizeof(Modbus_Frame));
+
+    // 提取并验证 CRC
+    uint16_t received_crc = frame->crc16;
+    uint16_t calculated_crc = CRC16_Modbus((uint8_t*)frame, len - 2);
+
+    if(received_crc != calculated_crc) {
+        return -1;  // CRC 错误，丢弃帧
+    }
+    return len;
+}`,
+                description: "通信协议中，发送方计算数据 CRC 并附加到帧尾，接收方重新计算并验证 CRC。CRC 错误通常由噪声干扰、波特率不匹配或时序问题引起。接收方应在验证 CRC 通过后才处理数据，否则丢弃该帧并要求重传。Modbus 协议规定 CRC 低字节在前，高字节在后。",
+                highlight: "CRC 错误说明数据传输有问题，应检查硬件连接和波特率"
+            },
+            {
+                title: "数据存储校验",
+                code: `// Flash 存储数据校验
+// 防止数据损坏或掉电丢失
+
+typedef struct {
+    uint32_t magic;      // 魔数 0x12345678
+    uint32_t length;
+    uint8_t  data[128];
+    uint32_t crc32;
+} Stored_Data;
+
+// 保存数据到 Flash
+void Store_Data(uint8_t *data, uint32_t len) {
+    Stored_Data stored;
+    stored.magic = 0x12345678;
+    stored.length = len;
+    memcpy(stored.data, data, len);
+    stored.crc32 = CRC32_Calculate(data, len);
+
+    // 写入 Flash
+    FLASH_Unlock();
+    FLASH_EraseSector(FLASH_Sector_11, VoltageRange_3);
+    FLASH_ProgramWord(FLASH_ADDR, (uint32_t)&stored);
+    FLASH_Lock();
+}
+
+// 从 Flash 读取并验证
+int Read_Data(uint8_t *buffer, uint32_t maxLen) {
+    Stored_Data *stored = (Stored_Data*)FLASH_ADDR;
+
+    // 验证魔数
+    if(stored->magic != 0x12345678) return -1;
+
+    // 验证 CRC
+    uint32_t crc = CRC32_Calculate(stored->data, stored->length);
+    if(crc != stored->crc32) return -2;
+
+    // 读取数据
+    memcpy(buffer, stored->data, stored->length);
+    return stored->length;
+}`,
+                description: "Flash 存储的数据可能因掉电、老化或干扰而损坏。添加 CRC 校验可以在读取时验证数据完整性。魔数用于识别有效数据区域，CRC 用于验证数据内容。如果 CRC 验证失败，应使用默认值或要求重新配置。这种模式适用于存储校准参数、用户配置等关键数据。",
+                highlight: "Flash 数据必须加 CRC 校验，否则损坏后无法发现"
+            },
+            {
+                title: "CRC 性能对比与最佳实践",
+                code: `// CRC 实现方式性能对比
+
+// 1. 硬件 CRC (STM32)
+// 速度：~4 个时钟周期/32 位数据
+// 占用：无 CPU 资源，DMA 可直接写入
+uint32_t HW_CRC(uint8_t *data, uint32_t len) {
+    CRC->CR |= CRC_CR_RESET;
+    for(uint32_t i = 0; i < len; i++)
+        *(__IO uint8_t*)&CRC->DR = data[i];
+    return CRC->DR;
+}
+
+// 2. 软件查表法
+// 速度：~80 个时钟周期/字节
+// 占用：256 字节查找表
+uint32_t SW_CRC_Table(uint8_t *data, uint32_t len);
+
+// 3. 软件直接计算
+// 速度：~800 个时钟周期/字节
+// 占用：无额外内存
+uint32_t SW_CRC_Direct(uint8_t *data, uint32_t len);
+
+// 性能对比 (1KB 数据):
+// 硬件 CRC:   ~1μs @ 168MHz
+// 查表法：   ~50μs
+// 直接计算: ~500μs
+
+// 最佳实践:
+// 1. 优先使用硬件 CRC
+// 2. 需要非标准 CRC 时使用查表法
+// 3. 代码空间受限时用直接计算`,
+                description: "硬件 CRC 性能远超软件实现：1KB 数据硬件 CRC 仅需 1μs，查表法需要 50μs，直接计算需要 500μs。硬件 CRC 还不占用 CPU 资源，可配合 DMA 实现零开销计算。但硬件 CRC 通常只支持标准 CRC-32，非标准 CRC 需用软件实现。查表法是性能和灵活性的折中方案。",
+                highlight: "硬件 CRC 比软件快 50-500 倍，应优先使用硬件 CRC 单元"
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [showCode, setShowCode] = useState(true);
+            const voiceEndTimerRef = useRef(null);
+
+            // 语音播放函数
+            const speak = (text) => {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+
+                    const voices = window.speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v =>
+                        v.lang === 'zh-CN' ||
+                        v.lang === 'zh-CN-XiaoxiaoNeural' ||
+                        v.lang.includes('Chinese')
+                    );
+                    if (zhVoice) utterance.voice = zhVoice;
+
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    utterance.onerror = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (isPlaying && currentStep < STEPS.length - 1) {
+                                setCurrentStep(prev => prev + 1);
+                            }
+                        }, 800);
+                    };
+
+                    window.speechSynthesis.speak(utterance);
+                }
+            };
+
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.description + "。" + step.highlight);
+
+                return () => {
+                    if (voiceEndTimerRef.current) {
+                        clearTimeout(voiceEndTimerRef.current);
+                    }
+                };
+            }, [currentStep]);
+
+            // CRC 计算过程可视化
+            const CRCVisualization = () => {
+                const bits = currentStep >= 0 ? [1, 0, 1, 1, 0, 0, 1, 1] : [];
+                const polynomial = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-indigo-400 mb-3">CRC 计算原理</h3>
+
+                        {/* 输入数据 */}
+                        <div className="mb-4">
+                            <div className="text-xs text-gray-400 mb-1">输入数据</div>
+                            <div className="flex gap-1">
+                                {bits.map((b, i) => (
+                                    <div key={i} className={`w-8 h-8 rounded flex items-center justify-center text-xs font-mono ${b ? 'bg-indigo-500' : 'bg-gray-600'}`}>
+                                        {b}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 除法过程 */}
+                        <div className="mb-4 p-2 bg-gray-900 rounded">
+                            <div className="text-xs text-gray-400 mb-2">模 2 除法 (XOR)</div>
+                            <div className="font-mono text-xs space-y-1">
+                                <div className="flex justify-between">
+                                    <span>被除数:</span>
+                                    <span className="text-indigo-400">10110011 00000000...</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>除数:</span>
+                                    <span className="text-purple-400">100000100110000010001110110110111</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>余数 (CRC):</span>
+                                    <span className="text-green-400 calculate">11101100 01001010...</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 移位寄存器 */}
+                        <div>
+                            <div className="text-xs text-gray-400 mb-1">移位寄存器</div>
+                            <div className="flex gap-1">
+                                {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+                                    <div key={i} className={`w-8 h-8 rounded flex items-center justify-center text-xs border-2 transition-all ${
+                                        currentStep >= 2 ? 'border-indigo-500 xor' : 'border-gray-600'
+                                    }`}>
+                                        {currentStep >= 2 ? '?' : '-'}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // CRC 标准对比表
+            const CRCComparison = () => {
+                const standards = [
+                    { name: 'CRC-8', poly: '0x07', bits: 8, use: 'CAN 总线' },
+                    { name: 'CRC-16', poly: '0x8005', bits: 16, use: 'Modbus' },
+                    { name: 'CRC-CCITT', poly: '0x1021', bits: 16, use: 'XMODEM' },
+                    { name: 'CRC-32', poly: '0x04C11DB7', bits: 32, use: 'Ethernet/ZIP', active: true }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-purple-400 mb-3">CRC 标准对比</h3>
+                        <div className="space-y-2">
+                            {standards.map((s, i) => (
+                                <div key={i} className={`p-2 rounded text-xs ${s.active ? 'bg-indigo-900/50 border border-indigo-500' : 'bg-gray-700'}`}>
+                                    <div className="flex justify-between mb-1">
+                                        <span className="font-bold">{s.name}</span>
+                                        <span className="text-gray-400">{s.bits}位</span>
+                                    </div>
+                                    <div className="flex justify-between text-gray-400">
+                                        <span>{s.poly}</span>
+                                        <span>{s.use}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // 性能对比柱状图
+            const PerformanceChart = () => {
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-green-400 mb-3">性能对比 (1KB 数据)</h3>
+                        <div className="space-y-3">
+                            <div>
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span>硬件 CRC</span>
+                                    <span className="text-green-400">~1μs</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded h-4">
+                                    <div className="bg-green-500 h-4 rounded" style={{width: '5%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span>查表法</span>
+                                    <span className="text-yellow-400">~50μs</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded h-4">
+                                    <div className="bg-yellow-500 h-4 rounded" style={{width: '25%'}}></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span>直接计算</span>
+                                    <span className="text-red-400">~500μs</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded h-4">
+                                    <div className="bg-red-500 h-4 rounded" style={{width: '100%'}}></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // 固件校验流程
+            const FirmwareVerify = () => {
+                const steps = [
+                    { name: '读取头部', status: currentStep >= 4 },
+                    { name: '复位 CRC', status: currentStep >= 4 },
+                    { name: '计算 CRC', status: currentStep >= 4 },
+                    { name: '比较验证', status: currentStep >= 4 },
+                    { name: '跳转执行', status: currentStep >= 4 && false }
+                ];
+
+                return (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-orange-400 mb-3">固件校验流程</h3>
+                        <div className="space-y-2">
+                            {steps.map((step, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
+                                        step.status ? 'bg-green-500' : 'bg-gray-600'
+                                    }`}>
+                                        {i + 1}
+                                    </div>
+                                    <span className="text-xs">{step.name}</span>
+                                    {step.status && <span className="text-green-400 text-xs">✓</span>}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    {/* 头部 */}
+                    <div className="max-w-7xl mx-auto mb-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h1 className="text-xl font-bold text-indigo-400">
+                                1207 - CRC 循环冗余校验完整指南
+                            </h1>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">
+                                    {isPlaying ? '暂停' : '播放'}
+                                </button>
+                                <button onClick={() => setShowCode(!showCode)} className="px-3 py-1 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                    {showCode ? '隐藏代码' : '显示代码'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div className="flex gap-1 mb-4">
+                            {STEPS.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentStep(i)}
+                                    className={`flex-1 h-2 rounded transition-all ${
+                                        i === currentStep ? 'bg-indigo-500 scale-110' :
+                                        i < currentStep ? 'bg-indigo-700' : 'bg-gray-600'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 主内容区 - 三列布局 */}
+                    <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* 左列：代码 */}
+                        {showCode && (
+                            <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                                <h2 className="text-sm font-bold text-indigo-400 mb-2">
+                                    {STEPS[currentStep].title}
+                                </h2>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap bg-gray-900 p-3 rounded">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+                        )}
+
+                        {/* 中列：可视化动画 */}
+                        <div className={`${showCode ? 'col-span-1' : 'col-span-2'} space-y-4`}>
+                            <CRCVisualization />
+                            <div className="grid grid-cols-2 gap-4">
+                                <CRCComparison />
+                                {currentStep >= 7 ? <PerformanceChart /> : <FirmwareVerify />}
+                            </div>
+                        </div>
+
+                        {/* 右列：说明 */}
+                        <div className="bg-gray-800 rounded-lg p-4 col-span-1">
+                            <h3 className="text-sm font-bold text-blue-400 mb-2">说明</h3>
+                            <p className="text-xs text-gray-300 leading-relaxed mb-3">
+                                {STEPS[currentStep].description}
+                            </p>
+                            <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2">
+                                <p className="text-xs text-yellow-300">
+                                    <span className="font-bold">💡 重点:</span> {STEPS[currentStep].highlight}
+                                </p>
+                            </div>
+
+                            {/* 导航按钮 */}
+                            <div className="flex gap-2 mt-4">
+                                <button
+                                    onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
+                                    disabled={currentStep === 0}
+                                    className="flex-1 py-2 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 text-xs"
+                                >
+                                    ← 上一步
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep(Math.min(STEPS.length - 1, currentStep + 1))}
+                                    disabled={currentStep === STEPS.length - 1}
+                                    className="flex-1 py-2 bg-indigo-600 rounded hover:bg-indigo-500 disabled:opacity-50 text-xs"
+                                >
+                                    下一步 →
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部摘要 */}
+                    <div className="max-w-7xl mx-auto mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-sm font-bold text-indigo-400 mb-2">CRC 校验核心要点</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-indigo-400 font-bold">硬件加速</span>
+                                <p className="text-gray-400 mt-1">4 周期完成计算</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-purple-400 font-bold">协议匹配</span>
+                                <p className="text-gray-400 mt-1">配置反转和初始值</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-green-400 font-bold">固件校验</span>
+                                <p className="text-gray-400 mt-1">Bootloader 必备</p>
+                            </div>
+                            <div className="bg-gray-700 p-2 rounded">
+                                <span className="text-orange-400 font-bold">数据保护</span>
+                                <p className="text-gray-400 mt-1">Flash 存储必加</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

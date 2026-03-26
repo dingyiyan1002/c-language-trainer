@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 DAC 数模转换完整指南 - 1257</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes wave { 0% { transform: scaleY(0.5); } 50% { transform: scaleY(1); } 100% { transform: scaleY(0.5); } }
+        @keyframes sine { 0%, 100% { cy: 50; } 25% { cy: 20; } 50% { cy: 50; } 75% { cy: 80; } }
+        @keyframes flow { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+        .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+        .animate-wave { animation: wave 1s ease-in-out infinite; }
+        .animate-flow { animation: flow 2s linear infinite; background-size: 200% 200%; }
+        .gradient-theme { background: linear-gradient(135deg, #ec4899 0%, #db2777 50%, #be185d 100%); }
+        .code-bg { background: #1e293b; }
+        .signal-high { background: linear-gradient(90deg, #ec4899, #db2777); }
+        .signal-low { background: #374151; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = { primary: '#ec4899', secondary: '#db2777', accent: '#f472b6', highlight: '#fbcfe8', signal: '#10b981', low: '#6b7280' };
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [dacValue, setDacValue] = React.useState(2048);
+            const [waveform, setWaveform] = React.useState('sine');
+            const [frequency, setFrequency] = React.useState(100);
+            const voiceEndTimerRef = React.useRef(null);
+            const [phase, setPhase] = React.useState(0);
+
+            const steps = [
+                {
+                    title: "DAC 基础架构",
+                    narration: "STM32 内置 12 位 DAC，电阻串型数模转换，2 个独立输出通道。支持 8 位或 12 位数据，左对齐或右对齐。输出电压范围 0 到 VREF+。",
+                    code: `// DAC 基本原理
+// 12 位分辨率：0-4095 对应 0-Vref
+// 输出电压 = (DAC 值 / 4095) * Vref
+
+// DAC 特性:
+// - 12 位电阻串型 DAC
+// - 2 个独立输出通道
+// - 8 位或 12 位数据格式
+// - 左对齐或右对齐
+// - DMA 传输支持
+// - 双通道同步更新
+// - 输出缓冲使能
+
+// 输出电压计算:
+// Vout = (DAC_DHR / 4095) * VREF+`,
+                    visual: "dac_arch"
+                },
+                {
+                    title: "DAC 初始化配置",
+                    narration: "配置 DAC 需要使能时钟、配置 GPIO 为模拟输入、使能 DAC 通道、配置输出缓冲、触发源选择。DMA 模式可实现自动波形输出。",
+                    code: `// DAC 初始化配置
+void DAC_Init(void) {
+    // 1. 使能时钟
+    RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+
+    // 2. 配置 PA4 为模拟输入
+    GPIOA->CRL &= ~GPIO_CRL_CNF4;
+    GPIOA->CRL &= ~GPIO_CRL_MODE4;
+
+    // 3. DAC 通道 1 配置
+    // BOFF=0 使能输出缓冲
+    // TEN=0 软件触发
+    DAC->CR &= ~DAC_CR_BOFF1;
+    DAC->CR &= ~DAC_CR_TEN1;
+
+    // 4. 使能 DAC 通道 1
+    DAC->CR |= DAC_CR_EN1;
+
+    // 5. 输出初始电压 (0V)
+    DAC->DHR12R1 = 0;
+}
+
+// 设置输出电压
+void DAC_SetVoltage(float voltage) {
+    // 假设 Vref=3.3V
+    uint16_t dac_value = (uint16_t)((voltage / 3.3) * 4095);
+    DAC->DHR12R1 = dac_value;
+}`,
+                    visual: "dac_init"
+                },
+                {
+                    title: "正弦波生成",
+                    narration: "使用查找表存储正弦波数据，定时器触发 DAC 更新，可生成连续正弦波。频率 = 定时器频率 / 查找表大小。用于信号发生器、音频合成。",
+                    code: `// 正弦波查找表 (64 点)
+const uint16_t sine_table[64] = {
+    2048, 2248, 2447, 2646, 2841, 3031, 3215, 3390,
+    3555, 3707, 3845, 3967, 4072, 4158, 4224, 4269,
+    4293, 4293, 4269, 4224, 4158, 4072, 3967, 3845,
+    3707, 3555, 3390, 3215, 3031, 2841, 2646, 2447,
+    2248, 2048, 1848, 1649, 1450, 1255, 1065,  881,
+     706,  541,  389,  251,  129,   24,   -62, -128,
+    -173, -197, -197, -173, -128,  -62,   24,  129,
+     251,  389,  541,  706,  881, 1065, 1255, 1450
+};
+
+// 定时器触发 DAC
+void DAC_SineWave_Init(void) {
+    // TIM6 更新触发 DAC
+    TIM6->PSC = 71;  // 1MHz
+    TIM6->ARR = 63;  // 64 点
+    // 1MHz/64 = 15.625kHz 更新率
+    // 15.625kHz/64 = 244Hz 正弦波频率
+
+    TIM6->CR2 |= (1 << TIM_CR2_MMS_Pos); // TRGO=010
+    DAC->CR |= DAC_CR_TEN1 | DAC_CR_TSEL1_1; // 软件触发
+    DAC->CR |= DAC_CR_DMAEN1; // 使能 DMA
+
+    TIM6->CR1 |= TIM_CR1_CEN;
+    DAC->CR |= DAC_CR_EN1;
+}`,
+                    visual: "sine_wave"
+                },
+                {
+                    title: "DMA 波形输出",
+                    narration: "DMA 模式自动从内存读取波形数据到 DAC 数据寄存器，无需 CPU 干预。循环模式实现连续波形输出。用于音频播放、任意波形发生器。",
+                    code: `// DMA 配置用于 DAC
+void DAC_DMA_Waveform_Init(void) {
+    // 1. 使能 DMA 时钟
+    RCC->AHBENR |= RCC_AHBENR_DMA2EN;
+
+    // 2. 配置 DMA 通道 3 (DAC1)
+    DMA2_Channel3->CPAR = (uint32_t)&DAC->DHR12R1;
+    DMA2_Channel3->CMAR = (uint32_t)sine_table;
+    DMA2_Channel3->CNDTR = 64;  // 64 点
+
+    // 3. DMA 配置
+    DMA2_Channel3->CCR = DMA_CCR3_TE |    // 传输完成中断
+                         DMA_CCR3_HTIE |  // 半传输中断
+                         DMA_CCR3_CIRC |  // 循环模式
+                         DMA_CCR3_DIR |   // 内存到外设
+                         DMA_CCR3_MINC |  // 内存地址递增
+                         (0b100 << DMA_CCR3_PL_Pos); // 高优先级
+
+    // 4. 使能 DMA
+    DMA2_Channel3->CCR |= DMA_CCR3_EN;
+}
+
+// DMA 传输完成中断 (用于音频缓冲更新)
+void DMA2_Channel3_IRQHandler(void) {
+    if (DMA2->ISR & DMA_ISR_TCIF3) {
+        DMA2->IFCR = DMA_IFCR_CTCIF3;
+        // 更新后半缓冲区数据
+        Update_Audio_Buffer(1);
+    }
+    if (DMA2->ISR & DMA_ISR_HTIF3) {
+        DMA2->IFCR = DMA_IFCR_CHTIF3;
+        // 更新前半缓冲区数据
+        Update_Audio_Buffer(0);
+    }
+}`,
+                    visual: "dma_output"
+                },
+                {
+                    title: "三角波生成",
+                    narration: "DAC 内置三角波发生器，通过配置 MAMPx 位选择掩码幅度。无需查找表，硬件自动生成。用于扫描信号、测试信号源。",
+                    code: `// 三角波生成 (硬件方式)
+void DAC_Triangle_Init(void) {
+    // 1. 配置软件触发
+    DAC->CR &= ~DAC_CR_TEN1;
+
+    // 2. 使能三角波生成
+    // MAMPx[3:0]=1111，最大幅度 4095
+    DAC->CR |= (15 << DAC_CR_MAMP1_Pos);
+
+    // 3. 使能 DAC
+    DAC->CR |= DAC_CR_EN1;
+
+    // 4. 软件触发 (产生三角波)
+    DAC->SWTRIGR |= DAC_SWTRIGR_SWTRIG1;
+}
+
+// 锯齿波生成
+void DAC_Sawtooth_Init(void) {
+    // 使用线性递增的查找表
+    for (int i = 0; i < 256; i++) {
+        saw_table[i] = i * 16;  // 0-4080
+    }
+    // 配合 DMA 循环输出
+    DAC_DMA_Waveform_Init();
+}`,
+                    visual: "triangle_wave"
+                },
+                {
+                    title: "双通道同步",
+                    narration: "双 DAC 通道可同时更新，输出两路同步信号。用于立体声音频、IQ 信号、差分信号生成。使用 DACCxDHR 同时写入两个通道。",
+                    code: `// 双通道同步输出
+void DAC_Dual_Channel_Init(void) {
+    // 使能两个通道
+    DAC->CR |= DAC_CR_EN1 | DAC_CR_EN2;
+
+    // 同步触发 (TIM2 TRGO)
+    DAC->CR |= (0b010 << DAC_CR_TSEL1_Pos);
+    DAC->CR |= (0b010 << DAC_CR_TSEL2_Pos);
+    DAC->CR |= DAC_CR_TEN1 | DAC_CR_TEN2;
+}
+
+// 同时设置两个通道电压
+void DAC_SetDualVoltage(float voltage1, float voltage2) {
+    uint16_t dac1 = (uint16_t)((voltage1 / 3.3) * 4095);
+    uint16_t dac2 = (uint16_t)((voltage2 / 3.3) * 4095);
+
+    // 同时写入双通道保持寄存器
+    DAC->DHR12RD = (dac2 << 16) | dac1;
+
+    // 软件触发同步更新
+    DAC->SWTRIGR |= DAC_SWTRIGR_SWTRIG;
+}
+
+// 应用：立体声音频
+// 左声道 = DAC 通道 1
+// 右声道 = DAC 通道 2`,
+                    visual: "dual_channel"
+                },
+                {
+                    title: "音频输出应用",
+                    narration: "DAC 用于音频回放，8kHz-48kHz 采样率。配合 DMA 双缓冲实现连续播放。可生成提示音、语音、简单音乐。I2S 外接 DAC 音质更好。",
+                    code: `// 音频回放系统
+#define AUDIO_SAMPLE_RATE 8000
+#define AUDIO_BUFFER_SIZE 1024
+
+uint16_t audio_buffer[2][AUDIO_BUFFER_SIZE];
+volatile uint8_t active_buffer = 0;
+
+void DAC_Audio_Init(void) {
+    // TIM7 触发更新率 = 8kHz
+    TIM7->PSC = 71;  // 1MHz
+    TIM7->ARR = (1000000 / AUDIO_SAMPLE_RATE) - 1;
+    TIM7->CR2 |= (1 << TIM_CR2_MMS_Pos); // TRGO
+
+    // DAC 配置
+    DAC->CR |= DAC_CR_TEN1 | DAC_CR_DMAEN1;
+
+    // DMA 循环模式
+    DMA2_Channel3->CNDTR = AUDIO_BUFFER_SIZE;
+    DMA2_Channel3->CCR |= DMA_CCR3_CIRC | DMA_CCR3_HTIE;
+}
+
+// 播放音频
+void Audio_Play(const uint16_t* samples, uint32_t length) {
+    // 填充缓冲区
+    memcpy(audio_buffer[0], samples, length * 2);
+    TIM7->CR1 |= TIM_CR1_CEN;  // 启动
+    DAC->CR |= DAC_CR_EN1;
+}
+
+// 生成提示音 ( sine 波)
+void Audio_Beep(float freq, int duration_ms) {
+    for (int i = 0; i < AUDIO_BUFFER_SIZE; i++) {
+        float phase = (float)i / AUDIO_SAMPLE_RATE * freq * 2 * 3.14159;
+        audio_buffer[0][i] = 2048 + (int16_t)(2000 * sinf(phase));
+    }
+    Audio_Play(audio_buffer[0], AUDIO_BUFFER_SIZE);
+}`,
+                    visual: "audio_output"
+                },
+                {
+                    title: "应用实例总结",
+                    narration: "DAC 应用广泛：信号发生器生成各种波形，音频回放播放声音，电机控制提供模拟参考，可调电源输出控制电压。掌握 DAC，解锁模拟信号生成能力。",
+                    code: `// 应用速查表
+// ================
+
+// 函数信号发生器
+void SignalGenerator(float freq, WaveformType type) {
+    switch(type) {
+        case SINE: Load_SineTable(freq); break;
+        case TRIANGLE: Load_TriangleTable(freq); break;
+        case SAWTOOTH: Load_SawTable(freq); break;
+        case SQUARE: Load_SquareTable(freq); break;
+    }
+    TIM6->ARR = (1000000 / freq / TABLE_SIZE) - 1;
+    TIM6->CR1 |= TIM_CR1_CEN;
+}
+
+// 可调直流电源
+void PowerSupply_SetVoltage(float voltage) {
+    DAC_SetVoltage(voltage);  // 0-3.3V
+}
+
+// 电机控制模拟参考
+void Motor_Control_Analog(float speed) {
+    float ref_voltage = speed * 3.3;  // 0-100% → 0-3.3V
+    DAC_SetVoltage(ref_voltage);
+}
+
+// 音频提示音
+void Play_Beep(void) {
+    Audio_Beep(1000.0, 200);  // 1kHz, 200ms
+}`,
+                    visual: "applications"
+                }
+            ];
+
+            const speakStep = React.useCallback((stepIndex) => {
+                if ('speechSynthesis' in window) {
+                    const utterance = new SpeechSynthesisUtterance(steps[stepIndex].narration);
+                    utterance.lang = 'zh-CN';
+                    utterance.rate = 1.0;
+                    utterance.pitch = 1.0;
+                    const voices = speechSynthesis.getVoices();
+                    const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                    if (zhVoice) utterance.voice = zhVoice;
+                    utterance.onend = () => {
+                        voiceEndTimerRef.current = setTimeout(() => {
+                            if (stepIndex < steps.length - 1) setCurrentStep(prev => prev + 1);
+                            else setIsPlaying(false);
+                        }, 800);
+                    };
+                    utterance.onerror = () => {
+                        setTimeout(() => {
+                            if (stepIndex < steps.length - 1) setCurrentStep(prev => prev + 1);
+                        }, 800);
+                    };
+                    speechSynthesis.speak(utterance);
+                }
+            }, [steps]);
+
+            React.useEffect(() => {
+                if (isPlaying) speakStep(currentStep);
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying, speakStep]);
+
+            // 波形动画
+            React.useEffect(() => {
+                if (isPlaying) {
+                    const interval = setInterval(() => {
+                        setPhase(prev => (prev + 1) % 64);
+                        if (waveform === 'sine') {
+                            const value = 2048 + Math.floor(2000 * Math.sin(phase * 2 * Math.PI / 64));
+                            setDacValue(value);
+                        }
+                    }, 50);
+                    return () => clearInterval(interval);
+                }
+            }, [isPlaying, phase, waveform]);
+
+            const handleStart = () => { setIsPlaying(true); setCurrentStep(0); };
+            const handleNext = () => { if (currentStep < steps.length - 1) setCurrentStep(prev => prev + 1); };
+            const handlePrev = () => { if (currentStep > 0) setCurrentStep(prev => prev - 1); };
+
+            const DACArchVisual = () => (
+                <div className="h-64 flex flex-col">
+                    <div className="flex-1 bg-gray-800 rounded-lg p-4 mb-4 relative">
+                        <div className="text-xs text-gray-400 mb-2">电阻串型 DAC 结构</div>
+                        <svg viewBox="0 0 400 80" className="w-full">
+                            <rect x="10" y="30" width="80" height="30" fill="#ec4899" rx="4" />
+                            <text x="50" y="50" textAnchor="middle" fill="white" fontSize="10">数据锁存</text>
+                            <line x1="90" y1="45" x2="130" y2="45" stroke="#f472b6" strokeWidth="2" />
+                            <rect x="130" y="10" width="20" height="60" fill="#db2777" />
+                            <rect x="150" y="15" width="20" height="50" fill="#db2777" />
+                            <rect x="170" y="20" width="20" height="40" fill="#db2777" />
+                            <text x="200" y="50" textAnchor="middle" fill="#f472b6" fontSize="10">电阻串</text>
+                            <line x1="230" y1="45" x2="270" y2="45" stroke="#f472b6" strokeWidth="2" />
+                            <rect x="270" y="30" width="80" height="30" fill="#be185d" rx="4" />
+                            <text x="310" y="50" textAnchor="middle" fill="white" fontSize="10">输出缓冲</text>
+                            <line x1="350" y1="45" x2="380" y2="45" stroke="#10b981" strokeWidth="2" />
+                            <text x="385" y="50" fill="#10b981" fontSize="10">Vout</text>
+                        </svg>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                        <div className="bg-gray-800 rounded p-2"><div className="text-xs text-gray-400">分辨率</div><div className="text-lg font-bold text-pink-400">12 位</div></div>
+                        <div className="bg-gray-800 rounded p-2"><div className="text-xs text-gray-400">范围</div><div className="text-lg font-bold text-pink-400">0-4095</div></div>
+                        <div className="bg-gray-800 rounded p-2"><div className="text-xs text-gray-400">通道</div><div className="text-lg font-bold text-pink-400">2 通道</div></div>
+                        <div className="bg-gray-800 rounded p-2"><div className="text-xs text-gray-400">输出</div><div className="text-lg font-bold text-pink-400">0-Vref</div></div>
+                    </div>
+                </div>
+            );
+
+            const DACInitVisual = () => (
+                <div className="h-64 flex flex-col">
+                    <div className="flex-1 flex items-center justify-around mb-4">
+                        {['时钟', 'GPIO', '通道配置', '缓冲', '触发源', '使能'].map((step, i) => (
+                            <div key={i} className={`w-14 h-14 rounded-full flex items-center justify-center ${i <= 5 ? 'bg-pink-500' : 'bg-gray-700'}`}>
+                                <span className="text-xs">{step}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-3 text-center">
+                        <div className="text-xs text-gray-400">DAC 状态</div>
+                        <div className="text-green-400 font-bold">✓ 已使能 | 缓冲开启 | 软件触发</div>
+                    </div>
+                </div>
+            );
+
+            const SineWaveVisual = () => (
+                <div className="h-64 flex flex-col">
+                    <div className="flex-1 bg-gray-800 rounded-lg relative overflow-hidden mb-4">
+                        <svg viewBox="0 0 400 100" className="w-full h-full">
+                            <path d={`M 0 50 ${Array.from({length: 400}).map((_, i) => `L ${i} ${50 + Math.sin((i + phase) * 0.15) * 40}`).join(' ')}`} fill="none" stroke="#ec4899" strokeWidth="2" />
+                        </svg>
+                        <div className="absolute top-2 right-2 text-xs text-pink-400">{frequency}Hz 正弦波</div>
+                    </div>
+                    <div className="flex gap-2">
+                        <div className="flex-1 bg-gray-800 rounded p-2 text-center">
+                            <div className="text-xs text-gray-400">当前值</div>
+                            <div className="text-lg font-bold text-pink-400">{dacValue}</div>
+                        </div>
+                        <div className="flex-1 bg-gray-800 rounded p-2 text-center">
+                            <div className="text-xs text-gray-400">电压</div>
+                            <div className="text-lg font-bold text-pink-400">{(dacValue / 4095 * 3.3).toFixed(2)}V</div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const DMAOutputVisual = () => (
+                <div className="h-64 flex flex-col">
+                    <div className="text-xs text-gray-400 mb-2">DMA 循环传输</div>
+                    <div className="flex-1 flex items-center gap-4 mb-4">
+                        <div className="bg-gray-800 rounded-lg p-4 flex-1">
+                            <div className="text-xs text-gray-400 mb-2">内存 (波形表)</div>
+                            <div className="grid grid-cols-8 gap-1">
+                                {Array.from({length: 16}).map((_, i) => (
+                                    <div key={i} className={`h-4 rounded ${i === phase % 16 ? 'bg-pink-500 animate-pulse' : 'bg-pink-700'}`}></div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="text-pink-400">→</div>
+                        <div className="bg-gray-800 rounded-lg p-4 w-32">
+                            <div className="text-xs text-gray-400 mb-2">DAC 寄存器</div>
+                            <div className="text-2xl font-bold text-pink-400">{dacValue}</div>
+                        </div>
+                    </div>
+                    <div className="text-center text-green-400">✓ DMA 自动传输 | 无需 CPU</div>
+                </div>
+            );
+
+            const TriangleWaveVisual = () => (
+                <div className="h-64 flex flex-col">
+                    <div className="flex-1 bg-gray-800 rounded-lg relative overflow-hidden mb-4">
+                        <svg viewBox="0 0 400 100" className="w-full h-full">
+                            <polyline points="0,80 100,20 200,80 300,20 400,80" fill="none" stroke="#ec4899" strokeWidth="2" />
+                        </svg>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-gray-800 rounded p-2">
+                            <div className="text-xs text-gray-400">上升</div>
+                            <div className="text-lg font-bold text-pink-400">{phase < 32 ? '✓' : '×'}</div>
+                        </div>
+                        <div className="bg-gray-800 rounded p-2">
+                            <div className="text-xs text-gray-400">峰值</div>
+                            <div className="text-lg font-bold text-pink-400">4095</div>
+                        </div>
+                        <div className="bg-gray-800 rounded p-2">
+                            <div className="text-xs text-gray-400">下降</div>
+                            <div className="text-lg font-bold text-pink-400">{phase >= 32 ? '✓' : '×'}</div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const DualChannelVisual = () => (
+                <div className="h-64 flex flex-col gap-2">
+                    <div className="bg-gray-800 rounded-lg p-2">
+                        <div className="text-xs text-gray-400 mb-1">通道 1 (左声道)</div>
+                        <svg viewBox="0 0 400 40" className="w-full">
+                            <path d={`M 0 20 ${Array.from({length: 400}).map((_, i) => `L ${i} ${20 + Math.sin((i + phase) * 0.15) * 15}`).join(' ')}`} fill="none" stroke="#ec4899" strokeWidth="2" />
+                        </svg>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-2">
+                        <div className="text-xs text-gray-400 mb-1">通道 2 (右声道)</div>
+                        <svg viewBox="0 0 400 40" className="w-full">
+                            <path d={`M 0 20 ${Array.from({length: 400}).map((_, i) => `L ${i} ${20 + Math.sin((i + phase) * 0.15) * 15}`).join(' ')}`} fill="none" stroke="#f472b6" strokeWidth="2" />
+                        </svg>
+                    </div>
+                    <div className="text-center text-green-400 text-xs">立体声同步输出</div>
+                </div>
+            );
+
+            const AudioOutputVisual = () => (
+                <div className="h-64 flex flex-col">
+                    <div className="flex-1 bg-gray-800 rounded-lg relative overflow-hidden mb-4 p-4">
+                        <div className="text-xs text-gray-400 mb-2">音频缓冲区 (双缓冲)</div>
+                        <div className="grid grid-cols-2 gap-2 h-full">
+                            <div className={`bg-pink-900/30 rounded border-2 ${activeBuffer === 0 ? 'border-pink-500' : 'border-gray-700'}`}>
+                                <div className="text-xs text-pink-400 p-1">缓冲区 0</div>
+                                <div className="grid grid-cols-4 gap-0.5 p-1">
+                                    {Array.from({length: 16}).map((_, i) => (
+                                        <div key={i} className="h-3 bg-pink-500/50 rounded"></div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className={`bg-pink-900/30 rounded border-2 ${activeBuffer === 1 ? 'border-pink-500' : 'border-gray-700'}`}>
+                                <div className="text-xs text-pink-400 p-1">缓冲区 1</div>
+                                <div className="grid grid-cols-4 gap-0.5 p-1">
+                                    {Array.from({length: 16}).map((_, i) => (
+                                        <div key={i} className="h-3 bg-pink-500/50 rounded"></div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="text-center">
+                        <div className="text-2xl font-bold text-pink-400">8kHz / 16 位 / 单声道</div>
+                        <div className="text-xs text-gray-400">音频采样率</div>
+                    </div>
+                </div>
+            );
+
+            const ApplicationsVisual = () => (
+                <div className="h-64 grid grid-cols-2 gap-2">
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">信号发生器</div>
+                        <div className="text-2xl">📡</div>
+                        <div className="text-xs text-pink-400">各种波形</div>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">音频回放</div>
+                        <div className="text-2xl">🔊</div>
+                        <div className="text-xs text-pink-400">8-48kHz</div>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">电机控制</div>
+                        <div className="text-2xl">⚙️</div>
+                        <div className="text-xs text-pink-400">模拟参考</div>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-2 text-center">
+                        <div className="text-xs text-gray-400">可调电源</div>
+                        <div className="text-2xl">🔌</div>
+                        <div className="text-xs text-pink-400">0-3.3V</div>
+                    </div>
+                </div>
+            );
+
+            const renderVisual = () => {
+                switch(currentStep) {
+                    case 0: return <DACArchVisual />;
+                    case 1: return <DACInitVisual />;
+                    case 2: return <SineWaveVisual />;
+                    case 3: return <DMAOutputVisual />;
+                    case 4: return <TriangleWaveVisual />;
+                    case 5: return <DualChannelVisual />;
+                    case 6: return <AudioOutputVisual />;
+                    case 7: return <ApplicationsVisual />;
+                    default: return <DACArchVisual />;
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-4 gradient-theme">
+                    <div className="max-w-7xl mx-auto">
+                        <h1 className="text-3xl font-bold text-center mb-2">STM32 DAC 数模转换完整指南</h1>
+                        <p className="text-center text-white/80 mb-4">文件编号：1257 | 波形生成 · 音频输出 · DMA 传输</p>
+                        <div className="flex justify-center gap-4 mb-4">
+                            <button onClick={handlePrev} disabled={currentStep === 0} className="px-6 py-2 bg-white/20 rounded-lg disabled:opacity-50 hover:bg-white/30">上一步</button>
+                            <button onClick={handleStart} disabled={isPlaying} className="px-6 py-2 bg-green-500 rounded-lg hover:bg-green-600 disabled:opacity-50">{isPlaying ? '播放中...' : '开始播放'}</button>
+                            <button onClick={handleNext} disabled={currentStep === steps.length - 1} className="px-6 py-2 bg-white/20 rounded-lg disabled:opacity-50 hover:bg-white/30">下一步</button>
+                        </div>
+                        <div className="flex justify-center gap-2 mb-4">
+                            {steps.map((_, idx) => (<div key={idx} className={`w-3 h-3 rounded-full ${idx === currentStep ? 'bg-white animate-pulse' : 'bg-white/30'}`}></div>))}
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <div className="code-bg rounded-lg p-4 font-mono text-sm overflow-auto">
+                                <pre className="text-green-400 whitespace-pre-wrap">{steps[currentStep].code}</pre>
+                            </div>
+                            <div className="bg-gray-800 rounded-lg p-4">{renderVisual()}</div>
+                            <div className="bg-white/10 rounded-lg p-4">
+                                <h2 className="text-xl font-bold mb-4">{steps[currentStep].title}</h2>
+                                <p className="text-white/80 leading-relaxed">{steps[currentStep].narration}</p>
+                            </div>
+                        </div>
+                        <div className="text-center mt-4 text-white/60 text-sm">步骤 {currentStep + 1} / {steps.length} | 自动播放 | 中文语音</div>
+                    </div>
+                </div>
+            );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

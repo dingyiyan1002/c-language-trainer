@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1192 - RTOS 空闲任务与钩子函数 - C 语言核心</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: linear-gradient(135deg, #475569 0%, #1e293b 100%); color: #e0e7ff; min-height: 100vh; overflow-x: hidden; }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(0.98); } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes idle { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(10deg); } }
+        @keyframes hook { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+        .pulse { animation: pulse 2s infinite; }
+        .blink { animation: blink 1s infinite; }
+        .idle { animation: idle 3s ease-in-out infinite; }
+        .hook { animation: hook 1s ease-in-out infinite; }
+
+        .state-transition { transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+
+        .code-line { display: block; padding: 2px 0; }
+        .code-keyword { color: #c678dd; }
+        .code-type { color: #e5c07b; }
+        .code-function { color: #61afef; }
+        .code-string { color: #98c379; }
+        .code-comment { color: #7f8c8d; font-style: italic; }
+        .code-number { color: #d19a66; }
+        .code-operator { color: #56b6c2; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // ========== COLOR MAP - 6 unique colors for this file ==========
+        const COLOR_MAP = {
+            primary: '#64748b',    // Slate - Idle task
+            secondary: '#10b981',  // Emerald - Hook functions
+            accent: '#3b82f6',     // Blue - Low power mode
+            bg: '#0f172a',         // Slate 900
+            text: '#f1f5f9',       // Slate 100
+            border: '#334155'      // Slate 700
+        };
+
+        // ========== SKILL.md v3.0 8 Regions ==========
+        const STEPS = [
+            { title: "空闲任务基础", subtitle: "最低优先级任务", duration: 8000 },
+            { title: "空闲任务钩子", subtitle: "vApplicationIdleHook", duration: 8000 },
+            { title: "低功耗模式", subtitle: "休眠与唤醒", duration: 8000 },
+            { title: " Tickless 模式", subtitle: "跳过 Tick 中断", duration: 8000 },
+            { title: "栈溢出检测", subtitle: "运行时保护", duration: 8000 },
+            { title: "堆栈监控", subtitle: "水位线检测", duration: 8000 },
+            { title: "应用案例", subtitle: "电池供电设备", duration: 8000 },
+            { title: "最佳实践", subtitle: "低功耗设计", duration: 10000 }
+        ];
+
+        // ========== Main App ==========
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isPlaying, setIsPlaying] = useState(true);
+            const [isMuted, setIsMuted] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+            const synthRef = useRef(window.speechSynthesis);
+            const currentUtteranceRef = useRef(null);
+
+            // 系统状态
+            const [systemState, setSystemState] = useState({
+                idleTaskRunning: true,
+                hookCalled: false,
+                lowPowerMode: false,
+                ticklessActive: false,
+                tasksBlocked: 3,
+                idleCount: 0
+            });
+
+            // 动画状态
+            const [animState, setAnimState] = useState({
+                idleAnim: false,
+                hookFlash: false
+            });
+
+            // ========== 语音合成 ==========
+            const speak = useCallback((text) => {
+                if (isMuted) return;
+                if (currentUtteranceRef.current) {
+                    synthRef.current.cancel();
+                }
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                const voices = synthRef.current.getVoices();
+                const xiaoxiaoVoice = voices.find(v =>
+                    v.name.includes('Xiaoxiao') ||
+                    v.name.includes('zh-CN') ||
+                    v.lang === 'zh-CN'
+                );
+                if (xiaoxiaoVoice) utterance.voice = xiaoxiaoVoice;
+
+                utterance.onend = () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = (event) => {
+                    console.warn('Speech synthesis error:', event);
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                currentUtteranceRef.current = utterance;
+                synthRef.current.speak(utterance);
+            }, [isMuted]);
+
+            // ========== 步骤推进 ==========
+            useEffect(() => {
+                const step = STEPS[currentStep];
+                speak(step.title + "。" + step.subtitle);
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                };
+            }, [currentStep, speak]);
+
+            // ========== 空闲任务循环模拟 ==========
+            useEffect(() => {
+                if (currentStep === 0 || currentStep === 1) {
+                    const interval = setInterval(() => {
+                        setAnimState(prev => ({ ...prev, idleAnim: true }));
+                        setTimeout(() => setAnimState(prev => ({ ...prev, idleAnim: false })), 500);
+
+                        setSystemState(prev => ({
+                            ...prev,
+                            idleCount: prev.idleCount + 1,
+                            hookCalled: currentStep === 1 && !prev.lowPowerMode
+                        }));
+                    }, 2000);
+
+                    return () => clearInterval(interval);
+                }
+            }, [currentStep]);
+
+            // ========== 手动控制 ==========
+            const handleNext = () => { if (currentStep < STEPS.length - 1) setCurrentStep(currentStep + 1); };
+            const handlePrev = () => { if (currentStep > 0) setCurrentStep(currentStep - 1); };
+            const handleRestart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+                setSystemState({
+                    idleTaskRunning: true,
+                    hookCalled: false,
+                    lowPowerMode: false,
+                    ticklessActive: false,
+                    tasksBlocked: 3,
+                    idleCount: 0
+                });
+            };
+
+            const toggleLowPower = () => {
+                setSystemState(prev => ({ ...prev, lowPowerMode: !prev.lowPowerMode }));
+            };
+
+            // ========== 渲染代码区域 ==========
+            const renderCode = () => {
+                const codeSnippets = {
+                    0: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 空闲任务基础 */</span><br/>
+                            <span className="code-comment">// 空闲任务是 RTOS 自动创建的特殊任务 */</span><br/>
+                            <span className="code-comment">// 特点： */</span><br/>
+                            <span className="code-comment">// 1. 优先级最低 (总是最后运行) */</span><br/>
+                            <span className="code-comment">// 2. 永远处于就绪态 */</span><br/>
+                            <span className="code-comment">// 3. 无其他任务可运行时执行 */</span><br/><br/>
+                            <span className="code-comment">/* 空闲任务函数 (内部) */</span><br/>
+                            <span className="code-keyword">static void</span> <span className="code-function">prvIdleTask</span>(<span className="code-keyword">void</span>* pvParams) {<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">for</span>(;;) {<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">portTASK_FUNCTION</span>();<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-comment">// 调用钩子函数 (如果启用) */</span><br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">configIDLE_HOOK</span>();<br/>
+                            &nbsp;&nbsp;}<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    1: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 空闲任务钩子函数 */</span><br/>
+                            <span className="code-comment">// 配置： */</span><br/>
+                            #define configUSE_IDLE_HOOK  1<br/><br/>
+                            <span className="code-comment">// 实现 (用户代码)： */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">vApplicationIdleHook</span>(<span className="code-keyword">void</span>) {<br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 注意：不能调用阻塞 API */</span><br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 适合：低功耗模式、统计 CPU 利用率 */</span><br/>
+                            &nbsp;&nbsp;<span className="code-keyword">if</span> (g_enterLowPower) {<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">enterSleepMode</span>();<br/>
+                            &nbsp;&nbsp;}<br/>
+                            }<br/><br/>
+                            <span className="code-comment">/* 典型应用 */</span><br/>
+                            <span className="code-comment">// - 进入睡眠模式 */</span><br/>
+                            <span className="code-comment">// - 喂看门狗 */</span><br/>
+                            <span className="code-comment">// - CPU 利用率统计 */</span><br/>
+                        </div>
+                    ),
+                    2: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 低功耗睡眠模式 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">enterSleepMode</span>(<span className="code-keyword">void</span>) {<br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 1. 禁用外设时钟 */</span><br/>
+                            &nbsp;&nbsp;RCC->AHBENR &= ~PeriphClocks;<br/><br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 2. 配置唤醒源 (EXTI) */</span><br/>
+                            &nbsp;&nbsp;EXTI->IMR |= EXTI_WakeBtn;<br/><br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 3. 进入睡眠 */</span><br/>
+                            &nbsp;&nbsp;<span className="code-function">__WFI</span>();  <span className="code-comment">// Wait For Interrupt */</span><br/><br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 4. 唤醒后恢复时钟 */</span><br/>
+                            &nbsp;&nbsp;RCC->AHBENR |= PeriphClocks;<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    3: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* Tickless 空闲模式 */</span><br/>
+                            <span className="code-comment">// 配置： */</span><br/>
+                            #define configUSE_TICKLESS_IDLE  1<br/><br/>
+                            <span className="code-comment">// 原理： */</span><br/>
+                            <span className="code-comment">// 1. 计算到下次事件的时间 */</span><br/>
+                            <span className="code-comment">// 2. 配置 RTC 唤醒 */</span><br/>
+                            <span className="code-comment">// 3. 关闭 SysTick，进入 Stop 模式 */</span><br/>
+                            <span className="code-comment">// 4. RTC 中断唤醒，补偿 Tick */</span><br/><br/>
+                            <span className="code-comment">/* 回调函数 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">vConfigureTicklessIdle</span>(<span className="code-keyword">void</span>) {<br/>
+                            &nbsp;&nbsp;RTC->WUTR = ticksToSleep;<br/>
+                            &nbsp;&nbsp;RTC->CR |= RTC_CR_WUTE;<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    4: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 栈溢出检测 */</span><br/>
+                            <span className="code-comment">// 配置： */</span><br/>
+                            #define configCHECK_FOR_STACK_OVERFLOW  2<br/><br/>
+                            <span className="code-comment">// 方法 1: 检查栈顶标记 */</span><br/>
+                            <span className="code-comment">// 方法 2: 检查栈指针范围 */</span><br/><br/>
+                            <span className="code-comment">/* 溢出钩子函数 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">vApplicationStackOverflowHook</span>(<br/>
+                            &nbsp;&nbsp;<span className="code-type">TaskHandle_t</span> xTask,<br/>
+                            &nbsp;&nbsp;<span className="code-type">char</span>* pcTaskName<br/>) {<br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 栈溢出处理： */</span><br/>
+                            &nbsp;&nbsp;<span className="code-function">Error_Handler</span>();  <span className="code-comment">// 通常死循环或复位 */</span><br/>
+                            }<br/>
+                        </div>
+                    ),
+                    5: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 栈水位线监控 */</span><br/>
+                            <span className="code-comment">// 获取任务栈最小剩余量 */</span><br/>
+                            <span className="code-type">UBaseType_t</span> uxHighWaterMark =<br/>
+                            &nbsp;&nbsp;<span className="code-function">uxTaskGetStackHighWaterMark</span>(<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;xTaskHandle<br/>
+                            &nbsp;&nbsp;);<br/><br/>
+                            <span className="code-comment">// 单位：字 (4 字节) */</span><br/>
+                            <span className="code-comment">// 返回值：历史最小剩余量 */</span><br/><br/>
+                            <span className="code-comment">/* 检查示例 */</span><br/>
+                            <span className="code-keyword">if</span> (uxHighWaterMark &lt; 32) {<br/>
+                            &nbsp;&nbsp;<span className="code-function">printf</span>("警告：栈空间不足！\n");<br/>
+                            }<br/>
+                        </div>
+                    ),
+                    6: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 电池供电设备应用 */</span><br/>
+                            <span className="code-keyword">void</span> <span className="code-function">vApplicationIdleHook</span>(<span className="code-keyword">void</span>) {<br/>
+                            &nbsp;&nbsp;<span className="code-keyword">static</span> <span className="code-type">uint32_t</span> idleCount = 0;<br/>
+                            &nbsp;&nbsp;idleCount++;<br/><br/>
+                            &nbsp;&nbsp;<span className="code-comment">// 连续空闲 100 次进入低功耗 */</span><br/>
+                            &nbsp;&nbsp;<span className="code-keyword">if</span> (idleCount > 100) {<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;<span className="code-function">enterStopMode</span>();<br/>
+                            &nbsp;&nbsp;&nbsp;&nbsp;idleCount = 0;<br/>
+                            &nbsp;&nbsp;}<br/>
+                            }<br/><br/>
+                            <span className="code-comment">// 典型效果： */</span><br/>
+                            <span className="code-comment">// 运行电流：10mA → 待机：100μA */</span><br/>
+                            <span className="code-comment">// 电池寿命提升 50-100 倍 */</span><br/>
+                        </div>
+                    ),
+                    7: (
+                        <div className="text-sm">
+                            <span className="code-comment">/* 低功耗设计最佳实践 */</span><br/>
+                            <span className="code-comment">// ✓ 1. 启用 Tickless 模式 (无任务时停 Tick) */</span><br/>
+                            <span className="code-comment">// ✓ 2. 空闲钩子进入 Stop/Standby */</span><br/>
+                            <span className="code-comment">// ✓ 3. 使用事件驱动架构 (非轮询) */</span><br/>
+                            <span className="code-comment">// ✓ 4. 禁用未用外设时钟 */</span><br/>
+                            <span className="code-comment">// ✓ 5. GPIO 配置为模拟模式 (无漏电) */</span><br/>
+                            <span className="code-comment">// ✓ 6. 监控栈水位线 (预防溢出) */</span><br/>
+                            <span className="code-comment">// ✓ 7. 任务优先级合理分配 */</span><br/>
+                        </div>
+                    )
+                };
+                return codeSnippets[currentStep];
+            };
+
+            // ========== 渲染可视化区域 ==========
+            const renderVisualization = () => {
+                if (currentStep === 0) {
+                    // 空闲任务基础
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>空闲任务 (Idle Task)</h3>
+                            <div className="relative">
+                                {/* 任务优先级展示 */}
+                                <div className="space-y-2">
+                                    <div className="p-3 rounded-lg flex items-center gap-4 opacity-50" style={{backgroundColor: '#3b82f6'}}>
+                                        <div className="text-xs font-bold">高优先级任务</div>
+                                        <div className="flex-1 h-6 rounded" style={{backgroundColor: 'rgba(255,255,255,0.3)'}}></div>
+                                        <span className="text-xs">运行/阻塞</span>
+                                    </div>
+                                    <div className="p-3 rounded-lg flex items-center gap-4 opacity-70" style={{backgroundColor: '#10b981'}}>
+                                        <div className="text-xs font-bold">中优先级任务</div>
+                                        <div className="flex-1 h-6 rounded" style={{backgroundColor: 'rgba(255,255,255,0.3)'}}></div>
+                                        <span className="text-xs">运行/就绪</span>
+                                    </div>
+                                    <div className={`p-3 rounded-lg flex items-center gap-4 transition-all ${animState.idleAnim ? 'pulse' : ''}`} style={{backgroundColor: COLOR_MAP.primary}}>
+                                        <div className="text-xs font-bold">空闲任务 (优先级 0)</div>
+                                        <div className="flex-1 h-6 rounded" style={{backgroundColor: 'rgba(255,255,255,0.3)'}}></div>
+                                        <span className="text-xs">{systemState.idleTaskRunning ? '运行中' : '等待'}</span>
+                                    </div>
+                                </div>
+
+                                {/* 说明 */}
+                                <div className="mt-4 p-4 rounded-lg" style={{backgroundColor: 'rgba(100,116,139,0.2)'}}>
+                                    <div className="text-xs space-y-1">
+                                        <div>✓ 优先级最低 (总是最后被调度)</div>
+                                        <div>✓ 永远处于就绪态 (不会被阻塞)</div>
+                                        <div>✓ 无其他任务可运行时执行</div>
+                                        <div>✓ 系统自动创建，无需手动创建</div>
+                                    </div>
+                                </div>
+
+                                {/* 统计 */}
+                                <div className="mt-4 grid grid-cols-2 gap-4">
+                                    <div className="text-center p-3 rounded" style={{backgroundColor: 'rgba(100,116,139,0.2)'}}>
+                                        <div className="text-2xl font-bold" style={{color: COLOR_MAP.primary}}>{systemState.idleCount}</div>
+                                        <div className="text-xs" style={{color: COLOR_MAP.text}}>空闲执行次数</div>
+                                    </div>
+                                    <div className="text-center p-3 rounded" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                        <div className="text-2xl font-bold" style={{color: COLOR_MAP.secondary}}>{systemState.tasksBlocked}</div>
+                                        <div className="text-xs" style={{color: COLOR_MAP.text}}>阻塞任务数</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 1) {
+                    // 空闲任务钩子
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>空闲任务钩子函数</h3>
+                            <div className="relative">
+                                {/* 流程图 */}
+                                <div className="p-4 rounded-lg mb-4" style={{backgroundColor: 'rgba(100,116,139,0.2)'}}>
+                                    <div className="text-center font-bold mb-2">空闲任务执行流程</div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex-1 p-2 rounded text-center text-xs" style={{backgroundColor: COLOR_MAP.primary}}>空闲任务循环</div>
+                                        <span className="text-2xl">→</span>
+                                        <div className={`flex-1 p-2 rounded text-center text-xs transition-all ${systemState.hookCalled ? 'pulse' : ''}`} style={{backgroundColor: systemState.hookCalled ? COLOR_MAP.secondary : '#374151'}}>
+                                            {systemState.hookCalled ? '✓ vApplicationIdleHook' : 'vApplicationIdleHook'}
+                                        </div>
+                                        <span className="text-2xl">→</span>
+                                        <div className="flex-1 p-2 rounded text-center text-xs" style={{backgroundColor: COLOR_MAP.primary}}>返回循环</div>
+                                    </div>
+                                </div>
+
+                                {/* 钩子函数用途 */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="p-3 rounded-lg" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                        <div className="font-bold mb-2" style={{color: COLOR_MAP.secondary}}>✓ 低功耗模式</div>
+                                        <div className="text-xs">无任务时进入睡眠/停止模式</div>
+                                    </div>
+                                    <div className="p-3 rounded-lg" style={{backgroundColor: 'rgba(59,130,246,0.2)'}}>
+                                        <div className="font-bold mb-2" style={{color: COLOR_MAP.accent}}>✓ CPU 利用率统计</div>
+                                        <div className="text-xs">统计空闲时间比例</div>
+                                    </div>
+                                    <div className="p-3 rounded-lg" style={{backgroundColor: 'rgba(245,158,11,0.2)'}}>
+                                        <div className="font-bold mb-2" style={{color: COLOR_MAP.accent}}>✓ 看门狗喂养</div>
+                                        <div className="text-xs">系统空闲时喂狗</div>
+                                    </div>
+                                    <div className="p-3 rounded-lg" style={{backgroundColor: 'rgba(239,68,68,0.2)'}}>
+                                        <div className="font-bold mb-2" style={{color: '#ef4444'}}>⚠ 注意事项</div>
+                                        <div className="text-xs">不能调用阻塞 API</div>
+                                    </div>
+                                </div>
+
+                                {/* 配置开关 */}
+                                <div className="mt-4 p-3 rounded border-2" style={{borderColor: COLOR_MAP.border}}>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm" style={{color: COLOR_MAP.text}}>configUSE_IDLE_HOOK</span>
+                                        <button onClick={() => setSystemState(prev => ({...prev, hookCalled: !prev.hookCalled}))}
+                                            className={`px-4 py-2 rounded font-bold transition-opacity ${systemState.hookCalled ? '' : 'opacity-50'}`}
+                                            style={{backgroundColor: systemState.hookCalled ? COLOR_MAP.secondary : '#6b7280'}}>
+                                            {systemState.hookCalled ? '已启用' : '已禁用'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 2) {
+                    // 低功耗模式
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>低功耗睡眠模式</h3>
+                            <div className="space-y-4">
+                                {/* 运行模式 */}
+                                <div className={`p-4 rounded-lg border-2 transition-all ${systemState.lowPowerMode ? 'opacity-50' : 'pulse'}`} style={{borderColor: COLOR_MAP.primary, backgroundColor: 'rgba(59,130,246,0.2)'}}>
+                                    <div className="font-bold flex items-center gap-2" style={{color: COLOR_MAP.primary}}>
+                                        <span>⚡</span> 运行模式 (RUN)
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 mt-3">
+                                        <div className="text-center p-2 rounded" style={{backgroundColor: 'rgba(255,255,255,0.1)'}}>
+                                            <div className="text-2xl">🔌</div>
+                                            <div className="text-xs">CPU 全速</div>
+                                        </div>
+                                        <div className="text-center p-2 rounded" style={{backgroundColor: 'rgba(255,255,255,0.1)'}}>
+                                            <div className="text-2xl">💡</div>
+                                            <div className="text-xs">外设开启</div>
+                                        </div>
+                                        <div className="text-center p-2 rounded" style={{backgroundColor: 'rgba(255,255,255,0.1)'}}>
+                                            <div className="text-2xl">📊</div>
+                                            <div className="text-xs">10mA</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 箭头 */}
+                                <div className="flex justify-center">
+                                    <button onClick={toggleLowPower} className="px-6 py-2 rounded font-bold transition-opacity hover:opacity-80" style={{backgroundColor: COLOR_MAP.secondary}}>
+                                        {systemState.lowPowerMode ? '唤醒 →' : '← 进入睡眠'}
+                                    </button>
+                                </div>
+
+                                {/* 睡眠模式 */}
+                                <div className={`p-4 rounded-lg border-2 transition-all ${!systemState.lowPowerMode ? 'opacity-50' : 'pulse'}`} style={{borderColor: COLOR_MAP.accent, backgroundColor: 'rgba(245,158,11,0.2)'}}>
+                                    <div className="font-bold flex items-center gap-2" style={{color: COLOR_MAP.accent}}>
+                                        <span>😴</span> 睡眠模式 (SLEEP/STOP)
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 mt-3">
+                                        <div className="text-center p-2 rounded" style={{backgroundColor: 'rgba(255,255,255,0.1)'}}>
+                                            <div className="text-2xl">⏸</div>
+                                            <div className="text-xs">CPU 停止</div>
+                                        </div>
+                                        <div className="text-center p-2 rounded" style={{backgroundColor: 'rgba(255,255,255,0.1)'}}>
+                                            <div className="text-2xl">🔕</div>
+                                            <div className="text-xs">外设关闭</div>
+                                        </div>
+                                        <div className="text-center p-2 rounded" style={{backgroundColor: 'rgba(255,255,255,0.1)'}}>
+                                            <div className="text-2xl">🔋</div>
+                                            <div className="text-xs">100μA</div>
+                                        </div>
+                                    </div>
+                                    <div className="text-xs mt-3 text-center">
+                                        唤醒源：EXTI / RTC / UART
+                                    </div>
+                                </div>
+
+                                {/* 功耗对比 */}
+                                <div className="text-center text-sm" style={{color: COLOR_MAP.text}}>
+                                    功耗比：运行 / 睡眠 = <span className="font-bold" style={{color: COLOR_MAP.secondary}}>100:1</span>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 3) {
+                    // Tickless 模式
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>Tickless 空闲模式</h3>
+                            <div className="space-y-4">
+                                {/* 传统 Tick */}
+                                <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(239,68,68,0.1)'}}>
+                                    <div className="font-bold mb-2" style={{color: '#ef4444'}}>传统模式 (持续 Tick)</div>
+                                    <div className="flex gap-1">
+                                        {[...Array(20)].map((_, i) => (
+                                            <div key={i} className="flex-1 h-8 rounded flex items-center justify-center pulse" style={{backgroundColor: '#ef4444', animationDelay: `${i * 50}ms`}}>
+                                                <span className="text-xs">⏱</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="text-xs mt-2">每 1ms 唤醒一次，即使无任务</div>
+                                </div>
+
+                                {/* Tickless */}
+                                <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(16,185,129,0.1)'}}>
+                                    <div className="font-bold mb-2 flex items-center gap-2" style={{color: COLOR_MAP.secondary}}>
+                                        <span>✓</span> Tickless 模式
+                                    </div>
+                                    <div className="flex gap-1">
+                                        <div className="flex-1 h-8 rounded flex items-center justify-center" style={{backgroundColor: COLOR_MAP.secondary}}>
+                                            <span className="text-xs">⏱</span>
+                                        </div>
+                                        <div className="flex-[5] h-8 rounded flex items-center justify-center" style={{backgroundColor: '#374151'}}>
+                                            <span className="text-xs">😴 睡眠</span>
+                                        </div>
+                                        <div className="flex-1 h-8 rounded flex items-center justify-center" style={{backgroundColor: COLOR_MAP.secondary}}>
+                                            <span className="text-xs">⏱</span>
+                                        </div>
+                                    </div>
+                                    <div className="text-xs mt-2">跳过空闲 Tick，RTC 唤醒</div>
+                                </div>
+
+                                {/* 配置 */}
+                                <div className="p-4 rounded-lg border-2" style={{borderColor: COLOR_MAP.border}}>
+                                    <div className="text-sm mb-2" style={{color: COLOR_MAP.text}}>配置 Tickless Idle</div>
+                                    <div className="font-mono text-xs">#define configUSE_TICKLESS_IDLE  1</div>
+                                    <div className="text-xs mt-2" style={{color: COLOR_MAP.text}}>
+                                        适用场景：电池供电、低功耗设备
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 4 || currentStep === 5) {
+                    // 栈溢出检测 / 堆栈监控
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>
+                                {currentStep === 4 ? '栈溢出检测' : '栈水位线监控'}
+                            </h3>
+
+                            {/* 栈结构 */}
+                            <div className="border-2 rounded-lg overflow-hidden" style={{borderColor: COLOR_MAP.border}}>
+                                <div className="p-2 text-center font-bold" style={{backgroundColor: COLOR_MAP.primary}}>任务栈 (4KB)</div>
+                                <div className="relative h-64">
+                                    {/* 已用栈 */}
+                                    <div className="absolute top-0 left-0 right-0 h-40" style={{backgroundColor: 'rgba(59,130,246,0.5)'}}>
+                                        <div className="text-center py-2 text-xs" style={{color: COLOR_MAP.text}}>已用栈空间</div>
+                                    </div>
+                                    {/* 空闲栈 */}
+                                    <div className="absolute top-40 left-0 right-0 h-16" style={{backgroundColor: 'rgba(16,185,129,0.3)'}}>
+                                        <div className="text-center py-2 text-xs" style={{color: COLOR_MAP.text}}>空闲栈空间 (水位线：256 字)</div>
+                                    </div>
+                                    {/* 栈顶标记 */}
+                                    <div className="absolute bottom-0 left-0 right-0 h-8 flex items-center justify-center" style={{backgroundColor: '#ef4444'}}>
+                                        <span className="text-xs font-bold">栈顶标记 (0xABAD1DEA)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 检测方法 */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="p-3 rounded-lg" style={{backgroundColor: 'rgba(239,68,68,0.2)'}}>
+                                    <div className="font-bold mb-2" style={{color: '#ef4444'}}>方法 1: 栈顶标记</div>
+                                    <div className="text-xs">启动时填充栈顶为 0xABAD1DEA</div>
+                                    <div className="text-xs">检查时验证标记是否被覆盖</div>
+                                </div>
+                                <div className="p-3 rounded-lg" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                    <div className="font-bold mb-2" style={{color: COLOR_MAP.secondary}}>方法 2: 栈指针检查</div>
+                                    <div className="text-xs">记录历史最小栈指针位置</div>
+                                    <div className="text-xs">uxTaskGetStackHighWaterMark()</div>
+                                </div>
+                            </div>
+
+                            {/* 水位线读取 */}
+                            <div className="p-4 rounded-lg" style={{backgroundColor: 'rgba(59,130,246,0.2)'}}>
+                                <div className="font-bold mb-2" style={{color: COLOR_MAP.accent}}>栈水位线监控 API</div>
+                                <div className="font-mono text-xs">uxTaskGetStackHighWaterMark(xTask)</div>
+                                <div className="text-xs mt-2">
+                                    返回值：历史最小剩余量 (字数)<br/>
+                                    建议阈值：&gt; 32 字 (128 字节)
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 6) {
+                    // 应用案例
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>电池供电设备应用</h3>
+                            <div className="relative">
+                                {/* 设备状态 */}
+                                <div className="p-4 rounded-lg mb-4 text-center" style={{backgroundColor: 'rgba(100,116,139,0.2)'}}>
+                                    <div className="text-4xl mb-2">📱</div>
+                                    <div className="font-bold">无线传感器节点</div>
+                                    <div className="text-xs mt-2">纽扣电池供电 (CR2032)</div>
+                                </div>
+
+                                {/* 工作循环 */}
+                                <div className="space-y-2">
+                                    <div className="p-3 rounded-lg flex items-center gap-4" style={{backgroundColor: 'rgba(239,68,68,0.2)'}}>
+                                        <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{backgroundColor: '#ef4444'}}>
+                                            <span className="text-2xl">📡</span>
+                                        </div>
+                                        <div>
+                                            <div className="font-bold">工作阶段 (100ms)</div>
+                                            <div className="text-xs">读取传感器 → 发送数据 → 10mA</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-center">
+                                        <span className="text-2xl">⬇</span>
+                                    </div>
+
+                                    <div className="p-3 rounded-lg flex items-center gap-4" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                        <div className="w-12 h-12 rounded-full flex items-center justify-center pulse" style={{backgroundColor: COLOR_MAP.secondary}}>
+                                            <span className="text-2xl">😴</span>
+                                        </div>
+                                        <div>
+                                            <div className="font-bold">睡眠阶段 (9.9s)</div>
+                                            <div className="text-xs">空闲任务 → Stop 模式 → 100μA</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 电池寿命对比 */}
+                                <div className="mt-6 grid grid-cols-2 gap-4">
+                                    <div className="p-3 rounded-lg text-center" style={{backgroundColor: 'rgba(239,68,68,0.2)'}}>
+                                        <div className="text-xs">无低功耗</div>
+                                        <div className="text-2xl font-bold" style={{color: '#ef4444'}}>~3 天</div>
+                                    </div>
+                                    <div className="p-3 rounded-lg text-center" style={{backgroundColor: 'rgba(16,185,129,0.2)'}}>
+                                        <div className="text-xs">启用 Tickless</div>
+                                        <div className="text-2xl font-bold" style={{color: COLOR_MAP.secondary}}>~1 年</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                if (currentStep === 7) {
+                    // 最佳实践
+                    return (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-center mb-4" style={{color: COLOR_MAP.text}}>低功耗设计最佳实践</h3>
+                            <div className="space-y-3">
+                                <div className="p-3 rounded border-l-4" style={{backgroundColor: 'rgba(16,185,129,0.1)', borderLeftColor: COLOR_MAP.secondary}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.secondary}}>✓ 启用 Tickless 模式</div>
+                                    <div className="text-xs mt-1">configUSE_TICKLESS_IDLE = 1</div>
+                                    <div className="text-xs">无任务时自动跳过 Tick 中断</div>
+                                </div>
+
+                                <div className="p-3 rounded border-l-4" style={{backgroundColor: 'rgba(59,130,246,0.1)', borderLeftColor: COLOR_MAP.accent}}>
+                                    <div className="font-bold" style={{color: COLOR_MAP.accent}}>✓ 空闲钩子进入低功耗</div>
+                                    <div className="text-xs mt-1">vApplicationIdleHook 中调用 WFI</div>
+                                    <div className="text-xs">SLEEP/STOP/STANDBY 模式选择</div>
+                                </div>
+
+                                <div className="p-3 rounded border-l-4" style={{backgroundColor: 'rgba(245,158,11,0.1)', borderLeftColor: '#f59e0b'}}>
+                                    <div className="font-bold" style={{color: '#f59e0b'}}>✓ 事件驱动架构</div>
+                                    <div className="text-xs mt-1">使用信号量/队列，避免轮询</div>
+                                    <div className="text-xs">任务大部分时间处于阻塞态</div>
+                                </div>
+
+                                <div className="p-3 rounded border-l-4" style={{backgroundColor: 'rgba(139,92,246,0.1)', borderLeftColor: '#8b5cf6'}}>
+                                    <div className="font-bold" style={{color: '#8b5cf6'}}>✓ 禁用未用外设时钟</div>
+                                    <div className="text-xs mt-1">RCC 配置中关闭未用模块</div>
+                                    <div className="text-xs">GPIO 配置为模拟模式 (无漏电)</div>
+                                </div>
+
+                                <div className="p-3 rounded border-l-4" style={{backgroundColor: 'rgba(239,68,68,0.1)', borderLeftColor: '#ef4444'}}>
+                                    <div className="font-bold" style={{color: '#ef4444'}}>✓ 监控栈水位线</div>
+                                    <div className="text-xs mt-1">定期调用 uxTaskGetStackHighWaterMark</div>
+                                    <div className="text-xs">预防栈溢出导致系统崩溃</div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                return null;
+            };
+
+            // ========== 渲染解释区域 ==========
+            const renderExplanation = () => {
+                const explanations = {
+                    0: {
+                        title: "空闲任务基础",
+                        points: [
+                            "空闲任务是 RTOS 自动创建的特殊任务，优先级最低 (0)",
+                            "永远处于就绪态，当无其他任务可运行时执行",
+                            "系统必须始终有可运行的任务，空闲任务保证这一点",
+                            "空闲任务中可调用钩子函数实现自定义功能"
+                        ]
+                    },
+                    1: {
+                        title: "空闲任务钩子函数",
+                        points: [
+                            "configUSE_IDLE_HOOK=1 启用钩子函数",
+                            "vApplicationIdleHook() 在空闲任务中被周期性调用",
+                            "不能调用阻塞 API (vTaskDelay 等)",
+                            "典型应用：低功耗模式、CPU 利用率统计、喂看门狗"
+                        ]
+                    },
+                    2: {
+                        title: "低功耗睡眠模式",
+                        points: [
+                            "RUN 模式：CPU 全速运行，外设开启，~10mA",
+                            "SLEEP 模式：CPU 停止，外设运行，~3mA",
+                            "STOP 模式：CPU 停止，外设关闭，~100μA",
+                            "STANDBY 模式：深度睡眠，仅备份域，~10μA"
+                        ]
+                    },
+                    3: {
+                        title: "Tickless 空闲模式",
+                        points: [
+                            "configUSE_TICKLESS_IDLE=1 启用 Tickless",
+                            "计算到下次任务唤醒的时间",
+                            "关闭 SysTick，配置 RTC 唤醒",
+                            "唤醒后补偿 Tick，更新任务延时",
+                            "电池供电设备必备特性"
+                        ]
+                    },
+                    4: {
+                        title: "栈溢出检测",
+                        points: [
+                            "configCHECK_FOR_STACK_OVERFLOW=1/2 启用检测",
+                            "方法 1：检查栈顶标记 (0xABAD1DEA) 是否被覆盖",
+                            "方法 2：检查栈指针是否超出范围",
+                            "溢出时调用 vApplicationStackOverflowHook()"
+                        ]
+                    },
+                    5: {
+                        title: "栈水位线监控",
+                        points: [
+                            "uxTaskGetStackHighWaterMark() 获取历史最小剩余栈",
+                            "返回值单位：字 (Cortex-M 为 4 字节)",
+                            "建议阈值：>32 字 (128 字节)",
+                            "调试阶段定期监控，预防栈溢出"
+                        ]
+                    },
+                    6: {
+                        title: "电池供电设备应用",
+                        points: [
+                            "无线传感器节点：工作 100ms，睡眠 9.9s",
+                            "工作电流 10mA，睡眠电流 100μA",
+                            "占空比 1%，平均电流~199μA",
+                            "CR2032 电池寿命：无低功耗 3 天 → Tickless 1 年"
+                        ]
+                    },
+                    7: {
+                        title: "低功耗设计最佳实践",
+                        points: [
+                            "启用 Tickless 模式，无任务时跳过 Tick",
+                            "空闲钩子进入 STOP/STANDBY 模式",
+                            "事件驱动架构，避免轮询",
+                            "禁用未用外设时钟，GPIO 模拟模式",
+                            "定期监控栈水位线，预防溢出"
+                        ]
+                    }
+                };
+
+                const exp = explanations[currentStep];
+                return (
+                    <div>
+                        <h3 className="text-lg font-bold mb-3" style={{color: COLOR_MAP.primary}}>{exp.title}</h3>
+                        <ul className="space-y-2">
+                            {exp.points.map((point, idx) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                    <span className="text-green-400 mt-1">▸</span>
+                                    <span>{point}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="flex flex-col h-screen p-4 gap-4">
+                    {/* 顶部标题 */}
+                    <div className="text-center py-3 rounded-lg" style={{backgroundColor: 'rgba(0,0,0,0.3)'}}>
+                        <h1 className="text-2xl font-bold mb-1">1192 - RTOS 空闲任务与钩子函数</h1>
+                        <p className="text-sm opacity-75">C 语言核心 | 低功耗设计与栈保护机制</p>
+                    </div>
+
+                    {/* 三列主布局 */}
+                    <div className="flex-1 grid grid-cols-3 gap-4 overflow-hidden">
+                        {/* 左列：代码 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>📝</span> 代码示例
+                            </h2>
+                            <div className="font-mono text-xs leading-relaxed" style={{color: COLOR_MAP.text}}>
+                                {renderCode()}
+                            </div>
+                        </div>
+
+                        {/* 中列：可视化 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>🎬</span> 可视化演示
+                            </h2>
+                            <div className="text-sm">
+                                {renderVisualization()}
+                            </div>
+                        </div>
+
+                        {/* 右列：解释 */}
+                        <div className="rounded-lg p-4 overflow-auto" style={{backgroundColor: COLOR_MAP.bg, border: `2px solid ${COLOR_MAP.border}`}}>
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2" style={{color: COLOR_MAP.text}}>
+                                <span>📖</span> 原理解析
+                            </h2>
+                            <div className="text-sm space-y-3" style={{color: COLOR_MAP.text}}>
+                                {renderExplanation()}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 底部控制栏 */}
+                    <div className="rounded-lg p-3 flex items-center justify-between" style={{backgroundColor: 'rgba(0,0,0,0.3)'}}>
+                        <div className="flex items-center gap-4">
+                            <button onClick={handlePrev} disabled={currentStep === 0}
+                                className="px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.primary}}>上一步</button>
+                            <button onClick={handleNext} disabled={currentStep === STEPS.length - 1}
+                                className="px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.secondary}}>下一步</button>
+                            <button onClick={handleRestart}
+                                className="px-4 py-2 rounded hover:opacity-80"
+                                style={{backgroundColor: COLOR_MAP.accent}}>重新开始</button>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            <div className="text-sm">
+                                <span className="opacity-75">进度：</span>
+                                <span className="font-bold">{currentStep + 1} / {STEPS.length}</span>
+                            </div>
+                            <button onClick={() => setIsMuted(!isMuted)}
+                                className="px-3 py-2 rounded text-sm"
+                                style={{backgroundColor: isMuted ? '#ef4444' : '#10b981'}}>
+                                {isMuted ? '🔇 静音' : '🔊 有声'}
+                            </button>
+                            <button onClick={() => setIsPlaying(!isPlaying)}
+                                className="px-4 py-2 rounded font-bold"
+                                style={{backgroundColor: isPlaying ? COLOR_MAP.primary : COLOR_MAP.accent}}>
+                                {isPlaying ? '⏸ 暂停' : '▶ 播放'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

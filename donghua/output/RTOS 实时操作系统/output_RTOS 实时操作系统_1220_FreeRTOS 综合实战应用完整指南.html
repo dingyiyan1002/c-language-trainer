@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreeRTOS 综合实战应用完整指南 - 可视化动画教程</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(20px); } }
+        @keyframes highlight { 0%, 100% { background-color: #06b6d4; } 50% { background-color: #22d3ee; } }
+        @keyframes run { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes process { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+        @keyframes complete { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-blink { animation: blink 1s linear infinite; }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
+        .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        .animate-flow { animation: flow 1.5s ease-in-out infinite; }
+        .animate-highlight { animation: highlight 2s ease-in-out infinite; }
+        .animate-run { animation: run 2s linear infinite; }
+        .animate-process { animation: process 1.5s ease-in-out infinite; }
+        .animate-complete { animation: complete 0.5s ease-in-out; }
+
+        .task-flow { transition: all 0.3s ease; }
+
+        * { font-family: 'Segoe UI', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#06b6c4',
+            secondary: '#22d3ee',
+            accent: '#67e8f9',
+            highlight: '#cffafe',
+            text: '#ecfeff',
+            bg: '#164e63'
+        };
+
+        const STEPS = [
+            { title: "系统架构设计", subtitle: "多任务应用框架" },
+            { title: "任务划分与优先级", subtitle: "任务粒度与调度策略" },
+            { title: "IPC 机制整合", subtitle: "信号量 + 队列 + 事件组" },
+            { title: "内存管理策略", subtitle: "静态 vs 动态分配" },
+            { title: "错误处理机制", subtitle: "断言 + 钩子 + 看门狗" },
+            { title: "低功耗设计", subtitle: "tickless idle 模式" },
+            { title: "调试与监控", subtitle: "日志 + 统计 + 追踪" },
+            { title: "完整项目示例", subtitle: "传感器数据采集系统" }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [systemState, setSystemState] = React.useState('idle');
+            const [activeTasks, setActiveTasks] = React.useState([]);
+            const [messageFlow, setMessageFlow] = React.useState([]);
+            const [cpuLoad, setCpuLoad] = React.useState(0);
+            const [powerMode, setPowerMode] = React.useState('normal');
+            const voiceEndTimerRef = React.useRef(null);
+
+            const simulateSystem = (step) => {
+                setSystemState('initializing');
+                setActiveTasks([]);
+                setMessageFlow([]);
+
+                switch(step) {
+                    case 0:
+                        setTimeout(() => {
+                            setSystemState('running');
+                            setActiveTasks(['Init', 'Scheduler']);
+                        }, 500);
+                        break;
+                    case 1:
+                        setTimeout(() => {
+                            setActiveTasks(['Task_H', 'Task_M', 'Task_L', 'Idle']);
+                            setSystemState('scheduled');
+                        }, 500);
+                        break;
+                    case 2:
+                        setTimeout(() => {
+                            setMessageFlow(['Sem→', 'Queue→', 'Event→']);
+                            setSystemState('ipc_active');
+                        }, 500);
+                        break;
+                    case 3:
+                        setTimeout(() => {
+                            setSystemState('memory_optimized');
+                        }, 500);
+                        break;
+                    case 4:
+                        setTimeout(() => {
+                            setSystemState('error_handling');
+                        }, 500);
+                        break;
+                    case 5:
+                        setTimeout(() => {
+                            setPowerMode('lowpower');
+                            setSystemState('tickless');
+                        }, 500);
+                        break;
+                    case 6:
+                        setTimeout(() => {
+                            setSystemState('monitoring');
+                            setCpuLoad(65);
+                        }, 500);
+                        break;
+                    case 7:
+                        setTimeout(() => {
+                            setActiveTasks(['Sensor', 'Filter', 'UART', 'Logger']);
+                            setMessageFlow(['ADC→', 'FFT→', 'TX→', 'LOG→']);
+                            setSystemState('full_application');
+                            setCpuLoad(45);
+                        }, 500);
+                        break;
+                }
+            };
+
+            const speak = (text) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'zh-CN';
+                utterance.rate = 1.0;
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang === 'zh-CN' || v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                speechSynthesis.speak(utterance);
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        } else {
+                            setIsPlaying(false);
+                        }
+                    }, 800);
+                };
+            };
+
+            React.useEffect(() => {
+                if (isPlaying) {
+                    simulateSystem(currentStep);
+                    setTimeout(() => {
+                        const narration = [
+                            "系统架构设计是 RTOS 应用的基础。采用分层设计：硬件抽象层、驱动层、RTOS 中间件、应用层。每层职责清晰，便于维护和移植。",
+                            "任务划分原则：按功能独立划分，高实时性任务高优先级。典型优先级：ISR 处理>控制任务>通信任务>日志任务>空闲任务。",
+                            "IPC 机制整合：信号量用于同步，队列传递数据，事件组广播状态。避免混用导致复杂度增加。优先使用轻量级机制。",
+                            "内存管理策略：关键任务使用静态分配确保可靠性，临时数据使用动态分配提高灵活性。heap_4 是推荐选择。",
+                            "错误处理机制：configASSERT 断言检查，栈溢出钩子检测，硬件看门狗兜底。分层错误处理，快速失败。",
+                            "低功耗设计：启用 tickless idle 模式，空闲时停止 SysTick。配合 WFI/WFE 进入睡眠。适用于电池供电设备。",
+                            "调试监控：串口日志输出，CPU 使用率统计，栈水位线监控。条件编译调试代码，发布时关闭减少开销。",
+                            "完整示例：传感器数据采集系统。4 个任务协作：ADC 采样、FFT 滤波、UART 传输、数据记录。综合运用所有 RTOS 机制。"
+                        ];
+                        speak(narration[currentStep]);
+                    }, 300);
+                }
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [isPlaying, currentStep]);
+
+            React.useEffect(() => {
+                if (!isPlaying) {
+                    simulateSystem(currentStep);
+                }
+            }, [currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const getSystemStateIcon = () => {
+                switch(systemState) {
+                    case 'idle': return '⏸️';
+                    case 'initializing': return '🔄';
+                    case 'running': return '▶️';
+                    case 'scheduled': return '📋';
+                    case 'ipc_active': return '🔗';
+                    case 'memory_optimized': return '💾';
+                    case 'error_handling': return '⚠️';
+                    case 'tickless': return '💤';
+                    case 'monitoring': return '📊';
+                    case 'full_application': return '🚀';
+                    default: return '❓';
+                }
+            };
+
+            return (
+                <div className="min-h-screen p-6 bg-gradient-to-br from-gray-900 via-cyan-900 to-teal-900">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-6">
+                            <h1 className="text-4xl font-bold text-white mb-2">FreeRTOS 综合实战应用完整指南</h1>
+                            <p className="text-cyan-200 text-lg">从架构设计到完整项目实现</p>
+                        </div>
+
+                        {/* 进度指示器 */}
+                        <div className="flex justify-center mb-6">
+                            <div className="flex gap-2">
+                                {STEPS.map((step, index) => (
+                                    <button
+                                        key={index}
+                                        onClick={() => setCurrentStep(index)}
+                                        className={`w-10 h-10 rounded-full transition-all ${
+                                            index === currentStep
+                                                ? 'bg-cyan-500 text-white scale-110'
+                                                : index < currentStep
+                                                ? 'bg-cyan-700 text-cyan-200'
+                                                : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                    >
+                                        {index + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* 代码区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-cyan-500/30">
+                                <h3 className="text-xl font-bold text-cyan-400 mb-4">💻 核心代码</h3>
+                                <div className="space-y-4 text-sm">
+                                    {currentStep === 0 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-cyan-300 overflow-x-auto">
+                                            <code>{`// 分层架构设计
+// 1. 硬件抽象层 (HAL)
+void HAL_Init(void);
+void HAL_SystemClock_Config(void);
+
+// 2. 驱动层
+void UART_Init(void);
+void ADC_Init(void);
+void SPI_Init(void);
+
+// 3. RTOS 中间件
+void RTOS_Init(void);
+void vTaskStartScheduler(void);
+
+// 4. 应用层
+void vSensorTask(void* pv);
+void vControlTask(void* pv);
+void vCommTask(void* pv);`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-cyan-300 overflow-x-auto">
+                                            <code>{`// 任务优先级配置
+#define TASK_PRIORITY_SENSOR    (tskIDLE_PRIORITY + 4)
+#define TASK_PRIORITY_CONTROL   (tskIDLE_PRIORITY + 3)
+#define TASK_PRIORITY_COMM      (tskIDLE_PRIORITY + 2)
+#define TASK_PRIORITY_LOGGER    (tskIDLE_PRIORITY + 1)
+#define TASK_PRIORITY_IDLE      (tskIDLE_PRIORITY + 0)
+
+// 任务创建
+xTaskCreate(vSensorTask, "Sensor", 256, NULL,
+            TASK_PRIORITY_SENSOR, NULL);
+xTaskCreate(vControlTask, "Control", 512, NULL,
+            TASK_PRIORITY_CONTROL, NULL);`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-cyan-300 overflow-x-auto">
+                                            <code>{`// IPC 整合使用
+SemaphoreHandle_t xDataReady;  // 同步
+QueueHandle_t xDataQueue;       // 数据传递
+EventGroupHandle_t xSystemEvent; // 事件广播
+
+// 生产者任务
+void vProducerTask(void* pv) {
+    data = acquireData();
+    xQueueSend(xDataQueue, &data, 0);
+    xSemaphoreGive(xDataReady);
+    xEventGroupSetBits(xSystemEvent, EVENT_DATA);
+}
+
+// 消费者任务
+void vConsumerTask(void* pv) {
+    xSemaphoreTake(xDataReady, portMAX_DELAY);
+    xQueueReceive(xDataQueue, &data, 0);
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-cyan-300 overflow-x-auto">
+                                            <code>{`// 静态 + 动态混合分配
+// 关键任务：静态分配
+StaticTask_t xSensorTaskBuffer;
+StackType_t xSensorTaskStack[256];
+TaskHandle_t xSensorTask = xTaskCreateStatic(
+    vSensorTask, "Sensor", 256, NULL,
+    TASK_PRIORITY_SENSOR,
+    xSensorTaskStack,
+    &xSensorTaskBuffer);
+
+// 临时数据：动态分配
+void* buffer = pvPortMalloc(size);
+// ... 使用
+vPortFree(buffer);`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-cyan-300 overflow-x-auto">
+                                            <code>{`// 错误处理机制
+// 1. 断言检查
+#define configASSERT(x) if((x)==0) {\\
+    printf("Assert failed: %s\\n", #x); \\
+    while(1); \\
+}
+
+// 2. 栈溢出钩子
+void vApplicationStackOverflowHook(
+    TaskHandle_t xTask, char* pcTaskName) {
+    printf("Stack overflow: %s\\n", pcTaskName);
+}
+
+// 3. 看门狗
+void WDG_Init(void);
+void WDG_Feed(void);  // 在每个任务循环中`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-cyan-300 overflow-x-auto">
+                                            <code>{`// tickless idle 低功耗
+// FreeRTOSConfig.h
+#define configUSE_TICKLESS_IDLE 1
+#define configEXPECTED_IDLE_TIME_BEFORE_SLEEP 2
+
+// 空闲钩子中进入睡眠
+void vApplicationIdleHook(void) {
+    portENTER_CRITICAL();
+    if (canEnterSleep) {
+        __WFI();  // Wait For Interrupt
+    }
+    portEXIT_CRITICAL();
+}
+
+// 功耗：运行 10mA → 睡眠 100μA`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-cyan-300 overflow-x-auto">
+                                            <code>{`// 调试与监控
+// 1. 串口日志
+#define LOG_DEBUG(fmt, ...) \\
+    printf("[D] %s:%d " fmt "\\n", \\
+           __FILE__, __LINE__, ##__VA_ARGS__)
+
+// 2. CPU 使用率统计
+void printCpuUsage(void);
+void printStackWatermark(void);
+
+// 3. 任务状态
+void printTaskList(void) {
+    TaskStatus_t* tasks = pvPortMalloc(...);
+    uxTaskGetSystemState(tasks, ...);
+    // 打印任务名、状态、优先级、栈水位
+}`}</code>
+                                        </pre>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <pre className="bg-gray-800 p-4 rounded-lg text-cyan-300 overflow-x-auto">
+                                            <code>{`// 完整项目：传感器数据采集
+int main(void) {
+    HAL_Init();
+    SystemClock_Config();
+    UART_Init();
+    ADC_Init();
+
+    // 创建任务
+    xTaskCreate(vSensorTask, "Sensor", 256, NULL, 4, NULL);
+    xTaskCreate(vFilterTask, "Filter", 512, NULL, 3, NULL);
+    xTaskCreate(vUartTask, "UART", 256, NULL, 2, NULL);
+    xTaskCreate(vLoggerTask, "Logger", 256, NULL, 1, NULL);
+
+    // 启动调度器
+    vTaskStartScheduler();
+
+    // 永远不会到达这里
+    while(1);
+}`}</code>
+                                        </pre>
+                                    )}
+
+                                    <div className="flex gap-2 mt-4">
+                                        <button
+                                            onClick={() => simulateSystem(currentStep)}
+                                            className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            ▶️ 运行模拟
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setSystemState('idle');
+                                                setActiveTasks([]);
+                                                setMessageFlow([]);
+                                                setCpuLoad(0);
+                                                setPowerMode('normal');
+                                            }}
+                                            className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition"
+                                        >
+                                            🔄 重置
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 可视化区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-cyan-500/30">
+                                <h3 className="text-xl font-bold text-cyan-400 mb-4">🔬 系统可视化</h3>
+                                <div className="space-y-4">
+                                    {/* 系统状态 */}
+                                    <div className="text-center p-4 bg-gray-800 rounded-lg">
+                                        <div className="text-4xl mb-2">{getSystemStateIcon()}</div>
+                                        <div className="text-lg font-bold text-cyan-400">
+                                            {systemState.toUpperCase()}
+                                        </div>
+                                    </div>
+
+                                    {/* 任务列表 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h4 className="text-lg font-bold text-cyan-300 mb-3">活动任务</h4>
+                                        <div className="space-y-2">
+                                            {activeTasks.length > 0 ? (
+                                                activeTasks.map((task, i) => (
+                                                    <div key={i} className="flex items-center justify-between p-2 bg-gray-700 rounded">
+                                                        <span className="text-white text-sm">{task}</span>
+                                                        <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="text-gray-500 text-center py-4">暂无活动任务</div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* 消息流 */}
+                                    {messageFlow.length > 0 && (
+                                        <div className="bg-gray-800 rounded-lg p-4">
+                                            <h4 className="text-lg font-bold text-cyan-300 mb-3">数据流</h4>
+                                            <div className="flex gap-2 overflow-hidden">
+                                                {messageFlow.map((msg, i) => (
+                                                    <div key={i} className="flex-1 text-center p-2 bg-cyan-800/50 rounded text-cyan-300 text-sm animate-flow">
+                                                        {msg}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* CPU 负载 */}
+                                    <div className="text-center">
+                                        <div className="text-2xl font-bold text-cyan-400 mb-2">
+                                            CPU 负载：{cpuLoad > 0 ? cpuLoad : '--'}%
+                                        </div>
+                                        <div className="w-full bg-gray-700 rounded-full h-4">
+                                            <div
+                                                className="bg-gradient-to-r from-cyan-500 to-blue-500 h-4 rounded-full transition-all duration-500"
+                                                style={{ width: `${cpuLoad}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+
+                                    {/* 电源模式 */}
+                                    <div className={`p-4 rounded-lg transition-all ${
+                                        powerMode === 'lowpower'
+                                            ? 'bg-blue-800/50 border border-blue-500'
+                                            : 'bg-gray-800'
+                                    }`}>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-gray-300">电源模式</span>
+                                            <span className={`font-bold ${
+                                                powerMode === 'lowpower' ? 'text-blue-400' : 'text-gray-500'
+                                            }`}>
+                                                {powerMode === 'lowpower' ? '💤 低功耗' : '🔌 正常模式'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 解释区 */}
+                            <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 border border-cyan-500/30">
+                                <h3 className="text-xl font-bold text-cyan-400 mb-4">📖 实战要点</h3>
+                                <div className="space-y-4 text-gray-300">
+                                    {currentStep === 0 && (
+                                        <div>
+                                            <h4 className="font-bold text-cyan-300 mb-2">📌 系统架构</h4>
+                                            <p>采用分层设计：HAL 层 (硬件无关)、驱动层 (外设驱动)、RTOS 层 (任务调度)、应用层 (业务逻辑)。每层独立测试，便于移植和维护。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 1 && (
+                                        <div>
+                                            <h4 className="font-bold text-cyan-300 mb-2">📌 任务优先级</h4>
+                                            <p>高实时性任务高优先级：控制环路 (最高)、传感器采样、通信传输、日志记录 (最低)。避免优先级反转，关键路径使用互斥量。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 2 && (
+                                        <div>
+                                            <h4 className="font-bold text-cyan-300 mb-2">📌 IPC 整合</h4>
+                                            <p>同步用信号量，数据用队列，事件用事件组。避免过度设计，简单通知优先用任务通知。保持 IPC 使用一致性。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 3 && (
+                                        <div>
+                                            <h4 className="font-bold text-cyan-300 mb-2">📌 内存策略</h4>
+                                            <p>关键任务 (控制、安全) 静态分配确保可靠性。临时数据 (缓冲、日志) 动态分配提高灵活性。监控堆内存使用率。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 4 && (
+                                        <div>
+                                            <h4 className="font-bold text-cyan-300 mb-2">📌 错误处理</h4>
+                                            <p>三层防护：断言 (开发期)、钩子 (运行期)、看门狗 (兜底)。错误快速传播，避免掩盖问题。记录错误上下文便于调试。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 5 && (
+                                        <div>
+                                            <h4 className="font-bold text-cyan-300 mb-2">📌 低功耗</h4>
+                                            <p>tickless idle 停止 SysTick 减少唤醒。配合 WFI 进入睡眠，外设中断唤醒。功耗可降低 10-100 倍。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 6 && (
+                                        <div>
+                                            <h4 className="font-bold text-cyan-300 mb-2">📌 调试监控</h4>
+                                            <p>串口日志分级 (DEBUG/INFO/WARN/ERROR)。定期输出 CPU 使用率和栈水位线。发布版本关闭调试输出减少开销。</p>
+                                        </div>
+                                    )}
+                                    {currentStep === 7 && (
+                                        <div>
+                                            <h4 className="font-bold text-cyan-300 mb-2">📌 完整示例</h4>
+                                            <p>传感器采集系统综合应用所有 RTOS 机制。4 个任务流水线处理：采样→滤波→传输→记录。可作为模板复用。</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 导航按钮 */}
+                        <div className="flex justify-center gap-4 mt-6">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className="bg-cyan-600 hover:bg-cyan-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                ⬅️ 上一步
+                            </button>
+                            <button
+                                onClick={() => setIsPlaying(!isPlaying)}
+                                className={`px-6 py-3 rounded-lg transition ${
+                                    isPlaying
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-cyan-600 hover:bg-cyan-700'
+                                } text-white`}
+                            >
+                                {isPlaying ? '⏸️ 暂停' : '▶️  autoplay'}
+                            </button>
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className="bg-cyan-600 hover:bg-cyan-700 text-white px-6 py-3 rounded-lg transition disabled:opacity-50"
+                            >
+                                下一步 ➡️
+                            </button>
+                        </div>
+
+                        {/* 当前步骤指示 */}
+                        <div className="text-center mt-6 p-4 bg-gray-900/80 backdrop-blur rounded-xl border border-cyan-500/30">
+                            <h2 className="text-2xl font-bold text-cyan-400 mb-2">
+                                步骤 {currentStep + 1}: {STEPS[currentStep].title}
+                            </h2>
+                            <p className="text-gray-300">{STEPS[currentStep].subtitle}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

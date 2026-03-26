@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 EEPROM 读写完整指南 - AT24C02 I2C 通信协议</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes flow { 0% { stroke-dashoffset: 100; } 100% { stroke-dashoffset: 0; } }
+        @keyframes wave { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+        @keyframes highlight { 0%, 100% { background-color: #3b82f6; } 50% { background-color: #60a5fa; } }
+        @keyframes activate { 0%, 100% { box-shadow: 0 0 5px #22c55e; } 50% { box-shadow: 0 0 20px #22c55e; } }
+        @keyframes dataShift { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+        @keyframes clockTick { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+        @keyframes ackPulse { 0% { transform: scaleY(0); } 50% { transform: scaleY(1); } 100% { transform: scaleY(0); } }
+        .sda-wave { animation: wave 0.5s ease-in-out infinite; }
+        .scl-tick { animation: clockTick 0.3s ease-in-out infinite; }
+        .data-flow { animation: dataShift 1s linear infinite; }
+        .ack-pulse { animation: ackPulse 0.2s ease-out; }
+        .active-step { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const COLOR_MAP = {
+            primary: '#a855f7', primaryLight: '#c084fc', primaryDark: '#7e22ce',
+            secondary: '#06b6d4', success: '#22c55e', warning: '#f59e0b',
+            sda: '#3b82f6', scl: '#f97316', address: '#8b5cf6', data: '#22c55e',
+            ack: '#ef4444', gradient: 'from-purple-500 via-purple-600 to-cyan-500'
+        };
+
+        const STEPS = [
+            {
+                title: 'EEPROM 基础',
+                voice: 'EEPROM 是电可擦除可编程只读存储器。AT24C02 容量 2Kbit，组织为 256 字节，每页 8 字节。支持 I2C 协议，工作电压 1.7V 到 5.5V，写入时间 5 毫秒。',
+                highlights: ['EEPROM', 'AT24C02', '2Kbit', '256 字节', 'I2C 协议']
+            },
+            {
+                title: 'I2C 协议',
+                voice: 'I2C 是两线制串行总线。SDA 数据线双向传输，SCL 时钟线同步。起始条件：SCL 高电平时 SDA 下降沿。停止条件：SCL 高电平时 SDA 上升沿。数据在 SCL 低电平变化，高电平采样。',
+                highlights: ['SDA', 'SCL', '起始条件', '停止条件', '采样']
+            },
+            {
+                title: '器件地址',
+                voice: 'AT24C02 器件地址 7 位：1010 固定前缀，A2A1A0 引脚地址，最后 1 位读写位。写操作地址 0xA0，读操作地址 0xA1。通过硬件引脚可并联 8 个器件。',
+                highlights: ['1010', 'A2A1A0', 'R/W 位', '0xA0', '0xA1']
+            },
+            {
+                title: '字节写时序',
+                voice: '字节写时序：发送起始信号，发送器件写地址 0xA0，发送字地址，发送数据字节，发送停止信号。写入周期 5 毫秒，期间器件不应答。',
+                highlights: ['起始', '0xA0', '字地址', '数据', '停止', '5ms']
+            },
+            {
+                title: '页面写时序',
+                voice: '页面写可连续写入最多 8 字节。发送起始，器件地址，字地址，然后连续发送 8 个数据字节。地址指针自动递增，页边界需重新发送起始。',
+                highlights: ['8 字节', '连续写入', '自动递增', '页边界']
+            },
+            {
+                title: '随机读时序',
+                voice: '随机读需要先伪写字地址。发送起始，写地址，字地址，重复起始，读地址，读取数据，发送应答，停止信号。',
+                highlights: ['伪写', '重复起始', '0xA1', '读取', 'ACK']
+            },
+            {
+                title: '顺序读时序',
+                voice: '顺序读从指定地址开始连续读取。读取后发送应答继续读取下一个地址，地址指针自动递增。发送不应答停止读取。',
+                highlights: ['连续读取', '自动递增', 'ACK 继续', 'NACK 停止']
+            },
+            {
+                title: '应用实例',
+                voice: '实际应用：保存配置参数，记录运行数据，存储校准值。注意写入寿命 100 万次，避免频繁写入。建议使用页面写提高效率。',
+                highlights: ['配置保存', '数据记录', '100 万次', '页面写']
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [showWaveform, setShowWaveform] = React.useState(false);
+            const [sdaState, setSdaState] = React.useState(1);
+            const [sclState, setSclState] = React.useState(1);
+            const [dataByte, setDataByte] = React.useState(0);
+            const [bitIndex, setBitIndex] = React.useState(0);
+            const [ackState, setAckState] = React.useState(null);
+            const [memData, setMemData] = React.useState(Array(256).fill(0xFF));
+            const [currentAddr, setCurrentAddr] = React.useState(0);
+            const [writeData, setWriteData] = React.useState(0x5A);
+            const [readData, setReadData] = React.useState(null);
+            const [pageData, setPageData] = React.useState([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
+            const [operation, setOperation] = React.useState('idle');
+            const voiceEndTimerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                const utterance = new SpeechSynthesisUtterance(STEPS[currentStep].voice);
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v => v.lang.includes('zh-CN') && v.name.includes('Xiaoxiao'))
+                    || voices.find(v => v.lang.includes('zh-CN'))
+                    || voices.find(v => v.lang.includes('Chinese'));
+                if (zhVoice) utterance.voice = zhVoice;
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        setCurrentStep(prev => {
+                            if (prev < STEPS.length - 1) return prev + 1;
+                            setIsPlaying(false);
+                            return prev;
+                        });
+                    }, 800);
+                };
+
+                if (isPlaying) speechSynthesis.speak(utterance);
+
+                return () => {
+                    if (voiceEndTimerRef.current) clearTimeout(voiceEndTimerRef.current);
+                    speechSynthesis.cancel();
+                };
+            }, [currentStep, isPlaying]);
+
+            const handlePlay = () => setIsPlaying(true);
+            const handlePause = () => {
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+            const handleRestart = () => {
+                setCurrentStep(0);
+                setIsPlaying(true);
+            };
+            const handleStepClick = (index) => {
+                setCurrentStep(index);
+                setIsPlaying(false);
+                speechSynthesis.cancel();
+            };
+
+            // 模拟 I2C 时序
+            React.useEffect(() => {
+                if (!showWaveform) return;
+
+                const runI2CSequence = async () => {
+                    // 起始条件
+                    setSdaState(1);
+                    setSclState(1);
+                    await sleep(100);
+                    setSdaState(0);
+                    await sleep(100);
+                    setSclState(0);
+                    await sleep(100);
+
+                    // 发送器件地址 1010xxx0
+                    const deviceAddr = 0xA0 >> 1;
+                    for (let i = 7; i >= 0; i--) {
+                        setSdaState((deviceAddr >> i) & 1);
+                        await sleep(50);
+                        setSclState(1);
+                        await sleep(100);
+                        setSclState(0);
+                    }
+
+                    // ACK
+                    await sleep(50);
+                    setSclState(1);
+                    await sleep(100);
+                    setAckState('ack');
+                    setSclState(0);
+                    await sleep(100);
+                    setAckState(null);
+
+                    // 发送字地址
+                    const wordAddr = currentAddr;
+                    for (let i = 7; i >= 0; i--) {
+                        setSdaState((wordAddr >> i) & 1);
+                        await sleep(50);
+                        setSclState(1);
+                        await sleep(100);
+                        setSclState(0);
+                    }
+
+                    // ACK
+                    await sleep(50);
+                    setSclState(1);
+                    await sleep(100);
+                    setAckState('ack');
+                    setSclState(0);
+                    await sleep(100);
+                    setAckState(null);
+
+                    // 发送数据
+                    for (let i = 7; i >= 0; i--) {
+                        setSdaState((writeData >> i) & 1);
+                        await sleep(50);
+                        setSclState(1);
+                        await sleep(100);
+                        setSclState(0);
+                    }
+
+                    // ACK
+                    await sleep(50);
+                    setSclState(1);
+                    await sleep(100);
+                    setAckState('ack');
+                    setSclState(0);
+                    await sleep(100);
+                    setAckState(null);
+
+                    // 停止条件
+                    setSdaState(0);
+                    setSclState(1);
+                    await sleep(100);
+                    setSdaState(1);
+                    await sleep(100);
+
+                    // 更新内存
+                    setMemData(prev => {
+                        const newData = [...prev];
+                        newData[currentAddr] = writeData;
+                        return newData;
+                    });
+                    setOperation('write-complete');
+                    setTimeout(() => setOperation('idle'), 500);
+                };
+
+                runI2CSequence();
+            }, [showWaveform, currentAddr, writeData]);
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            const renderWaveform = () => (
+                <div className="bg-gray-800 rounded-lg p-4 font-mono text-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="text-blue-400 font-bold">SDA:</span>
+                        <div className="flex-1 h-8 bg-gray-900 rounded relative overflow-hidden">
+                            <div className="absolute inset-0 flex items-center">
+                                <div className={`h-1 w-full transition-all duration-100 ${sdaState ? 'bg-blue-400 translate-y-[-4px]' : 'bg-blue-600 translate-y-[4px]'}`}></div>
+                            </div>
+                        </div>
+                        <span className={`w-8 text-center ${sdaState ? 'text-blue-400' : 'text-blue-600'}`}>{sdaState}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="text-orange-400 font-bold">SCL:</span>
+                        <div className="flex-1 h-8 bg-gray-900 rounded relative overflow-hidden">
+                            <div className="absolute inset-0 flex items-center">
+                                <div className={`h-1 w-full transition-all duration-50 ${sclState ? 'bg-orange-400 translate-y-[-4px]' : 'bg-orange-600 translate-y-[4px]'}`}></div>
+                            </div>
+                        </div>
+                        <span className={`w-8 text-center ${sclState ? 'text-orange-400' : 'text-orange-600'}`}>{sclState}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-green-400 font-bold">DATA:</span>
+                        <div className="flex-1 flex gap-1">
+                            {Array(8).fill(0).map((_, i) => (
+                                <div key={i} className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold ${i < bitIndex ? 'bg-green-600' : 'bg-gray-700'}`}>
+                                    {i < bitIndex ? ((dataByte >> (7-i)) & 1) : '?'}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    {ackState && (
+                        <div className="mt-2 text-center text-red-400 font-bold animate-pulse">ACK!</div>
+                    )}
+                </div>
+            );
+
+            const renderMemoryGrid = () => (
+                <div className="grid grid-cols-16 gap-1 max-w-xs">
+                    {Array(16).fill(0).map((_, row) => (
+                        <React.Fragment key={row}>
+                            {Array(16).fill(0).map((_, col) => {
+                                const addr = row * 16 + col;
+                                const isCurrent = addr === currentAddr;
+                                const hasData = memData[addr] !== 0xFF;
+                                return (
+                                    <div
+                                        key={addr}
+                                        className={`w-4 h-4 text-[8px] flex items-center justify-center rounded ${
+                                            isCurrent ? 'bg-purple-500 text-white ring-2 ring-white' :
+                                            hasData ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-400'
+                                        }`}
+                                        title={`Addr ${addr}: 0x${memData[addr].toString(16).padStart(2, '0')}`}
+                                    >
+                                        {addr}
+                                    </div>
+                                );
+                            })}
+                        </React.Fragment>
+                    ))}
+                </div>
+            );
+
+            const renderContent = () => {
+                switch (currentStep) {
+                    case 0:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">AT24C02 存储器结构</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">容量</div>
+                                            <div className="text-2xl font-bold text-purple-400">2 Kbit</div>
+                                            <div className="text-sm text-gray-400">= 256 字节</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">页大小</div>
+                                            <div className="text-2xl font-bold text-cyan-400">8 字节</div>
+                                            <div className="text-sm text-gray-400">每页</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">地址范围</div>
+                                            <div className="text-2xl font-bold text-green-400">0x00-0xFF</div>
+                                            <div className="text-sm text-gray-400">256 地址</div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="text-sm text-gray-400">写入时间</div>
+                                            <div className="text-2xl font-bold text-orange-400">5 ms</div>
+                                            <div className="text-sm text-gray-400">每字节</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-purple-900 to-cyan-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">EEPROM 特点:</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 非易失性存储，断电数据不丢失</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> I2C 串行接口，仅需 2 根线</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 支持字节写和页面写</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 擦写寿命 100 万次</li>
+                                        <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 数据保持 100 年</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 1:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">I2C 总线信号</h3>
+                                    <div className="space-y-3">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-16 h-8 bg-blue-600 rounded flex items-center justify-center font-bold">SDA</div>
+                                            <span className="text-sm">数据线，开漏双向 IO，需上拉电阻</span>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-16 h-8 bg-orange-600 rounded flex items-center justify-center font-bold">SCL</div>
+                                            <span className="text-sm">时钟线，由主机产生，开漏输出</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-cyan-400">起始和停止条件</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-blue-400 mb-2">起始条件 (START)</div>
+                                            <div className="text-xs text-gray-400 mb-2">SCL 高电平时 SDA 下降沿</div>
+                                            <div className="flex items-end gap-1 h-12">
+                                                <div className="w-4 h-8 bg-blue-400"></div>
+                                                <div className="w-4 h-8 bg-blue-600"></div>
+                                                <div className="w-4 h-4 bg-blue-600"></div>
+                                                <div className="w-4 h-4 bg-blue-400"></div>
+                                            </div>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-orange-400 mb-2">停止条件 (STOP)</div>
+                                            <div className="text-xs text-gray-400 mb-2">SCL 高电平时 SDA 上升沿</div>
+                                            <div className="flex items-end gap-1 h-12">
+                                                <div className="w-4 h-4 bg-orange-400"></div>
+                                                <div className="w-4 h-4 bg-orange-600"></div>
+                                                <div className="w-4 h-8 bg-orange-600"></div>
+                                                <div className="w-4 h-8 bg-orange-400"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-blue-900 to-orange-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">数据传输规则:</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• SCL 低电平期间：SDA 可以变化</li>
+                                        <li>• SCL 高电平期间：SDA 必须稳定</li>
+                                        <li>• 每个时钟周期传输 1 位数据</li>
+                                        <li>• 先传高位 (MSB First)</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    case 2:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">AT24C02 器件地址</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono">
+                                        <div className="flex items-center justify-center gap-1 mb-3">
+                                            {['1','0','1','0','A2','A1','A0','R/W'].map((bit, i) => (
+                                                <div key={i} className={`w-10 h-12 rounded flex flex-col items-center justify-center ${
+                                                    i < 4 ? 'bg-purple-600' : i < 7 ? 'bg-cyan-600' : 'bg-green-600'
+                                                }`}>
+                                                    <div className="text-xs">{bit}</div>
+                                                    <div className="text-[10px] opacity-75">{7-i}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="grid grid-cols-4 gap-2 text-xs">
+                                            <div className="text-purple-400">固定 1010</div>
+                                            <div className="text-cyan-400">硬件地址</div>
+                                            <div className="text-cyan-400">引脚</div>
+                                            <div className="text-green-400">0=写 1=读</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-cyan-400">地址配置</h3>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center bg-gray-900 rounded p-2">
+                                            <span className="text-sm">A2 A1 A0 = 000</span>
+                                            <span className="text-purple-400 font-mono">写：0xA0 / 读：0xA1</span>
+                                        </div>
+                                        <div className="flex justify-between items-center bg-gray-900 rounded p-2">
+                                            <span className="text-sm">A2 A1 A0 = 001</span>
+                                            <span className="text-purple-400 font-mono">写：0xA2 / 读：0xA3</span>
+                                        </div>
+                                        <div className="flex justify-between items-center bg-gray-900 rounded p-2">
+                                            <span className="text-sm">A2 A1 A0 = 111</span>
+                                            <span className="text-purple-400 font-mono">写：0xAE / 读：0xAF</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-purple-900 to-cyan-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">最多可并联 8 个器件!</h4>
+                                    <p className="text-sm text-gray-300">通过 A2/A1/A0 引脚的不同组合，在同一 I2C 总线上挂载多个 AT24C02。</p>
+                                </div>
+                            </div>
+                        );
+                    case 3:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">字节写时序</h3>
+                                    <div className="flex items-center gap-2 mb-4 overflow-x-auto">
+                                        <div className="flex-shrink-0 bg-blue-600 rounded px-3 py-2 text-sm font-bold">START</div>
+                                        <div className="text-blue-400">→</div>
+                                        <div className="flex-shrink-0 bg-purple-600 rounded px-3 py-2 text-sm font-mono">0xA0</div>
+                                        <div className="text-blue-400">→</div>
+                                        <div className="flex-shrink-0 bg-cyan-600 rounded px-3 py-2 text-sm font-mono">Addr</div>
+                                        <div className="text-blue-400">→</div>
+                                        <div className="flex-shrink-0 bg-green-600 rounded px-3 py-2 text-sm font-mono">Data</div>
+                                        <div className="text-blue-400">→</div>
+                                        <div className="flex-shrink-0 bg-red-600 rounded px-3 py-2 text-sm font-bold">STOP</div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-20 text-xs text-gray-400">1. 起始</span>
+                                            <div className="flex-1 h-6 bg-gray-900 rounded flex items-center px-2">
+                                                <span className="text-blue-400 font-mono text-xs">SDA 下降沿 (SCL=1)</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-20 text-xs text-gray-400">2. 地址</span>
+                                            <div className="flex-1 h-6 bg-gray-900 rounded flex items-center px-2">
+                                                <span className="text-purple-400 font-mono text-xs">1010xxx0 + ACK</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-20 text-xs text-gray-400">3. 字地址</span>
+                                            <div className="flex-1 h-6 bg-gray-900 rounded flex items-center px-2">
+                                                <span className="text-cyan-400 font-mono text-xs">0x00-0xFF + ACK</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-20 text-xs text-gray-400">4. 数据</span>
+                                            <div className="flex-1 h-6 bg-gray-900 rounded flex items-center px-2">
+                                                <span className="text-green-400 font-mono text-xs">数据字节 + ACK</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-20 text-xs text-gray-400">5. 停止</span>
+                                            <div className="flex-1 h-6 bg-gray-900 rounded flex items-center px-2">
+                                                <span className="text-red-400 font-mono text-xs">SDA 上升沿 (SCL=1)</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-orange-900 rounded-lg p-4 border-2 border-orange-500">
+                                    <h4 className="font-bold text-orange-400 mb-2">⚠️ 写入周期 5ms</h4>
+                                    <p className="text-sm text-gray-300">发送 STOP 后，EEPROM 内部开始 5ms 写入周期，期间不应答所有命令。</p>
+                                </div>
+                            </div>
+                        );
+                    case 4:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">页面写时序</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4">
+                                        <div className="flex items-center gap-1 overflow-x-auto">
+                                            <div className="bg-blue-600 rounded px-2 py-1 text-xs font-bold">START</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-purple-600 rounded px-2 py-1 text-xs font-mono">0xA0</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-cyan-600 rounded px-2 py-1 text-xs font-mono">Addr</div>
+                                            {Array(8).fill(0).map((_, i) => (
+                                                <React.Fragment key={i}>
+                                                    <div className="text-blue-400">→</div>
+                                                    <div className={`bg-green-600 rounded px-2 py-1 text-xs font-mono ${i < pageData.length ? '' : 'opacity-50'}`}>
+                                                        D{i}
+                                                    </div>
+                                                </React.Fragment>
+                                            ))}
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-red-600 rounded px-2 py-1 text-xs font-bold">STOP</div>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-8 gap-1 mb-4">
+                                        {pageData.map((data, i) => (
+                                            <div key={i} className="bg-green-900 rounded p-2 text-center">
+                                                <div className="text-[10px] text-gray-400">Addr+i</div>
+                                                <div className="font-mono text-sm text-green-400">0x{data.toString(16)}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-green-900 to-cyan-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-green-400">✓ 页面写优势</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 一次写入 8 字节，效率提升 8 倍</li>
+                                        <li>• 减少 I2C 总线占用时间</li>
+                                        <li>• 地址指针自动递增</li>
+                                        <li>• 注意：不能跨页边界</li>
+                                    </ul>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-2 text-orange-400">页边界规则</h3>
+                                    <p className="text-sm text-gray-300">如果起始地址是 0x08，只能写入 8 字节到 0x0F。继续写入会回绕到 0x00。</p>
+                                </div>
+                            </div>
+                        );
+                    case 5:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">随机读时序</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4 overflow-x-auto">
+                                        <div className="flex items-center gap-1 whitespace-nowrap">
+                                            <div className="bg-blue-600 rounded px-2 py-1 text-xs font-bold">START</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-purple-600 rounded px-2 py-1 text-xs font-mono">0xA0</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-cyan-600 rounded px-2 py-1 text-xs font-mono">Addr</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-yellow-600 rounded px-2 py-1 text-xs font-bold">RepSTART</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-purple-400 rounded px-2 py-1 text-xs font-mono">0xA1</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-green-600 rounded px-2 py-1 text-xs font-mono">Data</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-red-400 rounded px-2 py-1 text-xs">NACK</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-red-600 rounded px-2 py-1 text-xs font-bold">STOP</div>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-purple-400 mb-1">第一阶段：伪写 (Dummy Write)</div>
+                                            <p className="text-xs text-gray-400">发送起始、器件写地址、字地址，设置内部地址指针</p>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-yellow-400 mb-1">第二阶段：重复起始</div>
+                                            <p className="text-xs text-gray-400">不发送 STOP，直接发送重复起始，切换到读模式</p>
+                                        </div>
+                                        <div className="bg-gray-900 rounded p-3">
+                                            <div className="font-bold text-green-400 mb-1">第三阶段：读取数据</div>
+                                            <p className="text-xs text-gray-400">发送读地址，读取数据，发送 NACK，发送 STOP</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-blue-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2 text-blue-400">💡 关键：重复起始</h4>
+                                    <p className="text-sm text-gray-300">重复起始保证总线控制权不丢失，防止其他主机介入。</p>
+                                </div>
+                            </div>
+                        );
+                    case 6:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">顺序读时序</h3>
+                                    <div className="bg-gray-900 rounded p-4 mb-4 overflow-x-auto">
+                                        <div className="flex items-center gap-1 whitespace-nowrap">
+                                            <div className="bg-blue-600 rounded px-2 py-1 text-xs font-bold">START</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-purple-600 rounded px-2 py-1 text-xs font-mono">0xA0</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-cyan-600 rounded px-2 py-1 text-xs font-mono">Addr</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-yellow-600 rounded px-2 py-1 text-xs font-bold">RepSTART</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-purple-400 rounded px-2 py-1 text-xs font-mono">0xA1</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-green-600 rounded px-2 py-1 text-xs font-mono">D0</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-green-400 rounded px-2 py-1 text-xs">ACK</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-green-600 rounded px-2 py-1 text-xs font-mono">D1</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-green-400 rounded px-2 py-1 text-xs">ACK</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="text-gray-500">...</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-green-600 rounded px-2 py-1 text-xs font-mono">Dn</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-red-400 rounded px-2 py-1 text-xs">NACK</div>
+                                            <div className="text-blue-400">→</div>
+                                            <div className="bg-red-600 rounded px-2 py-1 text-xs font-bold">STOP</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-green-900 rounded-lg p-4">
+                                        <h4 className="font-bold mb-2 text-green-400">✓ 发送 ACK</h4>
+                                        <p className="text-sm text-gray-300">继续读取下一个字节，地址指针自动递增</p>
+                                    </div>
+                                    <div className="bg-red-900 rounded-lg p-4">
+                                        <h4 className="font-bold mb-2 text-red-400">✗ 发送 NACK</h4>
+                                        <p className="text-sm text-gray-300">停止读取，发送 STOP 结束</p>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-cyan-900 to-green-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">📖 顺序读应用</h4>
+                                    <p className="text-sm text-gray-300">适合连续读取配置表、查找表等相邻数据，一次读取多字节。</p>
+                                </div>
+                            </div>
+                        );
+                    case 7:
+                        return (
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-purple-400">STM32 硬件 I2C 驱动</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`// I2C 初始化
+void I2C_EEPROM_Init(void) {
+    // 1. 使能时钟
+    RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
+    RCC->APB2ENR |= RCC_APB2ENR_GPIOBEN;
+
+    // 2. 配置 PB6(SCL) PB7(SDA) 开漏复用
+    GPIOB->AFR[0] |= 0x11110000;  // AF4
+    GPIOB->MODER &= ~0x00000FF0;
+    GPIOB->MODER |= 0x00000AA0;
+    GPIOB->OTYPER |= 0x00C0;      // 开漏
+
+    // 3. I2C 参数配置
+    I2C1->CR1 &= ~I2C_CR1_PE;      // 禁用
+    I2C1->CR1 |= I2C_CR1_SMBUS;    // SMBus 模式
+    I2C1->TIMINGR = 0x10756EBC;    // 100kHz
+    I2C1->CR1 |= I2C_CR1_PE;       // 使能
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-800 rounded-lg p-4">
+                                    <h3 className="text-xl font-bold mb-3 text-cyan-400">字节写函数</h3>
+                                    <div className="bg-gray-900 rounded p-4 font-mono text-xs overflow-x-auto">
+                                        <pre className="text-green-400">{`uint8_t EEPROM_WriteByte(
+    uint8_t addr, uint8_t data) {
+    // 1. 发送起始条件
+    I2C1->CR2 |= I2C_CR2_START;
+    while (!(I2C1->ISR & I2C_ISR_SB)) {}
+
+    // 2. 发送器件地址 (写)
+    I2C1->TXDR = 0xA0;
+    while (!(I2C1->ISR & I2C_ISR_TXIS)) {}
+
+    // 3. 发送字地址
+    I2C1->TXDR = addr;
+    while (!(I2C1->ISR & I2C_ISR_TXIS)) {}
+
+    // 4. 发送数据
+    I2C1->TXDR = data;
+    while (!(I2C1->ISR & I2C_ISR_TXIS)) {}
+
+    // 5. 发送停止
+    I2C1->CR2 |= I2C_CR2_STOP;
+
+    // 6. 等待写入完成 (5ms)
+    Delay_ms(5);
+    return 0;
+}`}</pre>
+                                    </div>
+                                </div>
+                                <div className="bg-gradient-to-r from-purple-900 to-cyan-900 rounded-lg p-4">
+                                    <h4 className="font-bold mb-2">🔧 应用建议</h4>
+                                    <ul className="space-y-1 text-sm">
+                                        <li>• 配置参数：使用页面写，批量保存</li>
+                                        <li>• 运行计数：先读后写，累加更新</li>
+                                        <li>• 关键数据：三备份，取多数</li>
+                                        <li>• 避免频繁写入，延长寿命</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        );
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-4">
+                            <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-cyan-400 to-green-400 bg-clip-text text-transparent">
+                                STM32 EEPROM 读写完整指南
+                            </h1>
+                            <p className="text-sm text-gray-400">AT24C02 I2C 通信协议 · 字节写 · 页面写 · 随机读 · 顺序读</p>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 justify-center">
+                            {!isPlaying ? (
+                                <button onClick={handlePlay} className="px-4 py-2 bg-green-600 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                                    <span>▶</span> 播放
+                                </button>
+                            ) : (
+                                <button onClick={handlePause} className="px-4 py-2 bg-yellow-600 rounded-lg hover:bg-yellow-700 transition-colors flex items-center gap-2">
+                                    <span>⏸</span> 暂停
+                                </button>
+                            )}
+                            <button onClick={handleRestart} className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+                                <span>🔄</span> 重新开始
+                            </button>
+                            <button
+                                onClick={() => setShowWaveform(!showWaveform)}
+                                className={`px-4 py-2 rounded-lg transition-colors ${showWaveform ? 'bg-purple-600' : 'bg-gray-600'} hover:opacity-80`}
+                            >
+                                {showWaveform ? '隐藏波形' : '显示波形'}
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2 mb-4 overflow-x-auto justify-center">
+                            {STEPS.map((step, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => handleStepClick(index)}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                                        index === currentStep
+                                            ? `bg-gradient-to-r ${COLOR_MAP.gradient} text-white shadow-lg`
+                                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                    }`}
+                                >
+                                    {index + 1}. {step.title}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">代码区</h3>
+                                <div className="bg-gray-900 rounded p-3 font-mono text-xs overflow-x-auto">
+                                    <pre className="text-green-400">{`// EEPROM 操作函数
+uint8_t EEPROM_Init(void);
+uint8_t EEPROM_WriteByte(
+    uint8_t addr, uint8_t data);
+uint8_t EEPROM_ReadByte(
+    uint8_t addr, uint8_t *data);
+uint8_t EEPROM_WritePage(
+    uint8_t addr, uint8_t *data,
+    uint8_t len);
+uint8_t EEPROM_ReadSeq(
+    uint8_t addr, uint8_t *buf,
+    uint8_t len);`}</pre>
+                                </div>
+                                <div className="mt-4 bg-gray-900 rounded p-3">
+                                    <div className="text-xs text-gray-400 mb-2">当前操作:</div>
+                                    <div className={`text-center py-2 rounded font-bold ${
+                                        operation === 'write-complete' ? 'bg-green-600' : 'bg-gray-700'
+                                    }`}>
+                                        {operation === 'idle' ? '空闲' : operation === 'write-complete' ? '写入完成!' : operation}
+                                    </div>
+                                </div>
+                                {showWaveform && (
+                                    <div className="mt-4">
+                                        <div className="text-xs text-gray-400 mb-2">I2C 波形:</div>
+                                        {renderWaveform()}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">可视化区</h3>
+                                <div className="space-y-4">
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <span className="text-xs text-gray-400">EEPROM 存储矩阵 (256 字节)</span>
+                                            <span className="text-xs text-purple-400">当前地址：0x{currentAddr.toString(16).padStart(2, '0')}</span>
+                                        </div>
+                                        {renderMemoryGrid()}
+                                    </div>
+
+                                    <div className="bg-gray-900 rounded p-4">
+                                        <div className="flex gap-4 mb-3">
+                                            <div className="flex-1">
+                                                <label className="text-xs text-gray-400">写入地址:</label>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="255"
+                                                    value={currentAddr}
+                                                    onChange={(e) => setCurrentAddr(parseInt(e.target.value) || 0)}
+                                                    className="w-full bg-gray-800 rounded px-2 py-1 text-sm text-purple-400 font-mono"
+                                                />
+                                            </div>
+                                            <div className="flex-1">
+                                                <label className="text-xs text-gray-400">写入数据:</label>
+                                                <input
+                                                    type="text"
+                                                    value={writeData.toString(16).toUpperCase().padStart(2, '0')}
+                                                    onChange={(e) => setWriteData(parseInt('0x' + e.target.value) || 0)}
+                                                    className="w-full bg-gray-800 rounded px-2 py-1 text-sm text-green-400 font-mono"
+                                                />
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => {
+                                                setShowWaveform(true);
+                                                setOperation('writing');
+                                            }}
+                                            className="w-full bg-gradient-to-r from-purple-600 to-cyan-600 rounded py-2 text-sm font-bold hover:opacity-90"
+                                        >
+                                            写入 EEPROM
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-1 bg-gray-800 rounded-lg p-4">
+                                <h3 className="text-sm font-bold text-gray-400 mb-3">说明区</h3>
+                                <div className="space-y-4">
+                                    <div className="bg-gradient-to-r from-purple-900 to-cyan-900 rounded-lg p-3">
+                                        <div className="font-bold text-purple-400 mb-2">步骤 {currentStep + 1}: {STEPS[currentStep].title}</div>
+                                        <div className="text-xs text-gray-300">{STEPS[currentStep].voice}</div>
+                                    </div>
+                                    {renderContent()}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="text-center mt-4 text-xs text-gray-500">
+                            STM32 EEPROM 读写完整指南 | AT24C02 | I2C 协议 | 遵循 SKILL.md v3.0 标准
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

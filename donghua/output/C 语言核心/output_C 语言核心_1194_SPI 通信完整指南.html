@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1194. SPI 通信完整指南 - 可视化动画</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes flow { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+        @keyframes highlight { 0%, 100% { background-color: #3b82f6; } 50% { background-color: #60a5fa; } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes shiftLeft { 0% { transform: translateX(0); } 100% { transform: translateX(-30px); } }
+        @keyframes csSelect { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.3); } }
+        .pulse { animation: pulse 1.5s ease-in-out infinite; }
+        .blink { animation: blink 0.8s ease-in-out infinite; }
+        .slideIn { animation: slideIn 0.5s ease-out; }
+        .scaleIn { animation: scaleIn 0.4s ease-out; }
+        .flow { animation: flow 2s ease-in-out infinite; }
+        .highlight { animation: highlight 1s ease-in-out infinite; }
+        .rotate { animation: rotate 2s linear infinite; }
+        .shiftLeft { animation: shiftLeft 0.5s ease-in-out infinite; }
+        .csSelect { animation: csSelect 0.3s ease-in-out; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const COLOR_MAP = {
+            primary: '#f97316',    // Orange - SCK
+            secondary: '#22c55e',  // Green - MOSI
+            accent1: '#3b82f6',    // Blue - MISO
+            accent2: '#a855f7',    // Purple - CS
+            accent3: '#eab308',    // Yellow - Data
+            accent4: '#ef4444',    // Red - Error/Warning
+        };
+
+        const STEPS = [
+            {
+                title: "SPI 总线基础",
+                description: "四线制全双工同步通信",
+                code: `// SPI 总线特性
+// 1. 四根线：SCK + MOSI + MISO + CS
+// 2. 推挽输出，无需上拉电阻
+// 3. 主从架构 (一主多从)
+// 4. 全双工通信 (同时收发)
+// 5. 高速率 (可达 50+ Mbps)
+
+// 信号线定义
+// SCK  (Serial Clock)    - 时钟 (主→从)
+// MOSI (Master Out Slave In)  - 主出从入
+// MISO (Master In Slave Out)  - 主入从出
+// CS   (Chip Select)     - 片选 (低电平有效)
+
+// 硬件连接 (主→从)
+// Master SCK ───→ SCK Slave
+// Master MOSI ───→ MOSI Slave
+// Master MISO ←─── MISO Slave
+// Master CS  ───→ CS  Slave`,
+                visualState: { showBus: true, showSignals: true, showDirection: true }
+            },
+            {
+                title: "SPI 工作模式",
+                description: "CPOL/CPHA 与时钟极性",
+                code: `// SPI 模式 (CPOL + CPHA)
+// CPOL (Clock Polarity) - 时钟极性
+//   0: 空闲时 SCK = 低电平
+//   1: 空闲时 SCK = 高电平
+
+// CPHA (Clock Phase) - 时钟相位
+//   0: 第 1 个边沿采样 (上升沿)
+//   1: 第 2 个边沿采样 (下降沿)
+
+// 四种模式:
+// Mode 0: CPOL=0, CPHA=0 (最常用)
+// Mode 1: CPOL=0, CPHA=1
+// Mode 2: CPOL=1, CPHA=0
+// Mode 3: CPOL=1, CPHA=1
+
+// 模式兼容性:
+// Mode 0 ↔ Mode 3 (可互操作)
+// Mode 1 ↔ Mode 2 (可互操作)
+
+void SPI_Init(void) {
+    // 配置 SPI Mode 0 (CPOL=0, CPHA=0)
+    SPI1->CR1 &= ~SPI_CR1_CPOL;  // 空闲低电平
+    SPI1->CR1 &= ~SPI_CR1_CPHA;  // 第 1 边沿采样
+}`,
+                visualState: { showMode: true, showCPOL: true, showCPHA: true }
+            },
+            {
+                title: "SPI 数据传输",
+                description: "8 位移位寄存器",
+                code: `// SPI 数据帧 (8 位)
+// ┌────────────────────────────────┐
+// │ D7 │ D6 │ D5 │ D4 │ D3 │ D2 │ D1 │ D0 │
+// └────────────────────────────────┘
+//   │                        │
+//   ├─ MSB (先发送)          ├─ LSB (最后发送)
+//
+// MSB First (高位先发) - 最常用
+// LSB First (低位先发) - 特殊应用
+
+// 数据传输过程 (移位寄存器)
+// Master:  [D7 D6 D5 D4 D3 D2 D1 D0] → MOSI → Slave
+// Slave:   [D7 D6 D5 D4 D3 D2 D1 D0] → MISO → Master
+
+// 每个时钟周期传输 1 bit:
+// for (int i = 0; i < 8; i++) {
+//     SCK_Low();   // 准备数据
+//     MOSI(data & (1 << (7-i)));
+//     SCK_High();  // 从机采样
+//     bit = MISO(); // 读取返回位
+// }`,
+                visualState: { showShiftRegister: true, showBitTransfer: true }
+            },
+            {
+                title: "SPI 片选机制",
+                description: "低电平有效与多从机选择",
+                code: `// 片选信号 (CS/SS)
+// - 低电平有效 (Active Low)
+// - 多个从机需要多个 CS 引脚
+
+// 单从机连接
+// Master CS ───→ CS Slave
+
+// 多从机连接 (3 个从机)
+// Master CS1 ──┬→ CS1 Slave1 (Flash)
+// Master CS2 ──┼→ CS2 Slave2 (SD Card)
+// Master CS3 ──┴→ CS3 Slave3 (Display)
+
+// 片选时序
+// void SPI_Select(uint8_t slave) {
+//     GPIO_ResetBits(GPIOA, ALL_CS);  // 全部取消选中 (高电平)
+//     GPIO_ResetBits(GPIOA, CS[slave]); // 选中目标 (低电平)
+// }
+
+// 通信流程
+// 1. CS 拉低 (选中从机)
+// 2. 发送/接收数据
+// 3. CS 拉高 (取消选中)
+
+void SPI_Transfer(uint8_t slave, uint8_t *data, int len) {
+    CS_Low(slave);        // 选中
+    for (int i = 0; i < len; i++) {
+        SPI_Send(data[i]);
+    }
+    CS_High(slave);       // 取消选中
+}`,
+                visualState: { showCS: true, showMultiSlave: true }
+            },
+            {
+                title: "SPI 写操作",
+                description: "Master 发送数据到 Slave",
+                code: `// SPI 写操作 (只发送)
+// 某些场景只需单向传输 (如 OLED 显示)
+
+// 时序图 (Mode 0)
+// CS:   ───┐           └───
+//          └───────────
+// SCK:  ───┐┌─┐┌─┐┌─┐┌─┐┌─┐┌─┐┌─┐┌───
+//          ││ ││ ││ ││ ││ ││ ││ ││
+// MOSI: ───┘└─┘─┘─┘─┘─┘─┘─┘─┘─┘───
+//         D7 D6 D5 D4 D3 D2 D1 D0
+// MISO: X X X X X X X X  (忽略)
+
+void SPI_Write(uint8_t data) {
+    CS_Low();
+    for (int i = 0; i < 8; i++) {
+        // 输出数据位 (MSB First)
+        if (data & (1 << (7 - i)))
+            MOSI_High();
+        else
+            MOSI_Low();
+
+        SCK_High();   // 上升沿采样
+        SCK_Low();
+    }
+    CS_High();
+}`,
+                visualState: { showWrite: true, showDataFlow: 'mosi' }
+            },
+            {
+                title: "SPI 读操作",
+                description: "Master 从 Slave 读取数据",
+                code: `// SPI 读操作 (只接收)
+// 典型应用：ADC、传感器、Flash 读取
+
+// 时序图 (Mode 0)
+// CS:   ───┐           └───
+//          └───────────
+// SCK:  ───┐┌─┐┌─┐┌─┐┌─┐┌─┐┌─┐┌─┐┌───
+//          ││ ││ ││ ││ ││ ││ ││ ││
+// MOSI: ───┘└─┘─┘─┘─┘─┘─┘─┘─┘─┘───
+//         (虚字节/命令)
+// MISO: X D7 D6 D5 D4 D3 D2 D1 D0───
+
+uint8_t SPI_Read(void) {
+    uint8_t data = 0;
+    CS_Low();
+
+    for (int i = 0; i < 8; i++) {
+        SCK_High();   // 产生时钟
+        SCK_Low();
+
+        data <<= 1;
+        if (MISO_Read())
+            data |= 1;
+    }
+
+    CS_High();
+    return data;
+}`,
+                visualState: { showRead: true, showDataFlow: 'miso' }
+            },
+            {
+                title: "SPI 全双工通信",
+                description: "同时发送和接收数据",
+                code: `// SPI 全双工 (同时收发)
+// 本质：两个方向的移位寄存器
+
+// 传输过程:
+// Master 移位寄存器: [M7 M6 M5 M4 M3 M2 M1 M0]
+//                      ↓              ↓
+//                     MOSI          MISO
+//                      ↓              ↓
+// Slave 移位寄存器：  [S7 S6 S5 S4 S3 S2 S1 S0]
+
+// 每次传输交换一个字节:
+// master_data ←→ slave_data
+
+uint8_t SPI_Transfer(uint8_t tx_data) {
+    uint8_t rx_data = 0;
+
+    CS_Low();
+
+    for (int i = 0; i < 8; i++) {
+        // 发送位
+        if (tx_data & (1 << (7 - i)))
+            MOSI_High();
+        else
+            MOSI_Low();
+
+        SCK_High();
+        SCK_Low();
+
+        // 接收位
+        if (MISO_Read())
+            rx_data |= (1 << (7 - i));
+    }
+
+    CS_High();
+    return rx_data;  // 返回接收到的数据
+}`,
+                visualState: { showFullDuplex: true, showExchange: true }
+            },
+            {
+                title: "SPI 硬件实现",
+                description: "STM32 SPI 外设与驱动",
+                code: `// STM32 SPI 初始化
+void SPI_Init(void) {
+    // 1. 使能时钟
+    RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+
+    // 2. 配置 GPIO
+    // SCK - PA5, MOSI - PA7, MISO - PA6
+    GPIOA->MODER |= GPIO_MODER_MODER5_1 |
+                    GPIO_MODER_MODER6_1 |
+                    GPIO_MODER_MODER7_1;
+    GPIOA->AFR[0] |= 0x555 << 8;  // AF5 (SPI1)
+
+    // 3. 配置 SPI (Mode 0, Master, 8-bit)
+    SPI1->CR1 = 0;
+    SPI1->CR1 |= SPI_CR1_MSTR;   // 主机模式
+    SPI1->CR1 |= SPI_CR1_SSM;    // 软件片选
+    SPI1->CR1 |= SPI_CR1_SSI;
+    SPI1->CR2 |= SPI_CR2_DS_3 | SPI_CR2_DS_2 | SPI_CR2_DS_0;  // 8-bit
+    SPI1->CR2 |= SPI_CR2_FRXTH;  // FIFO 阈值
+
+    // 4. 波特率预分频 (fpclk/16)
+    SPI1->CR1 |= SPI_CR1_BR_1;
+
+    // 5. 使能 SPI
+    SPI1->CR1 |= SPI_CR1_SPE;
+}
+
+// 单字节收发
+uint8_t SPI_SendReceive(uint8_t data) {
+    while (!(SPI1->SR & SPI_SR_TXE));  // 等待 TX 空
+    SPI1->DR = data;
+    while (!(SPI1->SR & SPI_SR_RXNE)); // 等待 RX 非空
+    return SPI1->DR;
+}`,
+                visualState: { showHardware: true, showSTM32: true }
+            }
+        ];
+
+        function App() {
+            const [currentStep, setCurrentStep] = useState(0);
+            const [isAutoPlaying, setIsAutoPlaying] = useState(true);
+            const [showAnswer, setShowAnswer] = useState(false);
+            const voiceEndTimerRef = useRef(null);
+
+            const speak = (text) => {
+                if (!text) return;
+                const utterance = new SpeechSynthesisUtterance(text);
+                const voices = speechSynthesis.getVoices();
+                const zhVoice = voices.find(v =>
+                    v.lang === 'zh-CN' &&
+                    (v.name.includes('Xiaoxiao') || v.name.includes('Chinese'))
+                );
+                if (zhVoice) utterance.voice = zhVoice;
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                utterance.lang = 'zh-CN';
+
+                utterance.onend = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (isAutoPlaying && currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        }
+                    }, 800);
+                };
+                utterance.onerror = () => {
+                    voiceEndTimerRef.current = setTimeout(() => {
+                        if (isAutoPlaying && currentStep < STEPS.length - 1) {
+                            setCurrentStep(prev => prev + 1);
+                        }
+                    }, 800);
+                };
+                speechSynthesis.speak(utterance);
+            };
+
+            useEffect(() => {
+                speak(STEPS[currentStep].title + '。' + STEPS[currentStep].description);
+                return () => clearTimeout(voiceEndTimerRef.current);
+            }, [currentStep]);
+
+            const handleNext = () => {
+                if (currentStep < STEPS.length - 1) {
+                    setCurrentStep(prev => prev + 1);
+                }
+            };
+
+            const handlePrev = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(prev => prev - 1);
+                }
+            };
+
+            const handleRestart = () => {
+                setCurrentStep(0);
+                speechSynthesis.cancel();
+                setTimeout(() => speak(STEPS[0].title + '。' + STEPS[0].description), 100);
+            };
+
+            const SPIVisualization = () => {
+                const step = STEPS[currentStep];
+                const vs = step.visualState;
+
+                return (
+                    <div className="w-full h-96 bg-gray-800 rounded-lg p-6 relative overflow-hidden">
+                        {/* SPI Bus Lines */}
+                        {(vs.showBus || vs.showSignals) && (
+                            <g>
+                                {/* Master Device */}
+                                <rect x="20" y="40" width="80" height="120" rx="5" fill={COLOR_MAP.primary} opacity="0.2" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <text x="60" y="95" fill={COLOR_MAP.primary} fontSize="12" textAnchor="middle">Master</text>
+                                <text x="60" y="115" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle">STM32</text>
+
+                                {/* Slave Device */}
+                                <rect x="300" y="40" width="80" height="120" rx="5" fill={COLOR_MAP.secondary} opacity="0.2" stroke={COLOR_MAP.secondary} strokeWidth="2" />
+                                <text x="340" y="95" fill={COLOR_MAP.secondary} fontSize="12" textAnchor="middle">Slave</text>
+                                <text x="340" y="115" fill={COLOR_MAP.secondary} fontSize="10" textAnchor="middle">Sensor</text>
+
+                                {/* SCK Line */}
+                                <line x1="100" y1="60" x2="300" y2="60" stroke={COLOR_MAP.primary} strokeWidth="3" className={vs.showMode ? 'pulse' : ''} />
+                                <circle cx="100" cy="60" r="4" fill={COLOR_MAP.primary} />
+                                <circle cx="300" cy="60" r="4" fill={COLOR_MAP.primary} />
+                                <text x="200" y="55" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle">SCK</text>
+
+                                {/* MOSI Line */}
+                                <line x1="100" y1="90" x2="300" y2="90" stroke={COLOR_MAP.secondary} strokeWidth="3" className="flow" />
+                                <circle cx="100" cy="90" r="4" fill={COLOR_MAP.secondary} />
+                                <circle cx="300" cy="90" r="4" fill={COLOR_MAP.secondary} />
+                                <text x="200" y="85" fill={COLOR_MAP.secondary} fontSize="10" textAnchor="middle">MOSI</text>
+                                {/* Direction arrow */}
+                                <polygon points="280,85 300,90 280,95" fill={COLOR_MAP.secondary} />
+
+                                {/* MISO Line */}
+                                <line x1="100" y1="120" x2="300" y2="120" stroke={COLOR_MAP.accent1} strokeWidth="3" className="flow" />
+                                <circle cx="100" cy="120" r="4" fill={COLOR_MAP.accent1} />
+                                <circle cx="300" cy="120" r="4" fill={COLOR_MAP.accent1} />
+                                <text x="200" y="115" fill={COLOR_MAP.accent1} fontSize="10" textAnchor="middle">MISO</text>
+                                {/* Direction arrow */}
+                                <polygon points="120,115 100,120 120,125" fill={COLOR_MAP.accent1} />
+
+                                {/* CS Line */}
+                                <line x1="100" y1="150" x2="300" y2="150" stroke={COLOR_MAP.accent2} strokeWidth="3" strokeDasharray="5,3" />
+                                <circle cx="100" cy="150" r="4" fill={COLOR_MAP.accent2} />
+                                <circle cx="300" cy="150" r="4" fill={COLOR_MAP.accent2} />
+                                <text x="200" y="145" fill={COLOR_MAP.accent2} fontSize="10" textAnchor="middle">CS</text>
+                            </g>
+                        )}
+
+                        {/* SPI Mode Timing */}
+                        {vs.showMode && (
+                            <g>
+                                <text x="20" y="190" fill="#fff" fontSize="11">SPI 模式时序 (CPOL/CPHA):</text>
+
+                                {/* Mode 0 */}
+                                <text x="20" y="210" fill={COLOR_MAP.accent3} fontSize="9">Mode 0 (CPOL=0, CPHA=0):</text>
+                                <line x1="20" y1="220" x2="180" y2="220" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <line x1="20" y1="245" x2="180" y2="245" stroke={COLOR_MAP.secondary} strokeWidth="2" className="shiftLeft" />
+                                <text x="20" y="218" fill={COLOR_MAP.primary} fontSize="7">SCK</text>
+                                <text x="20" y="243" fill={COLOR_MAP.secondary} fontSize="7">MOSI</text>
+                                <text x="150" y="260" fill={COLOR_MAP.accent3} fontSize="7">采样点 ↑</text>
+
+                                {/* Mode 3 */}
+                                <text x="200" y="210" fill={COLOR_MAP.accent3} fontSize="9">Mode 3 (CPOL=1, CPHA=1):</text>
+                                <line x1="200" y1="220" x2="360" y2="220" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <line x1="200" y1="245" x2="360" y2="245" stroke={COLOR_MAP.secondary} strokeWidth="2" className="shiftLeft" />
+                                <text x="330" y="260" fill={COLOR_MAP.accent3} fontSize="7">采样点 ↑</text>
+                            </g>
+                        )}
+
+                        {/* Shift Register Animation */}
+                        {(vs.showShiftRegister || vs.showBitTransfer) && (
+                            <g>
+                                <text x="20" y="190" fill="#fff" fontSize="11">8 位移位寄存器:</text>
+
+                                {/* Master Register */}
+                                <rect x="20" y="200" width="160" height="30" fill={COLOR_MAP.primary} opacity="0.3" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                {[0,1,2,3,4,5,6,7].map(i => (
+                                    <line key={i} x1={20 + i * 20} y1="200" x2={20 + i * 20} y2="230" stroke={COLOR_MAP.primary} strokeWidth="1" />
+                                ))}
+                                <text x="100" y="220" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle">Master Shift Reg</text>
+
+                                {/* Bit animation */}
+                                {vs.showBitTransfer && (
+                                    <g>
+                                        {[0,1,2,3,4,5,6,7].map((i) => (
+                                            <circle
+                                                key={i}
+                                                cx={110 + i * 25}
+                                                cy="260"
+                                                r="10"
+                                                fill={COLOR_MAP.accent3}
+                                                className="pulse"
+                                                style={{ animationDelay: `${i * 0.1}s` }}
+                                            />
+                                        ))}
+                                        <text x="300" y="265" fill={COLOR_MAP.accent3} fontSize="10">→ MOSI</text>
+                                    </g>
+                                )}
+                            </g>
+                        )}
+
+                        {/* CS Multi-Slave */}
+                        {(vs.showCS || vs.showMultiSlave) && (
+                            <g>
+                                <text x="20" y="190" fill="#fff" fontSize="11">多从机片选:</text>
+
+                                {/* Master with 3 CS */}
+                                <rect x="20" y="200" width="60" height="80" rx="5" fill={COLOR_MAP.primary} opacity="0.3" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <text x="50" y="245" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle">Master</text>
+
+                                {/* CS Lines */}
+                                <line x1="80" y1="220" x2="150" y2="220" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="115" y="215" fill={COLOR_MAP.accent2} fontSize="8">CS1</text>
+
+                                <line x1="80" y1="240" x2="150" y2="240" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="115" y="235" fill={COLOR_MAP.accent2} fontSize="8">CS2</text>
+
+                                <line x1="80" y1="260" x2="150" y2="260" stroke={COLOR_MAP.accent2} strokeWidth="2" />
+                                <text x="115" y="255" fill={COLOR_MAP.accent2} fontSize="8">CS3</text>
+
+                                {/* Slave Devices */}
+                                <rect x="150" y="205" width="50" height="30" rx="3" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="1" />
+                                <text x="175" y="225" fill={COLOR_MAP.accent1} fontSize="7" textAnchor="middle">Flash</text>
+
+                                <rect x="150" y="225" width="50" height="30" rx="3" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="1" />
+                                <text x="175" y="245" fill={COLOR_MAP.accent2} fontSize="7" textAnchor="middle">SD</text>
+
+                                <rect x="150" y="245" width="50" height="30" rx="3" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="1" />
+                                <text x="175" y="265" fill={COLOR_MAP.accent3} fontSize="7" textAnchor="middle">OLED</text>
+                            </g>
+                        )}
+
+                        {/* Data Flow Animation */}
+                        {vs.showDataFlow && (
+                            <g>
+                                <circle cx="60" cy="100" r="20" fill={COLOR_MAP.primary} className="pulse" />
+                                <text x="60" y="105" fill="#fff" fontSize="10" textAnchor="middle">Master</text>
+
+                                <circle cx="340" cy="100" r="20" fill={COLOR_MAP.secondary} className="pulse" />
+                                <text x="340" y="105" fill="#fff" fontSize="10" textAnchor="middle">Slave</text>
+
+                                {/* MOSI Flow */}
+                                {(vs.showDataFlow === 'mosi' || vs.showFullDuplex) && (
+                                    <g>
+                                        <line x1="80" y1="80" x2="320" y2="80" stroke={COLOR_MAP.secondary} strokeWidth="4" />
+                                        {[0, 1, 2].map((i) => (
+                                            <circle
+                                                key={`mosi-${i}`}
+                                                cx={140 + i * 70}
+                                                cy="80"
+                                                r="8"
+                                                fill={COLOR_MAP.accent3}
+                                                className="pulse"
+                                                style={{ animationDelay: `${i * 0.2}s` }}
+                                            />
+                                        ))}
+                                        <text x="200" y="75" fill={COLOR_MAP.secondary} fontSize="9" textAnchor="middle">MOSI</text>
+                                    </g>
+                                )}
+
+                                {/* MISO Flow */}
+                                {(vs.showDataFlow === 'miso' || vs.showFullDuplex) && (
+                                    <g>
+                                        <line x1="80" y1="120" x2="320" y2="120" stroke={COLOR_MAP.accent1} strokeWidth="4" />
+                                        {[0, 1, 2].map((i) => (
+                                            <circle
+                                                key={`miso-${i}`}
+                                                cx={260 - i * 70}
+                                                cy="120"
+                                                r="8"
+                                                fill={COLOR_MAP.accent3}
+                                                className="pulse"
+                                                style={{ animationDelay: `${i * 0.2}s` }}
+                                            />
+                                        ))}
+                                        <text x="200" y="135" fill={COLOR_MAP.accent1} fontSize="9" textAnchor="middle">MISO</text>
+                                    </g>
+                                )}
+
+                                {vs.showFullDuplex && (
+                                    <text x="200" y="160" fill="#fff" fontSize="11" textAnchor="middle">全双工：同时收发</text>
+                                )}
+                            </g>
+                        )}
+
+                        {/* Data Exchange Animation */}
+                        {vs.showExchange && (
+                            <g>
+                                <text x="20" y="190" fill="#fff" fontSize="11">数据交换 (全双工):</text>
+
+                                {/* Master Register */}
+                                <rect x="20" y="200" width="120" height="40" fill={COLOR_MAP.primary} opacity="0.3" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <text x="80" y="225" fill={COLOR_MAP.primary} fontSize="10" textAnchor="middle">Master TX: 0xAA</text>
+
+                                {/* Slave Register */}
+                                <rect x="260" y="200" width="120" height="40" fill={COLOR_MAP.secondary} opacity="0.3" stroke={COLOR_MAP.secondary} strokeWidth="2" />
+                                <text x="320" y="225" fill={COLOR_MAP.secondary} fontSize="10" textAnchor="middle">Slave TX: 0x55</text>
+
+                                {/* Exchange arrows */}
+                                <line x1="145" y1="210" x2="255" y2="210" stroke={COLOR_MAP.accent3} strokeWidth="2" markerEnd="url(#arrowhead)" />
+                                <line x1="255" y1="230" x2="145" y2="230" stroke={COLOR_MAP.accent1} strokeWidth="2" markerEnd="url(#arrowhead)" />
+
+                                {/* After exchange */}
+                                <rect x="20" y="260" width="120" height="40" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="2" />
+                                <text x="80" y="285" fill={COLOR_MAP.accent1} fontSize="10" textAnchor="middle">Master RX: 0x55</text>
+
+                                <rect x="260" y="260" width="120" height="40" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="2" />
+                                <text x="320" y="285" fill={COLOR_MAP.accent3} fontSize="10" textAnchor="middle">Slave RX: 0xAA</text>
+                            </g>
+                        )}
+
+                        {/* STM32 Hardware */}
+                        {vs.showHardware && (
+                            <g>
+                                <text x="20" y="190" fill="#fff" fontSize="11">STM32 SPI 外设:</text>
+
+                                {/* SPI Peripheral */}
+                                <rect x="20" y="200" width="160" height="100" rx="5" fill={COLOR_MAP.primary} opacity="0.2" stroke={COLOR_MAP.primary} strokeWidth="2" />
+                                <text x="100" y="220" fill={COLOR_MAP.primary} fontSize="12" textAnchor="middle">SPI1 外设</text>
+
+                                {/* Registers */}
+                                <rect x="30" y="230" width="60" height="20" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="1" />
+                                <text x="60" y="243" fill={COLOR_MAP.accent3} fontSize="8" textAnchor="middle">CR1</text>
+
+                                <rect x="100" y="230" width="60" height="20" fill={COLOR_MAP.accent3} opacity="0.3" stroke={COLOR_MAP.accent3} strokeWidth="1" />
+                                <text x="130" y="243" fill={COLOR_MAP.accent3} fontSize="8" textAnchor="middle">CR2</text>
+
+                                <rect x="30" y="260" width="60" height="20" fill={COLOR_MAP.accent2} opacity="0.3" stroke={COLOR_MAP.accent2} strokeWidth="1" />
+                                <text x="60" y="273" fill={COLOR_MAP.accent2} fontSize="8" textAnchor="middle">DR</text>
+
+                                <rect x="100" y="260" width="60" height="20" fill={COLOR_MAP.accent1} opacity="0.3" stroke={COLOR_MAP.accent1} strokeWidth="1" />
+                                <text x="130" y="273" fill={COLOR_MAP.accent1} fontSize="8" textAnchor="middle">SR</text>
+
+                                {/* Pins */}
+                                <text x="200" y="230" fill={COLOR_MAP.primary} fontSize="9">PA5 - SCK</text>
+                                <text x="200" y="250" fill={COLOR_MAP.secondary} fontSize="9">PA7 - MOSI</text>
+                                <text x="200" y="270" fill={COLOR_MAP.accent1} fontSize="9">PA6 - MISO</text>
+                            </g>
+                        )}
+
+                        {/* Arrow marker definition */}
+                        <defs>
+                            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                                <polygon points="0 0, 10 3.5, 0 7" fill="#fff" />
+                            </marker>
+                        </defs>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-4">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="text-center mb-4">
+                            <h1 className="text-3xl font-bold mb-2" style={{ color: COLOR_MAP.primary }}>
+                                1194. SPI 通信完整指南
+                            </h1>
+                            <p className="text-gray-400 text-sm">四线制全双工 · 主从架构 · 高速同步通信</p>
+                        </div>
+
+                        {/* Progress Bar */}
+                        <div className="mb-4">
+                            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                <span>步骤 {currentStep + 1} / {STEPS.length}</span>
+                                <span>{Math.round(((currentStep + 1) / STEPS.length) * 100)}%</span>
+                            </div>
+                            <div className="w-full bg-gray-800 rounded-full h-2">
+                                <div
+                                    className="h-2 rounded-full transition-all duration-500"
+                                    style={{
+                                        width: `${((currentStep + 1) / STEPS.length) * 100}%`,
+                                        background: `linear-gradient(90deg, ${COLOR_MAP.primary}, ${COLOR_MAP.secondary})`
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Main Content - Three Column Layout */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            {/* Left: Code */}
+                            <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <h3 className="text-lg font-semibold mb-3" style={{ color: COLOR_MAP.primary }}>
+                                    💻 代码示例
+                                </h3>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                                    {STEPS[currentStep].code}
+                                </pre>
+                            </div>
+
+                            {/* Center: Visualization */}
+                            <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <h3 className="text-lg font-semibold mb-3" style={{ color: COLOR_MAP.secondary }}>
+                                    🔬 可视化动画
+                                </h3>
+                                <svg className="w-full h-64" viewBox="0 0 400 320">
+                                    <SPIVisualization />
+                                </svg>
+                            </div>
+
+                            {/* Right: Explanation */}
+                            <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                                <h3 className="text-lg font-semibold mb-3" style={{ color: COLOR_MAP.accent1 }}>
+                                    📖 核心概念
+                                </h3>
+                                <ul className="space-y-2 text-sm text-gray-300">
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.primary }}>四线制:</strong> SCK + MOSI + MISO + CS</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.secondary }}>全双工:</strong> 同时发送和接收</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.accent1 }}>主从架构:</strong> 一主多从，CS 片选</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.accent2 }}>四种模式:</strong> CPOL/CPHA 组合</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.accent3 }}>MSB 先发:</strong> 高位优先传输</span>
+                                    </li>
+                                    <li className="flex items-start">
+                                        <span className="mr-2">▸</span>
+                                        <span><strong style={{ color: COLOR_MAP.primary }}>高速率:</strong> 可达 50+ Mbps</span>
+                                    </li>
+                                </ul>
+
+                                {/* Code Challenge */}
+                                <div className="mt-4 p-3 bg-gray-700 rounded">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-semibold">💡 代码挑战</span>
+                                        <button
+                                            onClick={() => setShowAnswer(!showAnswer)}
+                                            className="text-xs px-2 py-1 rounded"
+                                            style={{ backgroundColor: COLOR_MAP.primary, color: '#fff' }}
+                                        >
+                                            {showAnswer ? '隐藏' : '显示'}答案
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-gray-400 mb-2">
+                                        实现批量 SPI 传输函数:
+                                    </p>
+                                    {showAnswer && (
+                                        <pre className="text-xs text-gray-300 overflow-x-auto">
+{`void SPI_TransferBulk(
+    uint8_t slave,
+    uint8_t *tx_data,
+    uint8_t *rx_data,
+    int len
+) {
+    CS_Low(slave);
+    for (int i = 0; i < len; i++) {
+        uint8_t tx = tx_data ? tx_data[i] : 0xFF;
+        uint8_t rx = SPI_SendReceive(tx);
+        if (rx_data) rx_data[i] = rx;
+    }
+    CS_High(slave);
+}`}
+                                        </pre>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Control Buttons */}
+                        <div className="flex justify-center gap-3 mb-4">
+                            <button
+                                onClick={handlePrev}
+                                disabled={currentStep === 0}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === 0
+                                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        : 'bg-gray-600 text-white hover:bg-gray-500'
+                                }`}
+                            >
+                                ← 上一步
+                            </button>
+
+                            <button
+                                onClick={handleRestart}
+                                className="px-6 py-3 rounded-lg font-semibold bg-gray-700 text-white hover:bg-gray-600 transition-all"
+                            >
+                                🔄 重新开始
+                            </button>
+
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === STEPS.length - 1}
+                                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                    currentStep === STEPS.length - 1
+                                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        : 'bg-gray-600 text-white hover:bg-gray-500'
+                                }`}
+                            >
+                                下一步 →
+                            </button>
+                        </div>
+
+                        {/* Autoplay Toggle */}
+                        <div className="text-center">
+                            <button
+                                onClick={() => setIsAutoPlaying(!isAutoPlaying)}
+                                className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                                    isAutoPlaying
+                                        ? 'bg-green-600 text-white'
+                                        : 'bg-gray-700 text-gray-300'
+                                }`}
+                            >
+                                {isAutoPlaying ? '▶️ 自动播放中' : '⏸️ 已暂停'}
+                            </button>
+                        </div>
+
+                        {/* Step Indicators */}
+                        <div className="flex justify-center gap-2 mt-4 flex-wrap">
+                            {STEPS.map((step, index) => (
+                                <button
+                                    key={index}
+                                    onClick={() => setCurrentStep(index)}
+                                    className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                                        index === currentStep
+                                            ? 'bg-white text-gray-900'
+                                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                    }`}
+                                >
+                                    {index + 1}. {step.title}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

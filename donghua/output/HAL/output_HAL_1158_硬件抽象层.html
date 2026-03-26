@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1158 - 硬件抽象层 (HAL) - 嵌入式 C 可视化动画</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes flow { 0% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+    @keyframes highlight { 0%, 100% { box-shadow: 0 0 5px rgba(59, 130, 246, 0.5); } 50% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.8); } }
+    .animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+    .animate-blink { animation: blink 1s ease-in-out infinite; }
+    .animate-slideIn { animation: slideIn 0.5s ease-out forwards; }
+    .animate-scaleIn { animation: scaleIn 0.5s ease-out forwards; }
+    .animate-flow { animation: flow 2s linear infinite; }
+    .animate-highlight { animation: highlight 1.5s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // ========== 可修改区域开始 ==========
+    const COLOR_MAP = {
+      primary: '#3b82f6',
+      secondary: '#60a5fa',
+      accent: '#93c5fd',
+      bg: '#1e3a8a',
+      text: '#dbeafe',
+      border: '#2563eb'
+    };
+
+    const STEPS = [
+      { title: 'HAL 概述', voice: '硬件抽象层 HAL 是介于硬件和软件之间的中间层。它屏蔽了底层硬件的差异，让上层应用可以使用统一的接口访问硬件。' },
+      { title: 'HAL 架构', voice: 'HAL 采用分层架构。最底层是硬件寄存器，中间是 HAL 驱动层，最上层是应用层。应用层通过 HAL API 访问硬件，无需直接操作寄存器。' },
+      { title: 'GPIO 操作对比', voice: '直接操作寄存器需要配置模式寄存器、输出类型寄存器、速度寄存器等。而使用 HAL 库只需调用 HAL_GPIO_WritePin 一个函数。' },
+      { title: 'UART 初始化', voice: 'UART 初始化需要配置波特率、数据位、停止位、校验位。HAL_UART_Init 函数封装了所有配置步骤，返回 HAL 状态。' },
+      { title: 'SPI 通信', voice: 'SPI 通信需要配置主从模式、时钟极性、时钟相位、数据大小。HAL_SPI_TransmitReceive 实现全双工数据传输。' },
+      { title: 'ADC 采集', voice: 'ADC 采集需要配置分辨率、采样时间、触发源。HAL_ADC_Start 启动转换，HAL_ADC_PollForConversion 等待转换完成。' },
+      { title: '定时器 PWM', voice: '定时器 PWM 需要配置预分频、自动重装载值、比较值。HAL_TIM_PWM_Start 启动 PWM 输出，HAL_TIM_PWM_ChangeDuty 调整占空比。' },
+      { title: 'HAL 优势', voice: 'HAL 提供硬件抽象、可移植性强、开发效率高、代码可读性好。适合快速开发和中大型项目。' }
+    ];
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(true);
+      const [voiceStatus, setVoiceStatus] = useState('就绪');
+      const voiceEndTimerRef = useRef(null);
+
+      // 语音播放
+      useEffect(() => {
+        if (!isPlaying) return;
+        const step = STEPS[currentStep];
+        setVoiceStatus('播放中...');
+
+        const utterance = new SpeechSynthesisUtterance(step.voice);
+        utterance.lang = 'zh-CN';
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+
+        // 尝试选择高质量语音
+        const voices = speechSynthesis.getVoices();
+        const xiaoxiao = voices.find(v => v.name.includes('Xiaoxiao') || v.name.includes('zh-CN'));
+        if (xiaoxiao) utterance.voice = xiaoxiao;
+
+        utterance.onend = () => {
+          setVoiceStatus('已完成');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            } else {
+              setIsPlaying(false);
+            }
+          }, 800);
+        };
+
+        utterance.onerror = () => {
+          setVoiceStatus('播放失败');
+          voiceEndTimerRef.current = setTimeout(() => {
+            if (currentStep < STEPS.length - 1) {
+              setCurrentStep(prev => prev + 1);
+            }
+          }, 800);
+        };
+
+        speechSynthesis.speak(utterance);
+        return () => clearTimeout(voiceEndTimerRef.current);
+      }, [currentStep, isPlaying]);
+
+      const handlePlay = () => {
+        setCurrentStep(0);
+        setIsPlaying(true);
+        speechSynthesis.cancel();
+      };
+
+      const handlePause = () => {
+        setIsPlaying(false);
+        speechSynthesis.cancel();
+      };
+
+      const handleNext = () => {
+        if (currentStep < STEPS.length - 1) {
+          setCurrentStep(prev => prev + 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      const handlePrev = () => {
+        if (currentStep > 0) {
+          setCurrentStep(prev => prev - 1);
+          speechSynthesis.cancel();
+        }
+      };
+
+      // ========== 渲染步骤内容 ==========
+      const renderStepContent = () => {
+        switch(currentStep) {
+          case 0: return <Step0Overview />;
+          case 1: return <Step1Architecture />;
+          case 2: return <Step2GPIOComparison />;
+          case 3: return <Step3UARTInit />;
+          case 4: return <Step4SPIComm />;
+          case 5: return <Step5ADCCollect />;
+          case 6: return <Step6TimerPWM />;
+          case 7: return <Step7Advantages />;
+          default: return <Step0Overview />;
+        }
+      };
+
+      return (
+        <div className="min-h-screen p-4" style={{ background: `linear-gradient(135deg, ${COLOR_MAP.bg} 0%, #0f172a 100%)` }}>
+          {/* 顶部控制栏 */}
+          <div className="mb-4 flex items-center justify-between" style={{ backgroundColor: 'rgba(30, 41, 59, 0.8)', borderRadius: '12px', padding: '16px' }}>
+            <div>
+              <h1 className="text-2xl font-bold" style={{ color: COLOR_MAP.text }}>1158 - 硬件抽象层 (HAL)</h1>
+              <p className="text-sm" style={{ color: COLOR_MAP.accent }}>Embedded C - Hardware Abstraction Layer</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-sm" style={{ color: COLOR_MAP.accent }}>
+                {voiceStatus} | 步骤 {currentStep + 1}/{STEPS.length}
+              </div>
+              <button onClick={handlePrev} disabled={currentStep === 0} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>上一个</button>
+              {!isPlaying ? (
+                <button onClick={handlePlay} className="px-4 py-2 rounded" style={{ backgroundColor: '#10b981', color: 'white' }}>播放</button>
+              ) : (
+                <button onClick={handlePause} className="px-4 py-2 rounded" style={{ backgroundColor: '#f59e0b', color: 'white' }}>暂停</button>
+              )}
+              <button onClick={handleNext} disabled={currentStep === STEPS.length - 1} className="px-4 py-2 rounded disabled:opacity-50" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>下一个</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 h-[calc(100vh-150px)]">
+            {/* 代码区 */}
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>代码示例</div>
+              <pre className="p-4 text-sm overflow-auto h-full text-gray-100 font-mono">
+                <code>{renderStepContent()}</code>
+              </pre>
+            </div>
+
+            {/* 可视化区 */}
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>可视化动画</div>
+              <div className="p-4 h-full overflow-auto">
+                {renderVisualization()}
+              </div>
+            </div>
+
+            {/* 解释区 */}
+            <div className="rounded-lg overflow-hidden shadow-xl" style={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="px-4 py-2 font-semibold" style={{ backgroundColor: COLOR_MAP.primary, color: 'white' }}>解释说明</div>
+              <div className="p-4 space-y-3 h-full overflow-auto">
+                <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20` }}>
+                  <div className="font-bold mb-2" style={{ color: COLOR_MAP.text }}>{STEPS[currentStep].title}</div>
+                  <p style={{ color: COLOR_MAP.accent }}>{STEPS[currentStep].voice}</p>
+                </div>
+                {renderExplanation()}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function renderVisualization() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewViz />;
+        case 1: return <Step1ArchitectureViz />;
+        case 2: return <Step2GPIOComparisonViz />;
+        case 3: return <Step3UARTInitViz />;
+        case 4: return <Step4SPICommViz />;
+        case 5: return <Step5ADCCollectViz />;
+        case 6: return <Step6TimerPWMViz />;
+        case 7: return <Step7AdvantagesViz />;
+        default: return <Step0OverviewViz />;
+      }
+    }
+
+    function renderExplanation() {
+      switch(currentStep) {
+        case 0: return <Step0OverviewExp />;
+        case 1: return <Step1ArchitectureExp />;
+        case 2: return <Step2GPIOComparisonExp />;
+        case 3: return <Step3UARTInitExp />;
+        case 4: return <Step4SPICommExp />;
+        case 5: return <Step5ADCCollectExp />;
+        case 6: return <Step6TimerPWMExp />;
+        case 7: return <Step7AdvantagesExp />;
+        default: return null;
+      }
+    }
+
+    // ========== 步骤 0: HAL 概述 ==========
+    function Step0Overview() {
+      return `/**
+ * 硬件抽象层 (HAL) - 概述
+ * Hardware Abstraction Layer
+ *
+ * HAL 是芯片厂商提供的标准库函数
+ * 屏蔽底层硬件细节，提供统一接口
+ */
+
+// 常见 MCU 的 HAL 库
+#define STM32_HAL      // ST 官方 HAL 库
+#define ESP32_HAL      // ESP-IDF HAL
+#define NXP_HAL        // NXP MCUXpresso
+#define AVR_HAL        // Arduino Core
+
+// HAL 的核心价值
+// 1. 硬件抽象 - 隐藏寄存器细节
+// 2. 可移植性 - 代码易于迁移
+// 3. 开发效率 - 减少底层调试时间
+// 4. 代码质量 - 经过厂商验证`;
+    }
+
+    function Step0OverviewViz() {
+      return (
+        <div className="space-y-4">
+          <div className="text-center mb-4">
+            <div className="text-lg font-bold" style={{ color: COLOR_MAP.text }}>HAL 定位</div>
+          </div>
+          <div className="space-y-2">
+            <div className="p-3 rounded text-center animate-slideIn" style={{ backgroundColor: `${COLOR_MAP.primary}40`, border: `2px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold" style={{ color: COLOR_MAP.text }}>应用层 (Application)</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>业务逻辑、算法</div>
+            </div>
+            <div className="flex justify-center">↓ 调用 HAL API</div>
+            <div className="p-3 rounded text-center animate-pulse" style={{ backgroundColor: `${COLOR_MAP.secondary}60`, border: `2px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold" style={{ color: 'white' }}>HAL 层 (硬件抽象层)</div>
+              <div className="text-xs" style={{ color: 'white' }}>GPIO/UART/SPI/ADC/TIMER</div>
+            </div>
+            <div className="flex justify-center">↓ 操作寄存器</div>
+            <div className="p-3 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.bg}80`, border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="font-bold" style={{ color: COLOR_MAP.accent }}>硬件层 (寄存器)</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>GPIOx_ODR, USARTx_DR, etc.</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step0OverviewExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>什么是 HAL？</strong> HAL 是 Hardware Abstraction Layer 的缩写，中文名为"硬件抽象层"。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>HAL 的作用：</strong> 在应用程序和硬件之间建立统一的接口层，应用程序通过 HAL 提供的 API 访问硬件资源，无需了解底层寄存器细节。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>主流 HAL 库：</strong> STM32 HAL (ST 官方)、ESP-IDF (乐鑫)、MCUXpresso (NXP)、Arduino Core (AVR/ARM)。</p>
+        </div>
+      );
+    }
+
+    // ========== 步骤 1: HAL 架构 ==========
+    function Step1Architecture() {
+      return `/**
+ * HAL 分层架构
+ */
+
+// ┌─────────────────────────────────────┐
+// │           应用层 (App)               │
+// │   main.c, task_sensor.c, ...        │
+// ├─────────────────────────────────────┤
+// │         HAL 驱动层 (HAL Driver)       │
+// │  stm32f4xx_hal_gpio.c               │
+// │  stm32f4xx_hal_uart.c               │
+// │  stm32f4xx_hal_spi.c                │
+// │  stm32f4xx_hal_adc.c                │
+// ├─────────────────────────────────────┤
+// │       寄存器抽象层 (Register)         │
+// │  stm32f4xx.h (CMSIS)                │
+// │  GPIO_TypeDef, USART_TypeDef        │
+// ├─────────────────────────────────────┤
+// │           硬件层 (Hardware)          │
+// │  GPIO, UART, SPI, ADC, TIMER        │
+// └─────────────────────────────────────┘
+
+// HAL 句柄结构 (以 UART 为例)
+typedef struct {
+    USART_TypeDef *Instance;      // 寄存器基地址
+    UART_InitTypeDef Init;        // 初始化参数
+    uint8_t *pTxBuffPtr;          // 发送缓冲
+    uint16_t TxXferSize;          // 发送大小
+    uint8_t *pRxBuffPtr;          // 接收缓冲
+    HAL_LockTypeDef Lock;         // 锁
+    HAL_StatusTypeDef State;      // 状态
+} UART_HandleTypeDef;`;
+    }
+
+    function Step1ArchitectureViz() {
+      return (
+        <div className="space-y-3">
+          <div className="p-3 rounded text-center animate-slideIn" style={{ backgroundColor: `${COLOR_MAP.primary}40`, border: `2px solid ${COLOR_MAP.primary}` }}>
+            <div className="font-bold" style={{ color: COLOR_MAP.text }}>应用层</div>
+            <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>main.c / sensor_task.c</div>
+          </div>
+          <div className="flex justify-center text-xs" style={{ color: COLOR_MAP.accent }}>↑ HAL_API ↑</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}50`, border: `2px solid ${COLOR_MAP.secondary}` }}>
+            <div className="font-bold text-center mb-2" style={{ color: 'white' }}>HAL 驱动层</div>
+            <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'white' }}>
+              <div className="p-2 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>hal_gpio.c</div>
+              <div className="p-2 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>hal_uart.c</div>
+              <div className="p-2 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>hal_spi.c</div>
+              <div className="p-2 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>hal_adc.c</div>
+            </div>
+          </div>
+          <div className="flex justify-center text-xs" style={{ color: COLOR_MAP.accent }}>↑ 寄存器操作 ↑</div>
+          <div className="p-3 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.bg}80`, border: `2px solid ${COLOR_MAP.border}` }}>
+            <div className="font-bold" style={{ color: COLOR_MAP.accent }}>CMSIS / 寄存器定义</div>
+            <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>stm32f4xx.h</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step1ArchitectureExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>四层架构：</strong> 应用层 → HAL 驱动层 → 寄存器抽象层 (CMSIS) → 硬件层。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>HAL 句柄：</strong> 每个外设都有一个 Handle 结构体，包含寄存器基址、配置参数、缓冲指针、状态等信息。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>使用方式：</strong> 初始化时配置 Handle 的 Init 成员，然后调用 HAL_xxx_Init()，之后使用 HAL_xxx_Read/Write() 等函数操作外设。</p>
+        </div>
+      );
+    }
+
+    // ========== 步骤 2: GPIO 操作对比 ==========
+    function Step2GPIOComparison() {
+      return `// ═══════════════════════════════════════
+// 方法 1: 直接操作寄存器 (传统方式)
+// ═══════════════════════════════════════
+void GPIO_SetOutput(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
+    // 配置模式寄存器 (MODER) - 设为输出
+    GPIOx->MODER &= ~(GPIO_MODER_MODER0 << (GPIO_Pin * 2));
+    GPIOx->MODER |= (GPIO_MODER_MODER0_0 << (GPIO_Pin * 2));
+
+    // 配置输出类型寄存器 (OTYPER) - 推挽
+    GPIOx->OTYPER &= ~(GPIO_OTYPER_OT0 << GPIO_Pin);
+
+    // 配置速度寄存器 (OSPEEDR) - 高速
+    GPIOx->OSPEEDR |= (GPIO_OSPEEDER_OSPEEDR0 << (GPIO_Pin * 2));
+
+    // 配置上拉下拉寄存器 (PUPDR) - 无上拉下拉
+    GPIOx->PUPDR &= ~(GPIO_PUPDR_PUPDR0 << (GPIO_Pin * 2));
+
+    // 设置输出高电平
+    GPIOx->BSRR = GPIO_Pin;
+}
+
+// ═══════════════════════════════════════
+// 方法 2: 使用 HAL 库 (推荐方式)
+// ═══════════════════════════════════════
+GPIO_InitTypeDef GPIO_InitStruct = {0};
+GPIO_InitStruct.Pin = GPIO_PIN_5;
+GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;  // 推挽输出
+GPIO_InitStruct.Pull = GPIO_NOPULL;          // 无上拉下拉
+GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH; // 高速
+HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+// 输出高/低电平
+HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);   // 高电平
+HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET); // 低电平
+
+// 翻转 GPIO
+HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);`;
+    }
+
+    function Step2GPIOComparisonViz() {
+      return (
+        <div className="space-y-4">
+          <div className="text-center font-bold mb-3" style={{ color: COLOR_MAP.text }}>传统方式 vs HAL 方式</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded" style={{ backgroundColor: 'rgba(239, 68, 68, 0.3)', border: '1px solid #ef4444' }}>
+              <div className="font-bold text-center mb-2 text-red-400">直接操作寄存器</div>
+              <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+                <div>配置 MODER 寄存器</div>
+                <div>配置 OTYPER 寄存器</div>
+                <div>配置 OSPEEDR 寄存器</div>
+                <div>配置 PUPDR 寄存器</div>
+                <div className="text-red-400">需要 20+ 行代码</div>
+              </div>
+            </div>
+            <div className="p-3 rounded" style={{ backgroundColor: 'rgba(34, 197, 94, 0.3)', border: '1px solid #22c55e' }}>
+              <div className="font-bold text-center mb-2 text-green-400">HAL 库方式</div>
+              <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+                <div>配置 GPIO_InitStruct</div>
+                <div>调用 HAL_GPIO_Init()</div>
+                <div className="text-green-400">仅需 5 行代码</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-3 rounded text-center animate-pulse" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `2px solid ${COLOR_MAP.primary}` }}>
+            <div className="font-bold" style={{ color: COLOR_MAP.text }}>HAL_GPIO_WritePin()</div>
+            <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>一行代码实现 GPIO 输出</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step2GPIOComparisonExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>传统方式缺点：</strong> 需要了解每个寄存器的功能，代码冗长易错，可移植性差。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>HAL 方式优点：</strong> 结构体配置直观，一个函数完成初始化，代码可移植性强。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>常用 GPIO API：</strong> HAL_GPIO_Init(), HAL_GPIO_WritePin(), HAL_GPIO_ReadPin(), HAL_GPIO_TogglePin()。</p>
+        </div>
+      );
+    }
+
+    // ========== 步骤 3: UART 初始化 ==========
+    function Step3UARTInit() {
+      return `/**
+ * UART 初始化配置
+ */
+UART_HandleTypeDef huart2;
+
+void MX_USART2_Init(void) {
+    huart2.Instance = USART2;
+    huart2.Init.BaudRate = 115200;              // 波特率 115200
+    huart2.Init.WordLength = UART_WORDLENGTH_8B; // 8 位数据位
+    huart2.Init.StopBits = UART_STOPBITS_1;     // 1 位停止位
+    huart2.Init.Parity = UART_PARITY_NONE;      // 无校验
+    huart2.Init.Mode = UART_MODE_TX_RX;         // 收发模式
+    huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE; // 无硬件流控
+    huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+
+    // 调用 HAL 初始化函数
+    if (HAL_UART_Init(&huart2) != HAL_OK) {
+        // 初始化失败处理
+        Error_Handler();
+    }
+}
+
+// HAL_UART_Init 内部流程:
+// 1. 使能时钟 (RCC)
+// 2. 配置 GPIO (TX/RX 引脚)
+// 3. 配置波特率寄存器 (BRR)
+// 4. 配置控制寄存器 (CR1/CR2/CR3)
+// 5. 使能 UART 外设
+
+// 发送数据
+HAL_UART_Transmit(&huart2, txBuffer, txSize, timeout);
+
+// 接收数据
+HAL_UART_Receive(&huart2, rxBuffer, rxSize, timeout);
+
+// 中断方式发送
+HAL_UART_Transmit_IT(&huart2, txBuffer, txSize);
+
+// DMA 方式发送
+HAL_UART_Transmit_DMA(&huart2, txBuffer, txSize);`;
+    }
+
+    function Step3UARTInitViz() {
+      return (
+        <div className="space-y-3">
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `2px solid ${COLOR_MAP.primary}` }}>
+            <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>UART 配置参数</div>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between" style={{ color: COLOR_MAP.accent }}>
+                <span>波特率:</span>
+                <span style={{ color: COLOR_MAP.text }}>115200</span>
+              </div>
+              <div className="flex justify-between" style={{ color: COLOR_MAP.accent }}>
+                <span>数据位:</span>
+                <span style={{ color: COLOR_MAP.text }}>8 位</span>
+              </div>
+              <div className="flex justify-between" style={{ color: COLOR_MAP.accent }}>
+                <span>停止位:</span>
+                <span style={{ color: COLOR_MAP.text }}>1 位</span>
+              </div>
+              <div className="flex justify-between" style={{ color: COLOR_MAP.accent }}>
+                <span>校验位:</span>
+                <span style={{ color: COLOR_MAP.text }}>无</span>
+              </div>
+            </div>
+          </div>
+          <div className="p-3 rounded text-center animate-highlight" style={{ backgroundColor: `${COLOR_MAP.secondary}40`, border: `2px solid ${COLOR_MAP.secondary}` }}>
+            <div className="font-bold" style={{ color: 'white' }}>HAL_UART_Init()</div>
+            <div className="text-xs mt-1" style={{ color: 'white' }}>一键完成所有配置</div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="p-2 rounded animate-pulse" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div style={{ color: COLOR_MAP.text }}>TX 引脚</div>
+            </div>
+            <div className="p-2 rounded animate-pulse" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <div style={{ color: COLOR_MAP.text }}>RX 引脚</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step3UARTInitExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>配置流程：</strong> 填充 UART_HandleTypeDef 结构体 → 调用 HAL_UART_Init() → 检查返回值。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>传输方式：</strong> 阻塞式 (Transmit/Receive)、中断式 (_IT)、DMA 式 (_DMA)。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>回调函数：</strong> 重写 HAL_UART_TxCpltCallback() 和 HAL_UART_RxCpltCallback() 处理传输完成事件。</p>
+        </div>
+      );
+    }
+
+    // ========== 步骤 4: SPI 通信 ==========
+    function Step4SPIComm() {
+      return `/**
+ * SPI 通信配置
+ */
+SPI_HandleTypeDef hspi1;
+
+void MX_SPI1_Init(void) {
+    hspi1.Instance = SPI1;
+    hspi1.Init.Mode = SPI_MODE_MASTER;          // 主模式
+    hspi1.Init.Direction = SPI_DIRECTION_2LINES; // 全双工
+    hspi1.Init.DataSize = SPI_DATASIZE_8BIT;    // 8 位数据
+    hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;  // 时钟极性
+    hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;      // 时钟相位
+    hspi1.Init.NSS = SPI_NSS_SOFT;              // 软件片选
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
+    hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;     // 高位在前
+    hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+    hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+
+    if (HAL_SPI_Init(&hspi1) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+// 全双工传输 (同时发送和接收)
+uint8_t txData = 0x55;
+uint8_t rxData = 0;
+HAL_SPI_TransmitReceive(&hspi1, &txData, &rxData, 1, timeout);
+
+// 片选控制
+HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET); // CS 拉低
+HAL_SPI_TransmitReceive(&hspi1, txBuf, rxBuf, len, timeout);
+HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);   // CS 拉高`;
+    }
+
+    function Step4SPICommViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>SPI 四线接口</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `2px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>主设备 (MCU)</div>
+              <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+                <div>SCK → 时钟输出</div>
+                <div>MOSI → 数据输出</div>
+                <div>MISO ← 数据输入</div>
+                <div>CS → 片选控制</div>
+              </div>
+            </div>
+            <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `2px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold text-center mb-2" style={{ color: COLOR_MAP.text }}>从设备 (Sensor)</div>
+              <div className="space-y-1 text-xs" style={{ color: COLOR_MAP.accent }}>
+                <div>SCK ← 时钟输入</div>
+                <div>MOSI ← 数据输入</div>
+                <div>MISO → 数据输出</div>
+                <div>CS ← 片选信号</div>
+              </div>
+            </div>
+          </div>
+          <div className="p-2 rounded text-center text-xs animate-flow" style={{ backgroundColor: `${COLOR_MAP.accent}20`, border: `1px dashed ${COLOR_MAP.accent}`, color: COLOR_MAP.text }}>
+            数据传输：MOSI (主→从) 与 MISO (从→主) 同时进行
+          </div>
+        </div>
+      );
+    }
+
+    function Step4SPICommExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>SPI 特点：</strong> 同步、全双工、高速、短距离通信，常用于 Flash、SD 卡、传感器等。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>时钟模式：</strong> CPOL(极性) 和 CPHA(相位) 组合成 4 种模式，需与从设备匹配。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>片选控制：</strong> 软件片选 (NSS_SOFT) 需手动控制 GPIO，硬件片选由 SPI 外设自动管理。</p>
+        </div>
+      );
+    }
+
+    // ========== 步骤 5: ADC 采集 ==========
+    function Step5ADCCollect() {
+      return `/**
+ * ADC 模数转换配置
+ */
+ADC_HandleTypeDef hadc1;
+
+void MX_ADC1_Init(void) {
+    ADC_ChannelConfTypeDef sConfig = {0};
+
+    hadc1.Instance = ADC1;
+    hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+    hadc1.Init.Resolution = ADC_RESOLUTION_12B;      // 12 位分辨率
+    hadc1.Init.ScanConvMode = DISABLE;               // 单通道模式
+    hadc1.Init.ContinuousConvMode = ENABLE;          // 连续转换
+    hadc1.Init.DiscontinuousConvMode = DISABLE;
+    hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START; // 软件触发
+    hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+    hadc1.Init.NbrOfConversion = 1;
+    hadc1.Init.DMAContinuousRequests = DISABLE;
+    hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+
+    if (HAL_ADC_Init(&hadc1) != HAL_OK) {
+        Error_Handler();
+    }
+
+    // 配置通道
+    sConfig.Channel = ADC_CHANNEL_0;      // 通道 0 (PA0)
+    sConfig.Rank = 1;
+    sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES; // 采样时间
+
+    if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+// 启动转换
+HAL_ADC_Start(&hadc1);
+
+// 等待转换完成 (阻塞)
+HAL_ADC_PollForConversion(&hadc1, timeout);
+
+// 读取转换结果 (0-4095 for 12-bit)
+uint32_t adcValue = HAL_ADC_GetValue(&hadc1);
+
+// 转换为电压 (假设 3.3V 参考)
+float voltage = (adcValue * 3.3f) / 4095.0f;
+
+// 停止转换
+HAL_ADC_Stop(&hadc1);`;
+    }
+
+    function Step5ADCCollectViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>ADC 转换流程</div>
+          <div className="space-y-2">
+            <div className="p-2 rounded flex items-center justify-between" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `1px solid ${COLOR_MAP.primary}` }}>
+              <span style={{ color: COLOR_MAP.accent }}>模拟信号</span>
+              <span className="animate-pulse" style={{ color: COLOR_MAP.text }}>0.5V ~ 2.8V</span>
+            </div>
+            <div className="flex justify-center" style={{ color: COLOR_MAP.accent }}>↓ ADC 转换 ↓</div>
+            <div className="p-2 rounded text-center" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `2px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold" style={{ color: COLOR_MAP.text }}>ADC 内核</div>
+              <div className="text-xs" style={{ color: COLOR_MAP.accent }}>12 位分辨率 / 480 周期采样</div>
+            </div>
+            <div className="flex justify-center" style={{ color: COLOR_MAP.accent }}>↓ 数字输出 ↓</div>
+            <div className="p-2 rounded flex items-center justify-between" style={{ backgroundColor: `${COLOR_MAP.accent}30`, border: `1px solid ${COLOR_MAP.accent}` }}>
+              <span style={{ color: COLOR_MAP.text }}>数字值</span>
+              <span className="animate-blink" style={{ color: COLOR_MAP.text }}>0 ~ 4095</span>
+            </div>
+          </div>
+          <div className="text-center text-xs" style={{ color: COLOR_MAP.accent }}>
+            电压计算公式：<span style={{ color: COLOR_MAP.text }}>V = (ADC_value × 3.3V) / 4095</span>
+          </div>
+        </div>
+      );
+    }
+
+    function Step5ADCCollectExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>分辨率：</strong> 12 位 ADC 输出范围 0-4095，对应 0V-Vref(通常 3.3V)。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>采样时间：</strong> 采样时间越长，转换越慢但精度越高。480 周期适用于高阻抗信号源。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>转换模式：</strong> 单次转换、连续转换、扫描模式 (多通道)、注入模式 (高优先级)。</p>
+        </div>
+      );
+    }
+
+    // ========== 步骤 6: 定时器 PWM ==========
+    function Step6TimerPWM() {
+      return `/**
+ * 定时器 PWM 输出配置
+ */
+TIM_HandleTypeDef htim3;
+TIM_OC_InitTypeDef sConfigOC = {0};
+
+void MX_TIM3_Init(void) {
+    htim3.Instance = TIM3;
+    htim3.Init.Prescaler = 83;                      // 预分频 84MHz/84 = 1MHz
+    htim3.Init.CounterMode = TIM_COUNTERMODE_UP;    // 向上计数
+    htim3.Init.Period = 9999;                       // 自动重装载值
+    htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+
+    if (HAL_TIM_PWM_Init(&htim3) != HAL_OK) {
+        Error_Handler();
+    }
+
+    // 配置 PWM 通道
+    sConfigOC.OCMode = TIM_OCMODE_PWM1;             // PWM 模式 1
+    sConfigOC.Pulse = 5000;                         // 初始占空比 50%
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;     // 高电平有效
+    sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+
+    // 配置通道 1 (PA6)
+    if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+// 启动 PWM 输出
+HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+
+// 动态调整占空比 (0-100%)
+void PWM_SetDuty(uint8_t duty) {
+    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty * 100);
+}
+
+// 频率计算：1MHz / 10000 = 100Hz`;
+    }
+
+    function Step6TimerPWMViz() {
+      const [duty, setDuty] = useState(50);
+
+      useEffect(() => {
+        const interval = setInterval(() => {
+          setDuty(prev => (prev >= 100 ? 0 : prev + 10));
+        }, 1000);
+        return () => clearInterval(interval);
+      }, []);
+
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>PWM 波形生成</div>
+          <div className="p-3 rounded" style={{ backgroundColor: `${COLOR_MAP.primary}20`, border: `1px solid ${COLOR_MAP.primary}` }}>
+            <div className="flex items-end h-24 gap-1">
+              {Array.from({ length: 20 }).map((_, i) => {
+                const isHigh = i % 10 < (duty / 10);
+                return (
+                  <div key={i} className="flex-1 transition-all duration-300"
+                    style={{
+                      height: isHigh ? '100%' : '20%',
+                      backgroundColor: isHigh ? COLOR_MAP.primary : COLOR_MAP.bg,
+                      border: `1px solid ${COLOR_MAP.border}`
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <div className="text-center mt-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+              当前占空比：<span style={{ color: COLOR_MAP.text, fontWeight: 'bold' }}>{duty}%</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `1px solid ${COLOR_MAP.secondary}` }}>
+              <div style={{ color: COLOR_MAP.text }}>频率：100Hz</div>
+            </div>
+            <div className="p-2 rounded" style={{ backgroundColor: `${COLOR_MAP.accent}30`, border: `1px solid ${COLOR_MAP.accent}` }}>
+              <div style={{ color: COLOR_MAP.text }}>分辨率：1%</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step6TimerPWMExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>PWM 原理：</strong> 通过调整高电平占整个周期的比例来控制平均电压，用于电机调速、LED 调光等。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>频率计算：</strong> F_pwm = 定时器时钟 / ((Prescaler+1) × (Period+1))。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>占空比调整：</strong> 使用 __HAL_TIM_SET_COMPARE() 宏修改比较寄存器 (CCR) 的值。</p>
+        </div>
+      );
+    }
+
+    // ========== 步骤 7: HAL 优势 ==========
+    function Step7Advantages() {
+      return `/**
+ * HAL 库优势总结
+ */
+
+// ═══════════════════════════════════════
+// 1. 硬件抽象 (Hardware Abstraction)
+// ═══════════════════════════════════════
+// 无需了解寄存器地址和位定义
+// 统一的 API 接口适用于所有 STM32 系列
+
+// ═══════════════════════════════════════
+// 2. 可移植性 (Portability)
+// ═══════════════════════════════════════
+// F1 → F4 → H7 只需修改初始化配置
+// 应用层代码几乎不需要改动
+
+// ═══════════════════════════════════════
+// 3. 开发效率 (Development Efficiency)
+// ═══════════════════════════════════════
+// STM32CubeMX 图形化配置生成代码
+// 减少 70% 底层驱动开发时间
+
+// ═══════════════════════════════════════
+// 4. 代码质量 (Code Quality)
+// ═══════════════════════════════════════
+// ST 官方测试验证
+// 完善的错误处理机制
+// 详细的文档和示例
+
+// ═══════════════════════════════════════
+// HAL vs LL (Low Layer) vs 寄存器
+// ═══════════════════════════════════════
+// | 特性       | HAL     | LL      | 寄存器  |
+// |----------|---------|---------|--------|
+// | 抽象层级   | 高      | 中      | 低     |
+// | 执行效率   | 中      | 高      | 最高   |
+// | 代码大小   | 大      | 中      | 小     |
+// | 开发效率   | 高      | 中      | 低     |
+// | 可移植性   | 高      | 中      | 低     |
+// | 学习曲线   | 低      | 中      | 高     |
+//
+// 推荐：一般应用选 HAL，实时性要求高选 LL`;
+    }
+
+    function Step7AdvantagesViz() {
+      return (
+        <div className="space-y-3">
+          <div className="text-center font-bold mb-2" style={{ color: COLOR_MAP.text }}>HAL 四大优势</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="p-3 rounded text-center animate-slideIn" style={{ backgroundColor: `${COLOR_MAP.primary}30`, border: `2px solid ${COLOR_MAP.primary}` }}>
+              <div className="font-bold" style={{ color: COLOR_MAP.text }}>硬件抽象</div>
+              <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>隐藏寄存器细节</div>
+            </div>
+            <div className="p-3 rounded text-center animate-slideIn" style={{ backgroundColor: `${COLOR_MAP.secondary}30`, border: `2px solid ${COLOR_MAP.secondary}` }}>
+              <div className="font-bold" style={{ color: COLOR_MAP.text }}>可移植性</div>
+              <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>跨系列兼容</div>
+            </div>
+            <div className="p-3 rounded text-center animate-slideIn" style={{ backgroundColor: `${COLOR_MAP.accent}30`, border: `2px solid ${COLOR_MAP.accent}` }}>
+              <div className="font-bold" style={{ color: COLOR_MAP.text }}>开发效率</div>
+              <div className="text-xs mt-1" style={{ color: COLOR_MAP.text }}>CubeMX 支持</div>
+            </div>
+            <div className="p-3 rounded text-center animate-slideIn" style={{ backgroundColor: `${COLOR_MAP.bg}60`, border: `2px solid ${COLOR_MAP.border}` }}>
+              <div className="font-bold" style={{ color: COLOR_MAP.text }}>代码质量</div>
+              <div className="text-xs mt-1" style={{ color: COLOR_MAP.accent }}>官方验证</div>
+            </div>
+          </div>
+          <div className="p-3 rounded" style={{ backgroundColor: 'rgba(34, 197, 94, 0.2)', border: '1px solid #22c55e' }}>
+            <div className="text-center font-bold mb-2" style={{ color: '#22c55e' }}>推荐使用场景</div>
+            <div className="text-xs space-y-1" style={{ color: COLOR_MAP.accent }}>
+              <div>✅ 快速原型开发</div>
+              <div>✅ 中大型项目</div>
+              <div>✅ 需要代码复用</div>
+              <div>✅ 团队协作开发</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Step7AdvantagesExp() {
+      return (
+        <div className="space-y-2 text-sm" style={{ color: COLOR_MAP.accent }}>
+          <p><strong style={{ color: COLOR_MAP.text }}>HAL vs LL：</strong> HAL 抽象层级高、开发效率高；LL (Low Layer) 更接近硬件、执行效率更高。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>选型建议：</strong> 一般应用、快速开发、团队协作选 HAL；实时性要求极高、资源受限场景选 LL 或直接操作寄存器。</p>
+          <p><strong style={{ color: COLOR_MAP.text }}>学习路径：</strong> 先掌握 HAL 快速上手 → 理解 LL 优化性能 → 必要时直接操作寄存器。</p>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
