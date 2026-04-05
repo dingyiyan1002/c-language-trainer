@@ -1,0 +1,1271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>项目全景分析 - 工作区概览</title>
+<style>
+/* ===== CSS Variables ===== */
+:root {
+  --bg-primary: #0a0f1a;
+  --bg-secondary: #111827;
+  --bg-card: #1a2235;
+  --bg-card-hover: #1e293b;
+  --border-color: rgba(148,163,184,0.12);
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent-emerald: #10b981;
+  --accent-cyan: #06b6d4;
+  --accent-purple: #8b5cf6;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+  --accent-blue: #3b82f6;
+  --gradient-main: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+  --gradient-purple: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+  --gradient-amber: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-card: 0 4px 24px rgba(0,0,0,0.2);
+  --shadow-glow: 0 0 40px rgba(16,185,129,0.08);
+  --font-sans: 'Inter', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ===== Background Effects ===== */
+.bg-grid {
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(rgba(16,185,129,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16,185,129,0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none; z-index: -1;
+}
+
+.glow-orb {
+  position: fixed; border-radius: 50%; filter: blur(80px);
+  opacity: 0.15; pointer-events: none; z-index: -1;
+}
+.glow-orb-1 { width: 500px; height: 500px; background: var(--accent-emerald); top: -150px; right: -100px; }
+.glow-orb-2 { width: 400px; height: 400px; background: var(--accent-purple); bottom: 20%; left: -100px; }
+.glow-orb-3 { width: 300px; height: 300px; background: var(--accent-cyan); bottom: -100px; right: 30%; }
+
+/* ===== Header / Nav ===== */
+.header {
+  position: sticky; top: 0; z-index: 100;
+  backdrop-filter: blur(20px) saturate(180%);
+  background: rgba(10,15,26,0.85);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.nav-inner {
+  max-width: 1400px; margin: 0 auto;
+  padding: 0 24px; display: flex; align-items: center; justify-content: space-between; height: 64px;
+}
+
+.logo-group { display: flex; align-items: center; gap: 12px; }
+
+.logo-icon {
+  width: 38px; height: 38px; border-radius: 11px;
+  background: var(--gradient-main);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 800; color: white; letter-spacing: -1px;
+  box-shadow: 0 4px 20px rgba(16,185,129,0.25);
+}
+
+.logo-text h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+.logo-text p { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+.nav-links { display: flex; gap: 4px; }
+
+.nav-link {
+  padding: 7px 16px; border-radius: 9px; font-size: 13.5px; font-weight: 500;
+  color: var(--text-secondary); text-decoration: none; transition: all 0.2s ease;
+  cursor: pointer; border: none; background: transparent;
+}
+.nav-link:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+.nav-link.active { color: var(--accent-emerald); background: rgba(16,185,129,0.1); }
+
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; animation: pulse-dot 2s infinite; }
+.status-dot.green { background: var(--accent-emerald); box-shadow: 0 0 8px var(--accent-emerald); }
+.status-dot.amber { background: var(--accent-amber); box-shadow: 0 0 8px var(--accent-amber); }
+.status-dot.purple { background: var(--accent-purple); box-shadow: 0 0 8px var(--accent-purple); }
+.status-dot.blue { background: var(--accent-blue); box-shadow: 0 0 8px var(--accent-blue); }
+
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+.mobile-menu-btn { display: none; background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 22px; }
+
+/* ===== Main Content ===== */
+.main-content { max-width: 1400px; margin: 0 auto; padding: 36px 24px 60px; }
+
+.section { margin-bottom: 56px; opacity: 0; transform: translateY(30px); transition: all 0.6s cubic-bezier(0.16,1,0.3,1); }
+.section.visible { opacity: 1; transform: translateY(0); }
+
+.section-header { margin-bottom: 28px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+
+.section-title { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; display: flex; align-items: center; gap: 12px; }
+.section-title .icon { font-size: 28px; }
+
+.section-badge {
+  padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  background: rgba(16,185,129,0.1); color: var(--accent-emerald); border: 1px solid rgba(16,185,129,0.2);
+}
+
+/* ===== Directory Cards Grid ===== */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 22px;
+}
+
+.dir-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 26px;
+  transition: all 0.3s ease;
+  cursor: default;
+  position: relative;
+  overflow: hidden;
+}
+.dir-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  border-radius: 3px 3px 0 0;
+}
+.dir-card.card-active::before { background: var(--gradient-main); }
+.dir-card.card-old::before { background: var(--gradient-amber); }
+.dir-card.card-log::before { background: var(--gradient-purple); }
+.dir-card.card-system::before { background: linear-gradient(90deg, #3b82f6, #8b5cf6); }
+.dir-card:hover { transform: translateY(-3px); border-color: rgba(148,163,184,0.25); box-shadow: var(--shadow-glow), var(--shadow-card); }
+
+.card-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
+
+.card-title-group { display: flex; align-items: center; gap: 12px; }
+
+.card-icon {
+  width: 46px; height: 46px; border-radius: 13px;
+  display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;
+}
+.card-icon.icon-green { background: rgba(16,185,129,0.12); }
+.card-icon.icon-amber { background: rgba(245,158,11,0.12); }
+.card-icon.icon-purple { background: rgba(139,92,246,0.12); }
+.card-icon.icon-blue { background: rgba(59,130,246,0.12); }
+
+.card-name h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.card-path { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); margin-top: 2px; word-break: break-all; }
+
+.card-tag {
+  padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.tag-active { background: rgba(16,185,129,0.15); color: var(--accent-emerald); }
+.tag-old { background: rgba(245,158,11,0.15); color: var(--accent-amber); }
+tag-log { background: rgba(139,92,246,0.15); color: var(--accent-purple); }
+.tag-system { background: rgba(59,130,246,0.15); color: var(--accent-blue); }
+
+.card-desc { font-size: 13.5px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 18px; }
+
+.card-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+
+.stat-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 11px; border-radius: 8px; font-size: 12px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+  color: var(--text-secondary);
+}
+.stat-chip .val { color: var(--text-primary); font-weight: 600; font-family: var(--font-mono); font-size: 11.5px; }
+
+.card-details { border-top: 1px solid var(--border-color); padding-top: 16px; }
+
+.detail-item { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; font-size: 13px; }
+.detail-bullet { color: var(--accent-emerald); margin-top: 3px; font-size: 8px; flex-shrink: 0; }
+.detail-label { color: var(--text-muted); min-width: 72px; flex-shrink: 0; }
+.detail-value { color: var(--text-secondary); }
+
+.expand-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 14px; padding: 6px 14px; border-radius: 8px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border-color);
+  color: var(--text-secondary); font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s; user-select: none;
+}
+.expand-toggle:hover { background: rgba(255,255,255,0.07); color: var(--text-primary); }
+.expand-toggle .arrow { transition: transform 0.25s ease; font-size: 10px; }
+.expand-toggle.expanded .arrow { transform: rotate(180deg); }
+
+.collapsible-content { max-height: 0; overflow: hidden; transition: max-height 0.35s ease; }
+.collapsible-content.open { max-height: 2000px; }
+
+/* ===== Comparison Table ===== */
+.comparison-table-wrapper { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--border-color); }
+
+table.comparison-table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 700px; }
+
+.comparison-table th {
+  background: rgba(16,185,129,0.08); color: var(--text-primary); font-weight: 600;
+  padding: 14px 18px; text-align: left; border-bottom: 1px solid var(--border-color);
+  white-space: nowrap; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.comparison-table td { padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: top; color: var(--text-secondary); }
+.comparison-table tr:last-child td { border-bottom: none; }
+.comparison-table tr:hover td { background: rgba(255,255,255,0.015); }
+
+.table-label { color: var(--text-muted); font-weight: 500; white-space: nowrap; }
+.badge-new { background: rgba(16,185,129,0.15); color: #34d399; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 600; }
+.badge-old { background: rgba(245,158,11,0.15); color: #fbbf24; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 600; }
+.badge-worse { background: rgba(239,68,68,0.15); color: #f87171; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 600; }
+.badge-neutral { background: rgba(148,163,184,0.15); color: #94a3b8; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 600; }
+
+/* ===== Issue List ===== */
+.issue-list { display: flex; flex-direction: column; gap: 10px; }
+
+.issue-item {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 16px 20px; border-radius: var(--radius-md);
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  transition: all 0.2s ease; cursor: default;
+}
+.issue-item:hover { border-color: rgba(148,163,184,0.2); background: var(--bg-card-hover); }
+
+.issue-severity {
+  width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800; flex-shrink: 0; font-style: italic;
+}
+.sev-p0 { background: rgba(239,68,68,0.15); color: #ef4444; }
+.sev-p1 { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.sev-p2 { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.sev-p3 { background: rgba(148,163,184,0.12); color: #94a3b8; }
+
+.issue-body { flex: 1; min-width: 0; }
+.issue-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
+.issue-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.55; }
+
+.issue-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.itag {
+  padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 500;
+}
+.itag-security { background: rgba(239,68,68,0.1); color: #fca5a5; }
+.itag-arch { background: rgba(139,92,246,0.1); color: #c4b5fd; }
+.itag-perf { background: rgba(59,130,246,0.1); color: #93c5fd; }
+.itag-code { background: rgba(245,158,11,0.1); color: #fcd34d; }
+.itag-dead { background: rgba(107,114,128,0.15); color: #9ca3af; }
+.itag-data { background: rgba(16,185,129,0.1); color: #6ee7b7; }
+
+/* ===== File Tree ===== */
+.file-tree { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.75; padding: 16px 20px;
+  background: rgba(0,0,0,0.25); border-radius: 9px; overflow-x: auto;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.tree-line { white-space: nowrap; color: var(--text-secondary); }
+.tree-folder { color: var(--accent-cyan); font-weight: 600; }
+.tree-file { color: var(--text-muted); }
+.tree-jsx { color: #61dafb; }
+.tree-ts { color: #3178c6; }
+.tree-css { color: #a855f7; }
+.tree-json { color: #f59e0b; }
+.tree-html { color: #ef4444; }
+.tree-md { color: #64748b; }
+
+/* ===== Security Alert Box ===== */
+.alert-box {
+  padding: 20px 24px; border-radius: var(--radius-md);
+  border-left: 4px solid var(--accent-red);
+  background: rgba(239,68,68,0.06); margin: 20px 0;
+}
+.alert-box.alert-warning { border-left-color: var(--accent-amber); background: rgba(245,158,11,0.05); }
+.alert-icon { font-size: 20px; margin-right: 10px; }
+.alert-box strong { color: var(--accent-red); }
+.alert-box.alert-warning strong { color: var(--accent-amber); }
+
+/* ===== Footer ===== */
+.footer {
+  border-top: 1px solid var(--border-color); padding: 32px 24px;
+  text-align: center; color: var(--text-muted); font-size: 13px;
+}
+.footer a { color: var(--accent-emerald); text-decoration: none; }
+.footer a:hover { text-decoration: underline; }
+
+/* ===== Tab System ===== */
+.tab-bar {
+  display: flex; gap: 4px; padding: 4px;
+  background: rgba(255,255,255,0.03); border-radius: 11px;
+  border: 1px solid var(--border-color); margin-bottom: 24px; width: fit-content;
+}
+.tab-btn {
+  padding: 8px 20px; border: none; border-radius: 8px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  background: transparent; color: var(--text-muted); transition: all 0.2s;
+}
+.tab-btn.active { background: var(--bg-card); color: var(--text-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.tab-btn:hover:not(.active) { color: var(--text-secondary); }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; animation: fadeTab 0.3s ease; }
+@keyframes fadeTab { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ===== Progress Bar Visual ===== */
+.progress-row { margin: 8px 0; }
+.progress-label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+.progress-label span:first-child { color: var(--text-secondary); }
+.progress-label span:last-child { color: var(--text-primary); font-weight: 600; font-family: var(--font-mono); font-size: 11px; }
+.progress-track { height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 3px; transition: width 1s ease; }
+.fill-good { background: linear-gradient(90deg, #10b981, #34d399); }
+.fill-mid { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.fill-bad { background: linear-gradient(90deg, #ef4444, #f87171); }
+
+/* ===== Tech Stack Pills ===== */
+.tech-stack { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0; }
+.tech-pill {
+  padding: 5px 12px; border-radius: 7px; font-size: 12px; font-weight: 500;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  display: flex; align-items: center; gap: 6px;
+}
+.tech-pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+/* ===== Responsive ===== */
+@media (max-width: 900px) {
+  .cards-grid { grid-template-columns: 1fr; }
+  .nav-links { display: none; position: absolute; top: 64px; left: 0; right: 0; background: rgba(10,15,26,0.97); backdrop-filter: blur(20px); flex-direction: column; padding: 16px; border-bottom: 1px solid var(--border-color); }
+  .nav-links.open { display: flex; }
+  .mobile-menu-btn { display: block; }
+  .section-title { font-size: 21px; }
+  .tab-bar { width: 100%; overflow-x: auto; }
+}
+@media (max-width: 480px) {
+  .main-content { padding: 20px 16px 40px; }
+  .dir-card { padding: 20px; }
+  .card-header { flex-direction: column; gap: 10px; }
+  .comparison-table { font-size: 12px; }
+  .comparison-table th, .comparison-table td { padding: 10px 12px; }
+}
+
+/* ===== Animations ===== */
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); }}
+.float-anim { animation: float 4s ease-in-out infinite; }
+</style>
+</head>
+
+<body>
+<div class="bg-grid"></div>
+<div class="glow-orb glow-orb-1"></div>
+<div class="glow-orb glow-orb-2"></div>
+<div class="glow-orb glow-orb-3"></div>
+
+<!-- ===== HEADER ===== -->
+<header class="header">
+  <div class="nav-inner">
+    <div class="logo-group">
+      <div class="logo-icon">W</div>
+      <div class="logo-text">
+        <h1>工作区全景</h1>
+        <p>Workspace Overview &amp; Analysis</p>
+      </div>
+    </div>
+    <button class="mobile-menu-btn" onclick="toggleMobileNav()">&#9776;</button>
+    <nav class="nav-links" id="navLinks">
+      <a class="nav-link active" onclick="scrollToSection('overview')">📂 总览</a>
+      <a class="nav-link" onclick="scrollToSection('compare')">⚖️ 版本对比</a>
+      <a class="nav-link" onclick="scrollToSection('issues')">🐛 问题清单</a>
+      <a class="nav-link" onclick="scrollToSection('security')">🔒 安全审计</a>
+      <a class="nav-link" onclick="scrollToSection('openclaw')">🤖 OpenClaw</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ===== MAIN ===== -->
+<main class="main-content">
+
+  <!-- ===== SECTION: OVERVIEW ===== -->
+  <section class="section" id="overview">
+    <div class="section-header">
+      <h2 class="section-title"><span class="icon">📂</span> 目录结构总览</h2>
+      <span class="section-badge">4 个目录 · 已扫描完毕</span>
+    </div>
+
+    <div class="cards-grid">
+
+      <!-- Card 1: Current Project (Active) -->
+      <article class="dir-card card-active">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon icon-green">W1</div>
+            <div>
+              <h2>web-development-received - 11</h2>
+              <p class="card-path">C:\Users\6\Downloads\web-development-request-received - 11</p>
+            </div>
+          </div>
+          <span class="card-tag tag-active"><span class="status-dot green"></span>当前项目</span>
+        </div>
+        <p class="card-desc">
+          <strong style="color:var(--accent-emerald)">嵌入式学习平台</strong>（"C语言思维训练器"）的最新迭代版本。基于 React 19 + TypeScript + Vite 7 构建，涵盖 200+ 题目的交互式学习系统，支持代码运行、内存可视化、AI 辅导等功能。
+        </p>
+        <div class="card-stats">
+          <span class="stat-chip">📄 App.tsx <span class="val">2,676 行</span></span>
+          <span class="stat-chip">📦 组件数 <span class="val">124 文件</span></span>
+          <span class="stat-chip">📚 课程数据 <span class="val">705 KB</span></span>
+          <span class="stat-chip">🔧 章节模块 <span class="val">20+</span></span>
+        </div>
+        <div class="tech-stack">
+          <span class="tech-pill"><span class="dot" style="background:#61dafb"></span>React 19.2</span>
+          <span class="tech-pill"><span class="dot" style="background:#3178c6"></span>TypeScript 5.9</span>
+          <span class="tech-pill"><span class="dot" style="background:#8b5cf6"></span>Vite 7.2</span>
+          <span class="tech-pill"><span class="dot" style="background:#06b6d4"></span>Tailwind 4</span>
+          <span class="tech-pill"><span class="dot" style="background:#10b981"></span>Express + SQLite</span>
+        </div>
+        <div class="card-details">
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">路由方式</span><span class="detail-value">手动 view state 切换，未使用 react-router</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">构建优化</span><span class="detail-value">Terser 压缩 + Brotli/Gzip + chunk 分割</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">后端端口</span><span class="detail-value">3001 (Express) — 支持 GCC 代码编译运行</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">学习路线</span><span class="detail-value">C语言核心 ✅ | 数据结构 🔜 | 计算机组成 📋 | Linux 📋 | ARM 📋</span></div>
+        </div>
+        <button class="expand-toggle" onclick="toggleExpand(this)">
+          查看文件树 <span class="arrow">&#9660;</span>
+        </button>
+        <div class="collapsible-content">
+          <div class="file-tree">
+<span class="tree-line"><span class="tree-folder">src/</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">components/</span></span>
+<span class="tree-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="tree-folder">ai/</span> <span class="tree-jsx">AITutor.tsx</span>, <span class="tree-jsx">AIConfigPanel.tsx</span></span>
+<span class="tree-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="tree-folder">games/</span> <span class="tree-jsx">BitSwitchGame.tsx</span>, <span class="tree-jsx">StructPackerGame.tsx</span></span>
+<span class="tree-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="tree-folder">layout/</span> <span class="tree-jsx">DashboardLayout.tsx</span>, <span class="tree-jsx">NavigationHeader.tsx</span>, <span class="tree-jsx">CollapsibleSidebar.tsx</span></span>
+<span class="tree-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="tree-folder">learning/</span> <span class="tree-jsx">CodeAnalyzer.tsx</span>, <span class="tree-jsx">DeepUnderstandingPanel.tsx</span>, <span class="tree-jsx">ProjectView.tsx</span></span>
+<span class="tree-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="tree-folder">memory/</span> <span class="tree-jsx">PointerSandbox.tsx</span>(44KB), <span class="tree-jsx">EnhancedMemoryViz.tsx</span>(25KB), <span class="tree-jsx">StackFrameViz.tsx</span></span>
+<span class="tree-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="tree-folder">ui/</span> <span class="tree-jsx">Button.tsx</span>, <span class="tree-jsx">Card.tsx</span>, <span class="tree-jsx">Icon.tsx</span>, <span class="tree-jsx">Toast.tsx</span></span>
+<span class="tree-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="tree-jsx">App.tsx</span> <strong>(2676 行)</strong></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">data/</span> <span class="tree-ts">lessons.ts</span> <strong>(705KB)</strong>, <span class="tree-ts">chapters/</span>(20个章节定义), <span class="tree-ts">projects.ts</span>, <span class="tree-ts">vocabulary.ts</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">hooks/</span> <span class="tree-ts">useInteractions.ts</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">services/</span> <span class="tree-ts">progressApi.ts</span>, <span class="tree-ts">aiConfigService.ts</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">server/</span> <span class="tree-jsx">index.js</span>(Express API), <span class="tree-jsx">runner.js</span>(GCC代码执行 34KB)</span>
+<span class="tree-line"><span class="tree-folder">donghua/</span> <span class="tree-html">258 个 HTML 文件</span></span>
+<span class="tree-line"><span class="tree-folder">dist/</span> 构建产物目录</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- Card 2: Old Version -->
+      <article class="dir-card card-old">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon icon-amber">WR</div>
+            <div>
+              <h2>web-development-received</h2>
+              <p class="card-path">C:\Users\6\Downloads\web-development-request-received</p>
+            </div>
+          </div>
+          <span class="card-tag tag-old"><span class="status-dot amber"></span>早期版本</span>
+        </div>
+        <p class="card-desc">
+          同一个嵌入式学习平台的<strong style="color:var(--accent-amber)">早期版本</strong>（无 <code>-11</code> 后缀）。包含大量开发过程中的 AI 生成的补丁脚本（<code>.cjs</code>）、完整的需求文档和测试配置。
+        </p>
+        <div class="card-stats">
+          <span class="stat-chip">📄 App.tsx <span class="val">143 KB (~3700行)</span></span>
+          <span class="stat-chip">🔧 补丁脚本 <span class="val">~30 个 .cjs/.ps1</span></span>
+          <span class="stat-chip">📝 文档 <span class="val">3 个 .md</span></span>
+          <span class="stat-chip">📋 题库 Markdown <span class="val">11 个</span></span>
+        </div>
+        <div class="tech-stack">
+          <span class="tech-pill"><span class="dot" style="background:#61dafb"></span>React 19.2</span>
+          <span class="tech-pill"><span class="dot" style="background:#3178c6"></span>TypeScript 5.9</span>
+          <span class="tech-pill"><span class="dot" style="background:#8b5cf6"></span>Vite 7.2 (简化版配置)</span>
+          <span class="tech-pill"><span class="dot" style="background:#f59e0b"></span>@vitejs/plugin-react (非swc)</span>
+          <span class="tech-pill"><span class="dot" style="background:#ef4444"></span>vite-plugin-singlefile</span>
+        </div>
+        <div class="card-details">
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">独有组件</span><span class="detail-value">CallStackVisualizer(38KB)、VisualizationFactory、Visualizations、VizQuestionList、AnimatedComponents</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">组件组织</span><span class="detail-value">扁平结构，32个文件直接在 components/ 下，无子目录分类</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">补丁脚本</span><span class="detail-value">fix-icons-node.cjs(9.8KB)、integrate-components.cjs、deploy-design-system.cjs 等 ~30个</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">文档</span><span class="detail-value">需求文档.md、Web-GCC技术报告.md、TEST_REPORT.md、OPTIMIZATION.md</span></div>
+        </div>
+        <button class="expand-toggle" onclick="toggleExpand(this)">
+          查看补丁脚本列表 <span class="arrow">&#9660;</span>
+        </button>
+        <div class="collapsible-content">
+          <div class="file-tree">
+<span class="tree-line"><span class="tree-folder">根目录补丁 (.cjs):</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">add-debug.cjs</span> <span class="tree-file">add-debug2.cjs</span> <span class="tree-jsx">debug-main.cjs</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">deploy-design-system.cjs</span> <span class="tree-jsx">deploy-sidebar.cjs</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">fix-achievements.cjs</span> <span class="tree-jsx">fix-all-icons.ps1</span> <span class="tree-jsx">fix-brain-import.cjs</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">fix-close2.cjs</span> <span class="tree-jsx">fix-closing.cjs</span> <span class="tree-jsx">fix-condition.cjs</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">fix-dup-toast.cjs</span> <span class="tree-jsx">fix-dup2.cjs</span> <span class="tree-jsx">fix-final.cjs</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">fix-homeview.cjs</span> <span class="tree-jsx">fix-icons-node.cjs</span> <strong>(9.8KB)</strong></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">fix-layout-icons.ps1</span> <span class="tree-jsx">fix-line.cjs</span> <span class="tree-jsx">fix-main-simple.cjs</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">fix-main-style.cjs</span> <span class="tree-jsx">fix-main.cjs</span> <span class="tree-jsx">fix-stats-icons.cjs</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">fix-syntax.cjs</span> <span class="tree-jsx">fix-toast-close.cjs</span> <span class="tree-jsx">fix-toast-provider.cjs</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">integrate-components.cjs</span> <span class="tree-jsx">integrate-header.cjs</span> <span class="tree-jsx">integrate-sidebar.cjs</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">remove-debug.cjs</span> <span class="tree-jsx">remove-line.cjs</span> <span class="tree-jsx">remove-tokens-import.cjs</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-jsx">update-index-css.cjs</span></span>
+<span class="tree-line" style="margin-top:8px;color:var(--text-muted)">共约 30 个自动生成的修复/部署/集成补丁脚本</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- Card 3: opencode1 -->
+      <article class="dir-card card-log">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon icon-purple">0</div>
+            <div>
+              <h2>opencode1</h2>
+              <p class="card-path">C:\Users\6\Downloads\opencode1</p>
+            </div>
+          </div>
+          <span class="card-tag" style="background:rgba(139,92,246,0.15);color:#c4b5fd;">日志记录</span>
+        </div>
+        <p class="card-desc">
+          仅包含<strong style="color:var(--accent-purple)"> 1 个文件</strong>：<code>1.md</code>（11.24 KB）。内容为 AI 助手的<strong>思考过程对话日志</strong>——记录了一次关于上下文摘要模板的交互，以及因附件过大导致 context compacted 后的续接过程。
+        </p>
+        <div class="card-stats">
+          <span class="stat-chip">📄 文件数量 <span class="val">1 个</span></span>
+          <span class="stat-chip">📏 文件大小 <span class="val">11.24 KB</span></span>
+          <span class="stat-chip">📝 内容类型 <span class="val">AI 对话日志</span></span>
+          <span class="stat-chip">🔄 状态 <span class="val">静态归档</span></span>
+        </div>
+        <div class="card-details">
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">来源</span><span class="detail-value">OpenCode 或类似 AI 编程助手的对话转存</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">主要内容</span><span class="detail-value">用户说"你好" → 要求生成结构化摘要模板 → context compaction 后续接</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">实际价值</span><span class="detail-value">低 —— 纯对话记录，不含代码或可执行资源</span></div>
+        </div>
+      </article>
+
+      <!-- Card 4: .openclaw -->
+      <article class="dir-card card-system">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon icon-blue">O</div>
+            <div>
+              <h2>.openclaw</h2>
+              <p class="card-path">C:\Users\6\.openclaw</p>
+            </div>
+          </div>
+          <span class="card-tag tag-system"><span class="status-dot blue"></span>智能助手系统</span>
+        </div>
+        <p class="card-desc">
+          基于 <strong style="color:var(--accent-blue)">Claude Code</strong> 的本地智能助手平台（OpenClaw）。配置了 <strong>47+ MCP 服务器</strong>（200+ 工具）、72 个 Skills、飞书渠道接入、向量记忆等能力。使用阿里云百炼 Qwen 3.5 Plus 作为 LLM 后端。
+        </p>
+        <div class="card-stats">
+          <span class="stat-chip">🤖 MCP 服务 <span class="val">47+</span></span>
+          <span class="stat-chip">🛠️ 工具总数 <span class="val">200+</span></span>
+          <span class="stat-chip">📦 子目录 <span class="val">50+</span></span>
+          <span class="stat-chip">💬 渠道 <span class="val">飞书已接入</span></span>
+        </div>
+        <div class="tech-stack">
+          <span class="tech-pill"><span class="dot" style="background:#10b981"></span>Qwen 3.5 Plus</span>
+          <span class="tech-pill"><span class="dot" style="background:#f59e0b"></span>Claude Code</span>
+          <span class="tech-pill"><span class="dot" style="background:#3b82f6"></span>MCP Protocol</span>
+          <span class="tech-pill"><span class="dot" style="background:#06b6d4"></span>Feishu Bot</span>
+          <span class="tech-pill"><span class="dot" style="background:#8b5cf6"></span>Vector Memory</span>
+        </div>
+        <div class="card-details">
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">LLM 配置</span><span class="detail-value">bailian/qwen3.5-plus（主）、Qwen3 Max/Coder、MiniMax M2.5、GLM-5/4.7、Kimi K2.5</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">MCP 分类</span><span class="detail-value">电脑控制(12工具)、GUI自动化(13)、Git(10)、GitHub(26)、数据库(8)、OCR(4)、截图(6)...</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">核心子目录</span><span class="detail-value">agents/ browser/ clipboard-history/ cron/ data/ feishu/ logs/ memory/ mcp-servers/ ...</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9670;</span><span class="detail-label">版本信息</span><span class="detail-value">OpenClaw 2026.2.22-2，Gateway 本地模式，最后更新 2026-03-08</span></div>
+        </div>
+        <button class="expand-toggle" onclick="toggleExpand(this)">
+          查看 MCP 服务器分类 <span class="arrow">&#9660;</span>
+        </button>
+        <div class="collapsible-content">
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;padding:10px 0;">
+            <div style="padding:10px;border-radius:8px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);">
+              <strong style="color:var(--accent-blue);font-size:12px;">🖥️ 电脑控制</strong>
+              <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px;line-height:1.6;">
+                computer-control-v2 (12)<br>
+                desktop-controller (8)<br>
+                gui-automation (13)<br>
+                window-manager (6)<br>
+                audio-control (7)
+              </div>
+            </div>
+            <div style="padding:10px;border-radius:8px;background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.15);">
+              <strong style="color:var(--accent-emerald);font-size:12px;">🔧 效率工具</strong>
+              <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px;line-height:1.6;">
+                screen-capture (6)<br>
+                ocr (4)<br>
+                clipboard-tools (7)<br>
+                voice-tools (4)<br>
+                feishu-voice (5)
+              </div>
+            </div>
+            <div style="padding:10px;border-radius:8px;background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.15);">
+              <strong style="color:var(--accent-purple);font-size:12px;">💻 开发工具</strong>
+              <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px;line-height:1.6;">
+                git-server (10)<br>
+                github (26)<br>
+                git-tools (12)<br>
+                database (8)<br>
+                ai-image (6)
+              </div>
+            </div>
+            <div style="padding:10px;border-radius:8px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);">
+              <strong style="color:var(--accent-amber);font-size:12px;">🌐 网络 & 自动化</strong>
+              <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px;line-height:1.6;">
+                web-crawler (7)<br>
+                http-client (6)<br>
+                network-tools (8)<br>
+                automation (10)<br>
+                email-sender (5)<br>
+                scheduler (7)<br>
+                webhook (7)
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+    </div><!-- end cards-grid -->
+  </section>
+
+
+  <!-- ===== SECTION: COMPARISON ===== -->
+  <section class="section" id="compare">
+    <div class="section-header">
+      <h2 class="section-title"><span class="icon">⚖️</span> 新旧版本对比</h2>
+      <span class="section-badge">web-development-received vs v-11</span>
+    </div>
+
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab(event, 'tab-config')">构建配置</button>
+      <button class="tab-btn" onclick="switchTab(event, 'tab-code')">代码结构</button>
+      <button class="tab-btn" onclick="switchTab(event, 'tab-feature')">功能差异</button>
+    </div>
+
+    <!-- Tab: Build Config -->
+    <div class="tab-panel active" id="tab-config">
+      <div class="comparison-table-wrapper">
+        <table class="comparison-table">
+          <thead>
+            <tr><th>对比项</th><th>旧版 (received)</th><th>v-11 (当前)</th><th>评价</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="table-label">Vite React 插件</td>
+              <td>@vitejs/plugin-react (标准版)</td>
+              <td>@vitejs/plugin-react-<strong>swc</strong> (更快)</td>
+              <td><span class="badge-new">✅ 更优</span></td>
+            </tr>
+            <tr>
+              <td class="table-label">构建输出</td>
+              <td>viteSingleFile() 单文件输出</td>
+              <td>多 chunk 分割 + Brotli/Gzip 双压缩</td>
+              <td><span class="badge-new">✅ 更优</span></td>
+            </tr>
+            <tr>
+              <td class="table-label">压缩策略</td>
+              <td>默认 terser 配置</td>
+              <td>terser 优化：drop_console、pure_funcs、passes:2、evaluate</td>
+              <td><span class="badge-new">✅ 更优</span></td>
+            </tr>
+            <tr>
+              <td class="table-label">依赖</td>
+              <td>基础 5 个（clsx/lucide/react/tailwind/twMerge）</td>
+              <td>+ @tanstack/react-virtual + web-vitals</td>
+              <td><span class="badge-neutral">≈ 相当</span></td>
+            </tr>
+            <tr>
+              <td class="table-label">chunk 分割</td>
+              <td>无手动分割</td>
+              <td>manualChunks：vendor/icons/utils/index 四路分离</td>
+              <td><span class="badge-new">✅ 更优</span></td>
+            </tr>
+            <tr>
+              <td class="table-label">package.json name</td>
+              <td>"react-vite-tailwind"</td>
+              <td>"embedded-learning"</td>
+              <td><span class="badge-new">✅ 更准确</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab: Code Structure -->
+    <div class="tab-panel" id="tab-code">
+      <div class="comparison-table-wrapper">
+        <table class="comparison-table">
+          <thead>
+            <tr><th>对比项</th><th>旧版</th><th>v-11</th><th>变化</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="table-label">App.tsx 大小</td>
+              <td><strong>~143 KB (~3700行)</strong></td>
+              <td><strong>110 KB (2676行)</strong></td>
+              <td><span class="badge-new">↓ 减少 28%</span></td>
+            </tr>
+            <tr>
+              <td class="table-label">组件组织</td>
+              <td>扁平：32个文件在 components/ 下</td>
+              <td>分层：ai/games/layout/learning/memory/ui/</td>
+              <td><span class="badge-new">✅ 改善</span></td>
+            </tr>
+            <tr>
+              <td class="table-label">组件数量</td>
+              <td>32 个（含 visualizer/ 目录）</td>
+              <td>124 个（含子目录全部文件）</td>
+              <td><span class="badge-neutral">拆分更细了</span></td>
+            </tr>
+            <tr>
+              <td class="table-label">旧版独有组件</td>
+              <td colspan="3" style="padding:10px 18px;background:rgba(245,158,11,0.05);">
+                CallStackVisualizer.tsx (38.9KB) · VisualizationFactory.tsx (22.2KB) · Visualizations.tsx (14.3KB) · VizQuestionList.tsx (5.5KB) · AnimatedComponents.tsx (8.8KB) · Dashboard.tsx (24.8KB) · visualizer/ 目录
+              </td>
+            </tr>
+            <tr>
+              <td class="table-label">新版独有组件/目录</td>
+              <td colspan="3" style="padding:10px 18px;background:rgba(16,185,129,0.05);">
+                components/<strong>ai/</strong> (AITutor, AIConfigPanel, AIPromptConfig) · <strong>games/</strong> (BitSwitch, StructPacker) · <strong>layout/</strong> (DynamicBackground, SidebarIntegration) · assets/icons/ (自定义图标集)
+              </td>
+            </tr>
+            <tr>
+              <td class="table-label">CodeRunner</td>
+              <td>46.97 KB — 直接 import（非懒加载）</td>
+              <td>61.32 KB — 使用 lazy() 懒加载</td>
+              <td><span class="badge-new">✅ 性能优化</span></td>
+            </tr>
+            <tr>
+              <td class="table-label">备份文件</td>
+              <td>大量 .cjs/.ps1 补丁脚本散落</td>
+              <td>仅 4 个 .backup/.bak 文件</td>
+              <td><span class="badge-new">✅ 干净许多</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab: Feature Diff -->
+    <div class="tab-panel" id="tab-feature">
+      <div class="comparison-table-wrapper">
+        <table class="comparison-table">
+          <thead>
+            <tr><th>功能</th><th>旧版</th><th>v-11</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="table-label">题目数据</td>
+              <td>questions/ 目录下 11 个 Markdown 文件</td>
+              <td>data/lessons.ts 单一 TS 文件（705KB），按章节模块化</td>
+            </tr>
+            <tr>
+              <td class="table-label">题目类型</td>
+              <td>fill / output / debug / order / multi-fill（5种）</td>
+              <td>+ choice / multi-choice（<strong>7种</strong>题型）</td>
+            </tr>
+            <tr>
+              <td class="table-label">AI 功能</td>
+              <td>无</td>
+              <td>✅ AITutor + AIConfigPanel + AIPromptConfig + 多 Provider 支持</td>
+            </tr>
+            <tr>
+              <td class="table-label">测试体系</td>
+              <td>✅ vitest + playwright e2e + python test</td>
+              <td>❌ 配置存在但无实际执行入口</td>
+            </tr>
+            <tr>
+              <td class="table-label">文档</td>
+              <td>✅ 完整（需求文档/Web-GCC报告/TEST_REPORT）</td>
+              <td>❌ 仅 README.md</td>
+            </tr>
+            <tr>
+              <td class="table-label">启动脚本</td>
+              <td>start.bat + 多个 fix/deploy 脚本</td>
+              <td>start.bat + init-env.ps1 + update-qwen-api.ps1</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ===== SECTION: ISSUES ===== -->
+  <section class="section" id="issues">
+    <div class="section-header">
+      <h2 class="section-title"><span class="icon">🐛</span> 问题清单</h2>
+      <span class="section-badge">共发现 28+ 个问题</span>
+    </div>
+
+    <div class="issue-list">
+
+      <!-- P0 Issues -->
+      <div class="issue-item">
+        <div class="issue-severity sev-p0">P0</div>
+        <div class="issue-body">
+          <div class="issue-title">API Key 硬编码在前端源码中</div>
+          <div class="issue-desc">aiConfigService.ts 第81行将 Qwen API Key 明文写入前端代码并随构建产物暴露给所有用户。同时 localStorage 也保存了该 Key。</div>
+          <div class="issue-tags">
+            <span class="itag itag-security">安全</span>
+            <span class="itag itag-code">aiConfigService.ts:81</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p0">P0</div>
+        <div class="issue-body">
+          <div class="issue-title">命令注入风险：spawn 使用 shell: true</div>
+          <div class="issue-desc">runner.js 中多处 spawn('gcc', ..., { shell: true }) 存在命令注入风险，用户提交的恶意代码可通过 shell 注入执行任意系统命令。</div>
+          <div class="issue-tags">
+            <span class="itag itag-security">安全</span>
+            <span class="itag itag-code">runner.js:480, index.js:201</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p0">P0</div>
+        <div class="issue-body">
+          <div class="issue-title">无用户认证机制</div>
+          <div class="issue-desc">server/index.js 的 getUserId() 直接从 req.headers['x-user-id'] 取值，任何人可伪造 user-id 操作他人数据。</div>
+          <div class="issue-tags">
+            <span class="itag itag-security">安全</span>
+            <span class="itag itag-code">index.js:65</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- P1 Issues -->
+      <div class="issue-item">
+        <div class="issue-severity sev-p1">P1</div>
+        <div class="issue-body">
+          <div class="issue-title">App.tsx 巨型单体文件：2676 行，14 个组件</div>
+          <div class="issue-desc">所有视图（首页/训练/统计/复习/收藏/实验室/项目）全部堆在一个文件中。QuestionView 组件就 730 行，承担了 7 种题型的渲染逻辑。</div>
+          <div class="issue-tags">
+            <span class="itag itag-arch">架构</span>
+            <span class="itag itag-code">App.tsx 全文</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p1">P1</div>
+        <div class="issue-body">
+          <div class="issue-title">无路由系统：手动 view state 切换</div>
+          <div class="issue-desc">导航通过 view 字符串状态变量切换，刷新丢失当前视图，无法前进/后退，不能通过 URL 分享页面。</div>
+          <div class="issue-tags">
+            <span class="itag itag-arch">架构</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p1">P1</div>
+        <div class="issue-body">
+          <div class="issue-title">ReviewView / BookmarkedView / LabQuestionView 大量重复</div>
+          <div class="issue-desc">三个组件约 400+ 行几乎完全相同的状态模式和回调逻辑，应抽取通用 QuestionFlowContainer。</div>
+          <div class="issue-tags">
+            <span class="itag itag-code">重复代码</span>
+            <span class="itag itag-arch">应重构</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p1">P1</div>
+        <div class="issue-body">
+          <div class="issue-title">三套独立的统计数据系统互相不同步</div>
+          <div class="issue-desc">progressApi.ts 管理 completed/correct/wrong；StatsAndAchievements 的 useUserStats() 管理 totalQuestions/streak；useInteractions.ts 的 useStreak()/useAchievements() 只在内存中。同一概念散落三处，数据完全不一致。</div>
+          <div class="issue-tags">
+            <span class="itag itag-data">状态管理</span>
+            <span class="itag itag-arch">架构缺陷</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- P2 Issues -->
+      <div class="issue-item">
+        <div class="issue-severity sev-p2">P2</div>
+        <div class="issue-body">
+          <div class="issue-title">isDarkMode 三元表达式泛滥</div>
+          <div class="issue-desc">全文数十处 className={`...${isDarkMode ? '...' : '...'}`}，应用了 Tailwind 4 却没有利用 dark: 前缀或 CSS 变量来消除 JS 层主题判断。</div>
+          <div class="issue-tags">
+            <span class="itag itag-code">样式</span>
+            <span class="itag itag-perf">可优化</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p2">P2</div>
+        <div class="issue-body">
+          <div class="issue-title">global.css 和 tokens.css 定义但从未引入</div>
+          <div class="issue-desc">styles/global.css（设计系统变量）和 styles/tokens.css（Design Tokens）定义了完整的 CSS 变量体系和 10+ keyframes 动画，但 main.tsx 只引入了 index.css。这些全是死代码。</div>
+          <div class="issue-tags">
+            <span class="itag itag-dead">死代码</span>
+            <span class="itag itag-code">~15KB 无效样式</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p2">P2</div>
+        <div class="issue-body">
+          <div class="issue-title">UI 组件库被定义但完全未使用</div>
+          <div class="issue-desc">components/ui/index.ts 导出了 Header/Card/Button/Badge/Input/RippleButton 等组件，但 App.tsx 和其他组件全部自己手写 UI。</div>
+          <div class="issue-tags">
+            <span class="itag itag-dead">死代码</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p2">P2</div>
+        <div class="issue-body">
+          <div class="issue-title">Google Fonts 从国外 CDN 加载且重复引入两次</div>
+          <div class="issue-desc">global.css 和 tokens.css 各引入一次 Inter + JetBrains Mono，Google Fonts 在国内不稳定，应本地化或用镜像。</div>
+          <div class="issue-tags">
+            <span class="itag itag-perf">性能</span>
+            <span class="itag itag-code">global.css:1, tokens.css:1</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p2">P2</div>
+        <div class="issue-body">
+          <div class="issue-title">localStorage 6 个 key 散乱操作，无统一存储层</div>
+          <div class="issue-desc">c-trainer-progress-v3、ai_tutor_config、theme、userStats、typing-stats、promptGenerator key 各自独立操作，无容量溢出处理。</div>
+          <div class="issue-tags">
+            <span class="itag itag-data">数据管理</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p2">P2</div>
+        <div class="issue-body">
+          <div class="issue-title">布局组件重复存在于两处</div>
+          <div class="issue-desc">DashboardLayout.tsx、StatsAndAchievements.tsx、LiquidNav.tsx 等在 components/ 根目录和 components/layout/ 各有一份，不确定哪个是生效版本。</div>
+          <div class="issue-tags">
+            <span class="itag itag-code">重复组件</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- P3 Issues -->
+      <div class="issue-item">
+        <div class="issue-severity sev-p3">P3</div>
+        <div class="issue-body">
+          <div class="issue-title">iconMap 90 行纯样板代码</div>
+          <div class="issue-desc">123-217 行将近 90 个 Lucide 图标逐一手写映射到 Record 对象，完全可以动态导入替代。</div>
+          <div class="issue-tags">
+            <span class="itag itag-code">样板代码</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p3">P3</div>
+        <div class="issue-body">
+          <div class="issue-title">useStreak / useAchievements 已定义但从未使用</div>
+          <div class="issue-desc">useInteractions.ts 导出了这两个 Hook，全项目没有任何地方 import 它们。</div>
+          <div class="issue-tags">
+            <span class="itag itag-dead">死代码</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p3">P3</div>
+        <div class="issue-body">
+          <div class="issue-title">@ 路径别名配置了但几乎没使用</div>
+          <div class="issue-desc">tsconfig.json 配置了 "@/*": "src/*"，但绝大多数 import 都用的是相对路径。</div>
+          <div class="issue-tags">
+            <span class="itag itag-code">规范问题</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-item">
+        <div class="issue-severity sev-p3">P3</div>
+        <div class="issue-body">
+          <div class="issue-title">API 地址硬编码 localhost:3001</div>
+          <div class="issue-desc">progressApi.ts 写死了 http://localhost:3001/api，部署到其他环境需手动修改。</div>
+          <div class="issue-tags">
+            <span class="itag itag-code">hardcoded</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Severity Summary -->
+    <div style="margin-top: 28px; padding: 24px; border-radius: var(--radius-md); background: var(--bg-card); border: 1px solid var(--border-color);">
+      <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 18px;">严重度分布</h3>
+      <div class="progress-row">
+        <div class="progress-label"><span>P0 致命问题（安全/可用性）</span><span>3</span></div>
+        <div class="progress-track"><div class="progress-fill fill-bad" style="width:85%"></div></div>
+      </div>
+      <div class="progress-row">
+        <div class="progress-label"><span>P1 重大问题（架构/维护性）</span><span>4</span></div>
+        <div class="progress-track"><div class="progress-fill fill-mid" style="width:70%"></div></div>
+      </div>
+      <div class="progress-row">
+        <div class="progress-label"><span>P2 中等问题（质量/死代码）</span><span>7</span></div>
+        <div class="progress-track"><div class="progress-fill fill-mid" style="width:55%"></div></div>
+      </div>
+      <div class="progress-row">
+        <div class="progress-label"><span>P3 轻微问题（代码规范）</span><span>4+</span></div>
+        <div class="progress-track"><div class="progress-fill fill-good" style="width:30%"></div></div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ===== SECTION: SECURITY ===== -->
+  <section class="section" id="security">
+    <div class="section-header">
+      <h2 class="section-title"><span class="icon">🔒</span> 安全审计</h2>
+      <span class="section-badge">⚠️ 发现多个安全隐患</span>
+    </div>
+
+    <div class="alert-box">
+      <span class="alert-icon">🚨</span>
+      <strong>严重：</strong>.openclaw/openclaw.json 和需求报告中明文暴露了以下敏感凭据：
+      <ul style="margin: 10px 0 0 20px; font-size: 13px; color: var(--text-secondary); line-height: 1.8;">
+        <li>阿里云百炼 API Key × 2（sk-sp-3948ead58498463a9ea10807d8a0682c / sk-sp-06daa8bda2ae465abfc0dc6dc6893f87）</li>
+        <li>飞书 App ID (cli_a913140429389cc7) + App Secret</li>
+        <li>Gateway Token (yyd)</li>
+      </ul>
+    </div>
+
+    <div class="alert-box alert-warning">
+      <span class="alert-icon">⚡</span>
+      <strong>注意：</strong>前端源码中也硬编码了 API Key（aiConfigService.ts 第81行），会随构建产物暴露给所有用户浏览器端。
+    </div>
+
+    <div style="margin-top: 20px;" class="cards-grid">
+      <div class="dir-card" style="cursor:default;">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon icon-green" style="background:rgba(239,68,68,0.12);">!</div>
+            <div>
+              <h2>后端代码执行风险</h2>
+            </div>
+          </div>
+          <span class="card-tag" style="background:rgba(239,68,68,0.15);color:#f87171;">高风险</span>
+        </div>
+        <div class="card-details" style="border:none;padding-top:0;">
+          <div class="detail-item"><span class="detail-bullet">&#9888;</span><span class="detail-label">shell:true</span><span class="detail-value">runner.js 多处 spawn 使用 shell: true，有命令注入风险</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9888;</span><span class="detail-label">无沙箱隔离</span><span class="detail-value">用户代码直接在系统 TEMP 目录编译执行，无容器/chroot 隔离</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9888;</span><span class="detail-label">超时仅 3 秒</span><span class="detail-value">TIMEOUT_MS = 3000，复杂程序可能不够</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9888;</span><span class="detail-label">临时文件清理</span><span class="detail-value">仅在 try/catch finally 清理，异常路径可能残留</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9888;</span><span class="detail-label">SQLite 并发</span><span class="detail-value">saveDb() 用 writeFileSync 同步写整个 DB，多用户并发可能损坏</span></div>
+        </div>
+      </div>
+
+      <div class="dir-card" style="cursor:default;">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon icon-green" style="background:rgba(239,68,68,0.12);">!</div>
+            <div>
+              <h2>前端安全与隐私</h2>
+            </div>
+          </div>
+          <span class="card-tag" style="background:rgba(239,68,68,0.15);color:#f87171;">中风险</span>
+        </div>
+        <div class="card-details" style="border:none;padding-top:0;">
+          <div class="detail-item"><span class="detail-bullet">&#9888;</span><span class="detail-label">Key 泄露</span><span class="detail-value">API Key 硬编码 → 构建产物 → 浏览器 Network 面板可见</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9888;</span><span class="detail-label">AI 请求直连</span><span class="detail-value">从前端直接 fetch 到第三方 AI API，Key 完全暴露</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9888;</span><span class="detail-label">innerHTML</span><span class="detail-value">main.tsx 两处 innerHTML 用于错误降级展示（低风险，静态字符串）</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9888;</span><span class="detail-label">Qwen 强制覆盖</span><span class="detail-value">loadAIConfig() 强制覆盖用户对 Qwen provider 的修改</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9888;</span><span class="detail-label">缓存竞态</span><span class="detail-value">progressApi.ts 的 cachedData 是模块级单例，多标签页缓存过期不同步</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ===== SECTION: OPENCLAW ===== -->
+  <section class="section" id="openclaw">
+    <div class="section-header">
+      <h2 class="section-title"><span class="icon">🤖</span> OpenClaw 系统详情</h2>
+      <span class="section-badge">基于 Claude Code 的智能助手平台</span>
+    </div>
+
+    <div class="alert-box alert-warning" style="margin-bottom: 24px;">
+      <span class="alert-icon">ℹ️</span>
+      <strong>提示：</strong>以下是 .openclaw 目录的详细配置信息。其中包含敏感凭据，请注意保管。
+    </div>
+
+    <div class="cards-grid">
+      <div class="dir-card" style="cursor:default;">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon icon-blue">⚙️</div>
+            <div>
+              <h2>LLM 模型配置</h2>
+            </div>
+          </div>
+        </div>
+        <div class="card-details" style="border:none;padding-top:0;">
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">服务商</span><span class="detail-value">阿里云百炼 (Coding Plan) — coding.dashscope.aliyuncs.com/v1</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">主模型</span><span class="detail-value">qwen3.5-plus (context: 1M tokens, output: 64K tokens)</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">备用模型</span><span class="detail-value">Qwen3 Max / Qwen3 Coder Next &amp; Plus / MiniMax-M2.5 / GLM-5 / GLM-4.7 / Kimi K2.5</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">嵌入模型</span><span class="detail-value">text-embedding-v3 (用于向量记忆/语义搜索)</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">Compaction</span><span class="detail-value">safeguard 模式（上下文超出时自动压缩）</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">超时</span><span class="detail-value">300 秒</span></div>
+        </div>
+      </div>
+
+      <div class="dir-card" style="cursor:default;">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon icon-blue">📡</div>
+            <div>
+              <h2>渠道 & 插件配置</h2>
+            </div>
+          </div>
+        </div>
+        <div class="card-details" style="border:none;padding-top:0;">
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">飞书渠道</span><span class="detail-value">已启用 — 可通过飞书机器人与 OpenClaw 对话</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">Gateway</span><span class="detail-value">本地模式 (local)，Token 认证</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">MCP 服务</span><span class="detail-value">60 个 MCP 服务器，59 个在线运行，端口 3000</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">Skills</span><span class="detail-value">26 个核心技能可用 + 自创技能（feishu-voice/pdf/github/smart-reminder）</span></div>
+          <div class="detail-item"><span class="detail-bullet">&#9654;</span><span class="detail-label">已知问题</span><span class="detail-value">42 个技能缺依赖、启动流程复杂、向量记忆未验证生效</span></div>
+        </div>
+      </div>
+
+      <div class="dir-card" style="cursor:default;grid-column:1/-1;">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-icon icon-blue">📂</div>
+            <div>
+              <h2>OpenClaw 完整子目录结构</h2>
+            </div>
+          </div>
+        </div>
+        <div class="file-tree" style="margin-top:12px;">
+<span class="tree-line"><span class="tree-folder">.openclaw/</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-json">openclaw.json</span> <span class="tree-file">(主配置 - LLM/MCP/Agent/Channel)</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-md">CLAUDE.md</span> <span class="tree-file">(系统提示词 - MCP/Skills 使用指南)</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-md">需求报告 - 给 Claude 的建议.md</span> <span class="tree-file">(297行配置优化需求)</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-md">修复报告 -2026-03-18.md</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-md">诊断夜间风扇问题.md</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">agents/</span> <span class="tree-file">Agent 定义</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">browser/</span> <span class="tree-file">浏览器控制</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">canvas/</span> <span class="tree-file">画布数据</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">claude-code/</span> <span class="tree-file">Claude Code 配置</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">clipboard-history/</span> <span class="tree-file">剪贴板历史</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">completions/</span> <span class="tree-file">自动补全</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">config-archives/</span> <span class="tree-file">配置备份存档</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">crawler-data/</span> <span class="tree-file">爬虫数据</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">credentials/</span> <span class="tree-file">凭证存储</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">cron/</span> <span class="tree-file">定时任务</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">data/</span> <span class="tree-file">数据库</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">databases/</span> <span class="tree-file">数据库文件</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">delivery-queue/</span> <span class="tree-file">消息队列</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">email/</span> <span class="tree-file">邮件配置</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">feishu/</span> <span class="tree-file">飞书集成</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">identity/</span> <span class="tree-file">身份认证</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">image-output/</span> <span class="tree-file">图片输出</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">logs/</span> <span class="tree-file">日志</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">mcp-servers/</span> <span class="tree-file">MCP 服务器配置</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">mcp/</span> <span class="tree-file">MCP 数据</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">media/</span> <span class="tree-file">媒体文件</span></span>
+<span class="tree-line">&nbsp;&nbsp;<span class="tree-folder">memory/</span> <span class="tree-file">向量记忆</span></span>
+<span class="tree-line">&nbsp;&nbsp;... 以及更多子目录（总计 50+）</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ===== FOOTER ===== -->
+<footer class="footer">
+  <p>项目全景分析报告 · 由 AI Code Assistant 自动生成</p>
+  <p style="margin-top: 6px; font-size: 12px; color: var(--text-muted);">工作区路径: C:\Users\6\Downloads\ · 分析时间: 2026-04-05</p>
+</footer>
+
+
+<!-- ===== SCRIPTS ===== -->
+<script>
+// ---- Intersection Observer for scroll animations ----
+const sections = document.querySelectorAll('.section');
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) entry.target.classList.add('visible');
+  });
+}, { threshold: 0.08 });
+sections.forEach(s => observer.observe(s));
+
+// ---- Expand/Collapse toggle ----
+function toggleExpand(btn) {
+  const content = btn.nextElementSibling;
+  const isOpen = content.classList.contains('open');
+  content.classList.toggle('open');
+  btn.classList.toggle('expanded');
+  btn.innerHTML = isOpen ? '查看详情 <span class="arrow">&#9660;</span>' : '收起 <span class="arrow">&#9650;</span>';
+}
+
+// ---- Tab switching ----
+function switchTab(e, panelId) {
+  const tabBar = e.target.closest('.tab-bar');
+  tabBar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  e.target.classList.add('active');
+  const container = tabBar.parentElement;
+  container.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(panelId).classList.add('active');
+}
+
+// ---- Smooth scroll for nav links ----
+function scrollToSection(id) {
+  document.getElementById(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Update active nav state
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+  event.target.classList.add('active');
+  // Close mobile nav if open
+  document.getElementById('navLinks').classList.remove('open');
+}
+
+// ---- Mobile menu toggle ----
+function toggleMobileNav() {
+  document.getElementById('navLinks').classList.toggle('open');
+}
+
+// ---- Progress bar animation on scroll ----
+const progressBars = document.querySelectorAll('.progress-fill');
+const progressObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.style.width = entry.target.style.width; // trigger reflow for animation
+    }
+  });
+}, { threshold: 0.5 });
+progressBars.forEach(bar => progressObserver.observe(bar));
+
+// ---- Active nav highlight on scroll ----
+const sectionEls = ['overview','compare','issues','security','openclaw'];
+window.addEventListener('scroll', () => {
+  let current = '';
+  sectionEls.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.getBoundingClientRect().top <= 120) current = id;
+  });
+  document.querySelectorAll('.nav-link').forEach(l => {
+    l.classList.toggle('active', l.getAttribute('onclick')?.includes(current));
+  });
+});
+</script>
+
+</body>
+</html>
